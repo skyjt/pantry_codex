@@ -135,6 +135,10 @@ npm run dist:linux   # deb + AppImage（x64 / arm64）
 npm run dist:mac     # dmg + zip（universal）
 ```
 
+### 常见问题
+
+- **macOS 上报 `Electron failed to install correctly`**：解压环节对 zip 内符号链接处理失败（实测于 npm 11 / Node 24）。处理：进入 `node_modules/electron`，用系统 `ditto -xk ~/Library/Caches/electron/<哈希目录>/electron-v22.3.27-darwin-arm64.zip dist/` 手动解压，再执行 `printf "Electron.app/Contents/MacOS/Electron" > path.txt`（**必须用 printf，路径不能带换行**）。
+
 ## 安全性
 
 - **网络边界**：所有通信仅发生在局域网内；应用不访问外网、不上报任何数据、不自动检查更新。

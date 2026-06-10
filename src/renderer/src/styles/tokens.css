@@ -1,0 +1,39 @@
+/* 视觉 token —— 与 docs/ui-design.md §9 一一对应，深色主题（v0.4）只换这张表 */
+:root {
+  --primary: #3d8b6b;
+  --primary-weak: rgba(61, 139, 107, 0.1);
+  --text-1: #1a1a1a;
+  --text-2: #666666;
+  --text-3: #999999;
+  --bg-window: #ffffff;
+  --bg-list: #f7f7f7;
+  --bg-chat: #f5f5f5;
+  --bubble-peer: #ffffff;
+  --bubble-mine: var(--primary-weak);
+  --line: #ececec;
+  --online: #2ba245;
+  --offline: #c2c2c2;
+  --danger: #e5484d;
+  --badge: #fa5151;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  font-size: 14px;
+  color: var(--text-1);
+  background: var(--bg-window);
+  user-select: none;
+  overflow: hidden;
+}

@@ -1,0 +1,32 @@
+{
+  "name": "pantry",
+  "productName": "茶话间",
+  "version": "0.1.0",
+  "description": "茶话间（Pantry）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
+  "private": true,
+  "main": "./out/main/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron ."
+  },
+  "devDependencies": {
+    "@types/node": "16.18.119",
+    "@vitejs/plugin-vue": "5.2.1",
+    "cross-env": "7.0.3",
+    "electron": "22.3.27",
+    "electron-vite": "2.3.0",
+    "pinia": "2.2.6",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vue": "3.5.13",
+    "vue-tsc": "2.1.10"
+  }
+}
