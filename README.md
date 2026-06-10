@@ -135,6 +135,15 @@ npm run dist:linux   # deb + AppImage（x64 / arm64）
 npm run dist:mac     # dmg + zip（universal）
 ```
 
+本机双实例联调（验证发现/消息链路，不需要两台机器）：
+
+```bash
+# 终端 1：默认端口
+npm run dev
+# 终端 2：独立数据目录（独立身份）+ 错开端口 + 手动指向终端 1
+PANTRY_USER_DATA=/tmp/pantry-dev2 PANTRY_UDP_PORT=27878 PANTRY_PEERS=127.0.0.1:17878 npm run dev
+```
+
 ### 常见问题
 
 - **macOS 上报 `Electron failed to install correctly`**：解压环节对 zip 内符号链接处理失败（实测于 npm 11 / Node 24）。处理：进入 `node_modules/electron`，用系统 `ditto -xk ~/Library/Caches/electron/<哈希目录>/electron-v22.3.27-darwin-arm64.zip dist/` 手动解压，再执行 `printf "Electron.app/Contents/MacOS/Electron" > path.txt`（**必须用 printf，路径不能带换行**）。

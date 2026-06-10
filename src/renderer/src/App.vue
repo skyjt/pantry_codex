@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import type { AppInfo } from '../../shared/ipc'
+import { usePeersStore } from './stores/peers'
 
 const info = ref<AppInfo | null>(null)
+const peersStore = usePeersStore()
 
 onMounted(async () => {
+  void peersStore.init()
   info.value = await window.pantry.getAppInfo()
 })
+
+function avatarText(nick: string): string {
+  return nick.slice(0, 1) || '?'
+}
 </script>
 
 <template>
@@ -21,7 +28,21 @@ onMounted(async () => {
 
     <aside class="list">
       <div class="search-box"><input class="search" placeholder="搜索" disabled /></div>
-      <p class="placeholder">会话列表 · v0.1 开发中</p>
+      <div class="list-head">网内节点 {{ peersStore.peers.length }} · 在线 {{ peersStore.onlineCount }}</div>
+      <div v-if="peersStore.peers.length === 0" class="placeholder">正在发现同网段节点…</div>
+      <ul v-else class="peer-list">
+        <li v-for="peer in peersStore.peers" :key="peer.nodeId" class="peer" :class="{ offline: !peer.online }">
+          <span class="peer-avatar">{{ avatarText(peer.nick) }}</span>
+          <span class="peer-main">
+            <span class="peer-name">
+              {{ peer.nick }}
+              <em v-if="!peer.online" class="offline-tag">· 离线</em>
+            </span>
+            <span class="peer-sub">{{ peer.ip }} · {{ peer.host }}</span>
+          </span>
+          <span class="dot" :class="peer.online ? 'on' : 'off'"></span>
+        </li>
+      </ul>
     </aside>
 
     <main class="content">
@@ -31,7 +52,7 @@ onMounted(async () => {
           v{{ info.version }} · Electron {{ info.electron }} · Chromium {{ info.chrome }} · Node
           {{ info.node }}
         </p>
-        <p class="hint">脚手架就绪 —— 设计文档见 docs/</p>
+        <p class="hint">v0.1 · 网络层已上线（发现/心跳/探活）—— 消息功能开发中</p>
       </div>
     </main>
   </div>
@@ -92,7 +113,7 @@ onMounted(async () => {
   flex-direction: column;
 }
 .search-box {
-  padding: 12px;
+  padding: 12px 12px 8px;
 }
 .search {
   width: 100%;
@@ -104,11 +125,84 @@ onMounted(async () => {
   font-size: 13px;
   outline: none;
 }
+.list-head {
+  padding: 4px 12px 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
 .placeholder {
   color: var(--text-3);
   font-size: 13px;
   text-align: center;
   margin-top: 24px;
+}
+.peer-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+}
+.peer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: default;
+}
+.peer:hover {
+  background: var(--line);
+}
+.peer-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.peer.offline .peer-avatar {
+  background: var(--offline);
+}
+.peer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.peer-name {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.peer.offline .peer-name {
+  color: var(--text-3);
+}
+.offline-tag {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.peer-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot.on {
+  background: var(--online);
+}
+.dot.off {
+  background: var(--offline);
 }
 
 /* 栏③ 内容 */
