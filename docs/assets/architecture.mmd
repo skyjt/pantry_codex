@@ -1,0 +1,25 @@
+flowchart LR
+  subgraph client["茶话间客户端 · Electron 22（每台机器一份，全网对等）"]
+    direction LR
+    subgraph rp["渲染进程 — 界面（Chromium 108 · Vue 3 · 沙箱内）"]
+      UI["三栏界面<br/>会话 · 通讯录 · 聊天<br/>Pinia 状态 = 后台数据的投影"]
+    end
+    subgraph mp["主进程 — 后台（Node 16.17）"]
+      IPC["IPC 契约层<br/>类型化通道（shared/ 统一定义）"]
+      SVC["业务编排 services<br/>chat · contacts · porter · capture"]
+      NET["网络层 net/<br/>发现 · 可靠消息 · 文件传输"]
+      DB[("SQLite（WAL）<br/>消息 · 联系人 · 群 · 补发队列")]
+      SYS["系统集成<br/>托盘 · 通知 · 截图 · 快捷键 · 自启"]
+    end
+  end
+  PEERS["其他茶话间节点 ×N（≤1000）<br/>无服务器，全部对等"]
+  FS["数据目录（设置中可迁移）<br/>files · images · stickers · logs · config"]
+
+  UI <-->|"invoke 调用 / 事件推送"| IPC
+  IPC --> SVC
+  SVC --> NET
+  SVC --> DB
+  SVC --> SYS
+  NET <-->|"UDP 17878 · 发现 / 心跳 / 消息+回执"| PEERS
+  NET <-->|"TCP 17879 · 文件字节流（拉取式）"| PEERS
+  DB -.-> FS
