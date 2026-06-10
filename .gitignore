@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+out/
+dist/
+*.tsbuildinfo
+
+# 日志与本地数据
+logs/
+*.log
+*.local
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# 会话笔记（Claude Code 本地记忆）
+.remember/
+
+# 参考源码（克隆的外部仓库，不入库；获取方式见 references/readme.md）
+references/ipmsg/
+references/iptux/
