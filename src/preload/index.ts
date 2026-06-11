@@ -3,10 +3,19 @@ import {
   IpcChannels,
   IpcEvents,
   type AppInfo,
+  type ConversationView,
+  type MessageView,
+  type MsgStatusEvent,
   type NetState,
   type PantryApi,
   type PeerView
 } from '../shared/ipc'
+
+function subscribe<T>(channel: string, listener: (data: T) => void): () => void {
+  const wrapped = (_event: unknown, data: T): void => listener(data)
+  ipcRenderer.on(channel, wrapped)
+  return () => ipcRenderer.removeListener(channel, wrapped)
+}
 
 // 渲染进程一切能力的唯一入口（tech-design §2 安全基线：sandbox + contextBridge）
 const api: PantryApi = {
@@ -15,11 +24,20 @@ const api: PantryApi = {
   getPeers: (): Promise<PeerView[]> => ipcRenderer.invoke(IpcChannels.peersList),
   probePeer: (nodeId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.peersProbe, nodeId),
-  onPeersUpdated: (listener: (peers: PeerView[]) => void): (() => void) => {
-    const wrapped = (_event: unknown, peers: PeerView[]): void => listener(peers)
-    ipcRenderer.on(IpcEvents.peersUpdated, wrapped)
-    return () => ipcRenderer.removeListener(IpcEvents.peersUpdated, wrapped)
-  }
+  listConversations: (): Promise<ConversationView[]> => ipcRenderer.invoke(IpcChannels.convList),
+  openConversation: (peerNodeId: string): Promise<ConversationView | null> =>
+    ipcRenderer.invoke(IpcChannels.convOpen, peerNodeId),
+  markRead: (convId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.convMarkRead, convId),
+  pageMessages: (convId: string, beforeSeq: number | null, limit?: number): Promise<MessageView[]> =>
+    ipcRenderer.invoke(IpcChannels.msgPage, convId, beforeSeq, limit),
+  sendText: (peerNodeId: string, text: string): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.msgSend, peerNodeId, text),
+  resendMessage: (msgId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.msgResend, msgId),
+  onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
+  onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
+  onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
+  onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener)
 }
 
 contextBridge.exposeInMainWorld('pantry', api)

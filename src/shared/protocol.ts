@@ -24,7 +24,14 @@ export const TIMINGS = {
   /** 对同一节点 10s 内不重复应答 alive（§6.1） */
   aliveDedupWindow: 10_000,
   /** 探活超时（§6.2 按需探活） */
-  probeTimeout: 2_000
+  probeTimeout: 2_000,
+  /** msg 的 ACK 退避重传间隔（§7.2）：发送后依次等待，仍无 ACK 即入补发队列 */
+  ackRetrySchedule: [1_000, 2_000, 4_000] as number[],
+  /** 补发队列保留时长 / 单节点上限（决议 #6） */
+  queueTtl: 7 * 24 * 3_600_000,
+  queueMaxPerPeer: 200,
+  /** 已收消息 ID 去重窗口（§7.2） */
+  dedupTtl: 24 * 3_600_000
 }
 export type Timings = typeof TIMINGS
 
@@ -88,6 +95,19 @@ export interface PresencePayload {
 
 /** exit 载荷（空对象） */
 export type ExitPayload = Record<string, never>
+
+/** 用户消息载荷（§7.1）。v0.1 仅 text；image/sticker/group-text 随功能落地扩展 */
+export interface MsgPayload {
+  kind: 'text'
+  text: string
+  /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
+  resend?: boolean
+}
+
+/** ACK 载荷（§7.2） */
+export interface AckPayload {
+  ackFor: string
+}
 
 export const MSG_TYPES = {
   entry: 'entry',

@@ -17,3 +17,11 @@ export function openDatabase(dbPath: string): AppDatabase {
   applyMigrations(db)
   return db
 }
+
+/** 文件库打不开时的降级（磁盘满/权限）：功能照常，本次会话不持久 */
+export function openMemoryDatabase(): AppDatabase {
+  const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
+  applyMigrations(db)
+  return db
+}

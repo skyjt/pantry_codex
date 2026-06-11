@@ -3,8 +3,11 @@ import {
   LIMITS,
   MSG_TYPES,
   PROTOCOL_VERSION,
+  TEXT_UDP_LIMIT,
   UDP_MAX_INBOUND,
+  type AckPayload,
   type Envelope,
+  type MsgPayload,
   type PresencePayload,
   type Profile,
   type ProfilePayload
@@ -75,10 +78,24 @@ function validatePayload(type: string, payload: unknown): boolean {
       const p = payload as Partial<PresencePayload>
       return isInt(p.seq) && p.seq >= 0 && isInt(p.profileRev) && p.profileRev >= 0
     }
+    case MSG_TYPES.msg: {
+      if (!isRecord(payload)) return false
+      const m = payload as Partial<MsgPayload>
+      if (m.kind !== 'text') return false // v0.1 白名单只放行 text
+      if (typeof m.text !== 'string' || m.text.length === 0) return false
+      if (Buffer.byteLength(m.text, 'utf8') > TEXT_UDP_LIMIT) return false
+      if (m.resend !== undefined && typeof m.resend !== 'boolean') return false
+      return true
+    }
+    case MSG_TYPES.ack: {
+      if (!isRecord(payload)) return false
+      const a = payload as Partial<AckPayload>
+      return isStr(a.ackFor, LIMITS.id)
+    }
     case MSG_TYPES.exit:
       return isRecord(payload)
     default:
-      // 其余已知类型（msg/ack/peers/file-ctl/group）随对应功能落地时补校验
+      // 其余已知类型（peers/file-ctl/group）随对应功能落地时补校验
       return isRecord(payload)
   }
 }

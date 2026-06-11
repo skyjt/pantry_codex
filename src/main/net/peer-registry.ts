@@ -45,12 +45,15 @@ export class PeerRegistry extends EventEmitter {
       const record: PeerRecord = { profile, ip, udpPort, lastSeen: now, online: true }
       this.peers.set(nodeId, record)
       this.emit('updated')
+      this.emit('online', nodeId) // 新节点即在线：触发补发等待者（messenger）
       return record
     }
 
+    let cameOnline = false
     if (!existing.online) {
       existing.online = true
       changed = true
+      cameOnline = true
     }
     if (existing.ip !== ip || existing.udpPort !== udpPort) {
       existing.ip = ip
@@ -66,6 +69,8 @@ export class PeerRegistry extends EventEmitter {
     existing.lastSeen = now
 
     if (changed) this.emit('updated')
+    // 放在所有字段更新之后：emit 是同步的，监听者（messenger 补发）要拿到最新地址（§7.2）
+    if (cameOnline) this.emit('online', nodeId)
     return existing
   }
 

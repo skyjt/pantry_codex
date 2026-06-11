@@ -4,11 +4,17 @@ import { join, resolve } from 'node:path'
 import { IpcChannels, IpcEvents, type AppInfo, type NetState, type PeerView } from '../shared/ipc'
 import { DEFAULT_UDP_PORT } from '../shared/protocol'
 import { loadAppState } from './store/app-state'
-import { openDatabase, type AppDatabase } from './store/db'
+import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
+import { ConvRepo } from './store/conv-repo'
+import { MsgRepo } from './store/msg-repo'
+import { QueueRepo } from './store/queue-repo'
+import { DedupRepo } from './store/dedup-repo'
 import { UdpChannel } from './net/udp'
 import { PeerRegistry } from './net/peer-registry'
 import { Discovery, type ManualPeer } from './net/discovery'
+import { Messenger } from './net/messenger'
+import { ChatService } from './services/chat'
 import type { PeerRecord } from './net/peer-registry'
 
 // Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠 —— 默认软渲染（tech-design §9）
@@ -44,6 +50,8 @@ if (!gotLock) {
   let db: AppDatabase | null = null
   let peersRepo: PeersRepo | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
+  let chat: ChatService | null = null
+  let pruneTimer: ReturnType<typeof setInterval> | null = null
 
   function toPeerView(record: PeerRecord): PeerView {
     return {
@@ -71,13 +79,43 @@ if (!gotLock) {
     registry = new PeerRegistry(state.nodeId)
     discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers })
 
-    // 存储层：打开失败不致命（磁盘满/权限问题时退化为内存模式，重启后丢历史联系人）
+    // 存储层降级链：文件库 → 内存库（功能照常、不持久）→ 全不可用则只剩发现功能
     try {
       db = openDatabase(join(app.getPath('userData'), 'data', 'db', 'chat.db'))
+    } catch (err) {
+      console.error('[store] 文件库打开失败，尝试内存库：', err)
+      try {
+        db = openMemoryDatabase()
+      } catch (err2) {
+        console.error('[store] 内存库也不可用，本次会话仅发现功能：', err2)
+      }
+    }
+    if (db) {
       peersRepo = new PeersRepo(db)
       registry.seed(peersRepo.loadAll()) // 历史联系人以离线态回灌（F-DISC-7）
-    } catch (err) {
-      console.error('[store] 数据库打开失败，本次会话为内存模式：', err)
+
+      const messenger = new Messenger({
+        udp,
+        registry,
+        selfId: state.nodeId,
+        queue: new QueueRepo(db),
+        dedup: new DedupRepo(db)
+      })
+      chat = new ChatService({
+        selfId: state.nodeId,
+        convRepo: new ConvRepo(db),
+        msgRepo: new MsgRepo(db),
+        messenger,
+        probe: (peerId) => {
+          discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
+        }
+      })
+      chat.on('message', (msg) => mainWindow?.webContents.send(IpcEvents.msgNew, msg))
+      chat.on('status', (ev) => mainWindow?.webContents.send(IpcEvents.msgStatus, ev))
+      chat.on('convs', (convs) => mainWindow?.webContents.send(IpcEvents.convsUpdated, convs))
+      chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
+      pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
+      pruneTimer.unref?.()
     }
 
     // 注册表变化 → 节流 200ms 推给渲染层（tech-design §4 事件推送约定）
@@ -162,6 +200,35 @@ if (!gotLock) {
     return discovery?.probeNode(nodeId) ?? false
   })
 
+  ipcMain.handle(IpcChannels.convList, () => chat?.listConversations() ?? [])
+
+  ipcMain.handle(IpcChannels.convOpen, (_event, peerId: unknown) => {
+    if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
+    return chat?.openConversation(peerId) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.convMarkRead, (_event, convId: unknown) => {
+    if (typeof convId === 'string' && convId.length <= 128) chat?.markRead(convId)
+  })
+
+  ipcMain.handle(IpcChannels.msgPage, (_event, convId: unknown, beforeSeq: unknown, limit: unknown) => {
+    if (typeof convId !== 'string' || convId.length > 128 || !chat) return []
+    const before = typeof beforeSeq === 'number' && Number.isInteger(beforeSeq) ? beforeSeq : null
+    const lim = typeof limit === 'number' && limit >= 1 && limit <= 200 ? limit : 50
+    return chat.pageMessages(convId, before, lim)
+  })
+
+  ipcMain.handle(IpcChannels.msgSend, (_event, peerId: unknown, text: unknown) => {
+    if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
+    if (typeof text !== 'string' || text.length === 0 || text.length > 4096) return null
+    return chat?.sendText(peerId, text) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.msgResend, (_event, msgId: unknown): boolean => {
+    if (typeof msgId !== 'string' || msgId.length === 0 || msgId.length > 64) return false
+    return chat?.resend(msgId) ?? false
+  })
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -182,6 +249,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时
     discovery = null
+    if (pruneTimer) clearInterval(pruneTimer)
     if (persistTimer) clearTimeout(persistTimer)
     try {
       if (registry && peersRepo) peersRepo.upsertMany(registry.list()) // 离场前最后一次落库

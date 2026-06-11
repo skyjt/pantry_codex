@@ -8,6 +8,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from './db'
 import { PeersRepo } from './peers-repo'
+import { ConvRepo } from './conv-repo'
+import { MsgRepo } from './msg-repo'
+import { QueueRepo } from './queue-repo'
+import { DedupRepo } from './dedup-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
 import type { PeerRecord } from '../net/peer-registry'
 
@@ -96,7 +100,99 @@ try {
     .all(toFtsQuery('文邮')) as unknown[]
   assert.equal(none.length, 0, '非连续字不得命中（短语匹配）')
 
-  console.log('[db-selftest] PASS —— 迁移/联系人持久化/中文FTS 全部通过')
+  // 5. 会话/消息 repo 往返
+  const convRepo = new ConvRepo(db)
+  const msgRepo = new MsgRepo(db)
+  const convId = convRepo.ensureSingle('node-bob')
+  assert.equal(convId, 'single:node-bob')
+  convRepo.ensureSingle('node-bob') // 幂等
+  assert.equal(
+    msgRepo.insert({
+      id: 'm-1',
+      convId,
+      senderId: 'me',
+      isMine: true,
+      kind: 'text',
+      content: '第一条消息',
+      ts: 1000,
+      status: 'sending'
+    }),
+    true
+  )
+  assert.equal(
+    msgRepo.insert({
+      id: 'm-1',
+      convId,
+      senderId: 'me',
+      isMine: true,
+      kind: 'text',
+      content: '重复插入',
+      ts: 1000,
+      status: 'sending'
+    }),
+    false,
+    '消息主键幂等'
+  )
+  msgRepo.insert({
+    id: 'm-2',
+    convId,
+    senderId: 'node-bob',
+    isMine: false,
+    kind: 'text',
+    content: '回你一条',
+    ts: 2000,
+    status: 'sent'
+  })
+  convRepo.bump(convId, 2000)
+  convRepo.incUnread(convId)
+  const conv = convRepo.get(convId)
+  assert.equal(conv?.unread, 1)
+  assert.equal(conv?.preview, '回你一条', '会话摘要应为最新一条')
+  assert.deepEqual(
+    msgRepo.page(convId, null, 10).map((m) => m.id),
+    ['m-1', 'm-2'],
+    '分页按时间升序'
+  )
+  msgRepo.updateStatus('m-1', 'sent')
+  assert.equal(msgRepo.get('m-1')?.status, 'sent')
+  convRepo.markRead(convId)
+  assert.equal(convRepo.get(convId)?.unread, 0)
+
+  // 6. 补发队列与去重
+  const queueRepo = new QueueRepo(db)
+  queueRepo.enqueue('q-1', 'node-bob', '{"x":1}', Date.now() - 8 * 24 * 3_600_000) // 已过期
+  queueRepo.enqueue('q-2', 'node-bob', '{"x":2}', Date.now())
+  assert.deepEqual(queueRepo.prune(7 * 24 * 3_600_000, 200), ['q-1'], '过期条目被裁剪')
+  assert.deepEqual(
+    queueRepo.listByPeer('node-bob').map((i) => i.msgId),
+    ['q-2']
+  )
+  queueRepo.remove('q-2')
+  assert.equal(queueRepo.listByPeer('node-bob').length, 0)
+
+  const dedupRepo = new DedupRepo(db)
+  dedupRepo.add('d-1', Date.now() - 25 * 3_600_000)
+  dedupRepo.add('d-2', Date.now())
+  assert.equal(dedupRepo.has('d-1'), true)
+  dedupRepo.prune(24 * 3_600_000)
+  assert.equal(dedupRepo.has('d-1'), false, '过期去重记录被清理')
+  assert.equal(dedupRepo.has('d-2'), true)
+
+  // 7. 启动自愈：残留"发送中"复位为失败（决议 #22）
+  msgRepo.insert({
+    id: 'm-3',
+    convId,
+    senderId: 'me',
+    isMine: true,
+    kind: 'text',
+    content: '没发完就崩了',
+    ts: 3000,
+    status: 'sending'
+  })
+  assert.equal(msgRepo.resetStaleSending(), 1)
+  assert.equal(msgRepo.get('m-3')?.status, 'failed')
+
+  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/中文FTS 全部通过')
 } finally {
   db.close()
   rmSync(dir, { recursive: true, force: true })
