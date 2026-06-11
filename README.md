@@ -108,7 +108,7 @@ pantry/
 ├─ build/          # 打包资源（图标、安装器配置）
 ├─ docs/           # 协议与设计文档
 ├─ references/     # 参考资料与开源项目源码（ipmsg、iptux），见该目录下 readme
-└─ scripts/        # 构建 / 发布脚本
+└─ scripts/        # 构建 / 发布 / 本机多客户端联调脚本
 ```
 
 ## 开发
@@ -129,6 +129,9 @@ electron_builder_binaries_mirror=https://npmmirror.com/mirrors/electron-builder-
 
 ```bash
 npm run dev          # 本地开发（热重载）
+npm run dev:client1  # 本机联调客户端 1（/tmp/pantry-dev1，UDP/TCP 17878/17879）
+npm run dev:client2  # 本机联调客户端 2（/tmp/pantry-dev2，UDP/TCP 27878/27879）
+npm run dev:client3  # 本机联调客户端 3（/tmp/pantry-dev3，UDP/TCP 37878/37879）
 npm run build        # 编译 main / preload / renderer
 npm test             # vitest：协议编解码 + 发现层回环集成 + 纯函数
 npm run test:db      # 数据库自测（在 Electron 内置 Node 真实 ABI 上执行）
@@ -141,13 +144,13 @@ npm run dist:mac     # dmg + zip（当前 macOS 架构；正式 universal 包后
 
 目标平台打包与冒烟的详细流程见 [docs/packaging-test.md](docs/packaging-test.md)。
 
-本机双实例联调（验证发现/消息链路，不需要两台机器）：
+本机多客户端联调（验证发现/消息/文件链路，不需要多台机器）：
 
 ```bash
-# 终端 1：默认端口
-npm run dev
-# 终端 2：独立数据目录（独立身份）+ 错开端口 + 手动指向终端 1
-PANTRY_USER_DATA=/tmp/pantry-dev2 PANTRY_UDP_PORT=27878 PANTRY_PEERS=127.0.0.1:17878 npm run dev
+# 三个终端分别执行；每个客户端都有独立身份、独立数据目录、错开的 UDP/TCP 端口。
+npm run dev:client1
+npm run dev:client2
+npm run dev:client3
 ```
 
 ### 常见问题
