@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream, mkdirSync, renameSync, rmSync, sta
 import { dirname, join, sep } from 'node:path'
 import { resolve as pathResolve } from 'node:path'
 import { EventEmitter } from 'node:events'
-import type { DoneFrame, PullFrame, PullOkFrame, TcpFrame } from '../../shared/protocol'
+import type { DoneFrame, Envelope, PullFrame, PullOkFrame, TcpFrame } from '../../shared/protocol'
 import { encodeFrame, FrameReader } from './frame'
 
 // 文件传输数据面（protocol §8，拉取式）：
@@ -21,6 +21,8 @@ export interface OutgoingFile {
 export interface OutgoingLookup {
   /** 仅 accepted 状态的传输可被拉取；返回 null 拒绝 */
   resolve(transferId: string, fileId: string): OutgoingFile | null
+  /** 超长文本 TCP 控制帧入口；返回 true 表示已接收并应 ACK */
+  receiveMessage?: (env: Envelope) => boolean
 }
 
 /** 发送侧 TCP 服务。事件：'progress'(transferId, bytesDelta)、'served'(transferId) */
@@ -68,6 +70,12 @@ export class TransferServer extends EventEmitter {
       (frame) => {
         if (frame.type === 'finish') {
           this.emit('served', frame.transferId)
+          return
+        }
+        if (frame.type === 'msg') {
+          const ok = this.lookup.receiveMessage?.(frame.envelope) ?? false
+          if (ok) send({ type: 'msg-ack', ackFor: frame.envelope.id })
+          else send({ type: 'err', reason: 'bad-msg' })
           return
         }
         if (frame.type !== 'pull' || busy) {
@@ -145,7 +153,7 @@ export interface PullOptions {
   cancelRef: { canceled: boolean; socket: Socket | null }
 }
 
-/** 接收侧：连接发送方逐文件拉取。任一文件失败即整体 reject（v0.2 不续传） */
+/** 接收侧：连接发送方逐文件拉取；保留 .part 时可从 offset 断点续传。 */
 export function pullTransfer(opts: PullOptions): Promise<void> {
   return new Promise((resolvePromise, reject) => {
     const root = pathResolve(opts.saveDir)
@@ -169,7 +177,15 @@ export function pullTransfer(opts: PullOptions): Promise<void> {
       settled = true
       if (current) {
         current.stream.destroy()
-        rmSync(current.partPath, { force: true })
+        if (
+          reason === 'canceled' ||
+          reason === 'hash-mismatch' ||
+          reason === 'size-mismatch' ||
+          reason === 'path-escape' ||
+          reason === 'part-read-error'
+        ) {
+          rmSync(current.partPath, { force: true })
+        }
       }
       socket.destroy()
       reject(new Error(reason))
@@ -205,24 +221,45 @@ export function pullTransfer(opts: PullOptions): Promise<void> {
       }
       mkdirSync(dirname(finalPath), { recursive: true })
       const partPath = `${finalPath}.part`
-      current = {
-        plan,
-        partPath,
-        finalPath,
-        stream: createWriteStream(partPath),
-        hash: createHash('sha256'),
-        left: plan.size
+      let offset = 0
+      try {
+        offset = Math.min(statSync(partPath).size, plan.size)
+      } catch {
+        offset = 0
       }
-      current.stream.on('error', () => fail('write-error'))
-      socket.write(
-        encodeFrame({
-          type: 'pull',
-          from: opts.selfId,
-          transferId: opts.transferId,
-          fileId: plan.fileId,
-          offset: 0
-        })
-      )
+      if (offset > 0) opts.onProgress(offset)
+      const hash = createHash('sha256')
+      const startPull = (): void => {
+        current = {
+          plan,
+          partPath,
+          finalPath,
+          stream: createWriteStream(partPath, { flags: offset > 0 ? 'a' : 'w' }),
+          hash,
+          left: plan.size - offset
+        }
+        current.stream.on('error', () => fail('write-error'))
+        socket.write(
+          encodeFrame({
+            type: 'pull',
+            from: opts.selfId,
+            transferId: opts.transferId,
+            fileId: plan.fileId,
+            offset
+          })
+        )
+      }
+      if (offset === 0) {
+        startPull()
+        return
+      }
+      const existing = createReadStream(partPath, { start: 0, end: offset - 1 })
+      existing.on('data', (chunk) => hash.update(chunk))
+      existing.on('error', () => {
+        rmSync(partPath, { force: true })
+        fail('part-read-error')
+      })
+      existing.on('end', startPull)
     }
 
     const reader = new FrameReader(

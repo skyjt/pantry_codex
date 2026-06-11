@@ -9,6 +9,7 @@ export interface ConvRow {
   unread: number
   pinned: number
   muted: number
+  mentioned: number
   draft: string
   preview: string | null
 }
@@ -32,6 +33,7 @@ export function convRowToView(row: ConvRow): ConversationView {
     unread: row.unread,
     pinned: row.pinned !== 0,
     muted: row.muted !== 0,
+    mentioned: row.mentioned !== 0,
     preview: row.preview ?? ''
   }
 }
@@ -41,7 +43,11 @@ export class ConvRepo {
   private readonly ensureGroupStmt: DatabaseT.Statement
   private readonly bumpStmt: DatabaseT.Statement
   private readonly incUnreadStmt: DatabaseT.Statement
+  private readonly markMentionedStmt: DatabaseT.Statement
   private readonly markReadStmt: DatabaseT.Statement
+  private readonly pinStmt: DatabaseT.Statement
+  private readonly muteStmt: DatabaseT.Statement
+  private readonly removeStmt: DatabaseT.Statement
   private readonly listStmt: DatabaseT.Statement
   private readonly getStmt: DatabaseT.Statement
 
@@ -56,7 +62,11 @@ export class ConvRepo {
     `)
     this.bumpStmt = db.prepare('UPDATE conversations SET last_ts = MAX(last_ts, ?) WHERE id = ?')
     this.incUnreadStmt = db.prepare('UPDATE conversations SET unread = unread + 1 WHERE id = ?')
-    this.markReadStmt = db.prepare('UPDATE conversations SET unread = 0 WHERE id = ?')
+    this.markMentionedStmt = db.prepare('UPDATE conversations SET mentioned = 1 WHERE id = ?')
+    this.markReadStmt = db.prepare('UPDATE conversations SET unread = 0, mentioned = 0 WHERE id = ?')
+    this.pinStmt = db.prepare('UPDATE conversations SET pinned = ? WHERE id = ?')
+    this.muteStmt = db.prepare('UPDATE conversations SET muted = ? WHERE id = ?')
+    this.removeStmt = db.prepare('DELETE FROM conversations WHERE id = ?')
     // preview 取该会话最新一条消息正文（会话列表摘要）
     this.listStmt = db.prepare(`
       SELECT c.*, (
@@ -95,8 +105,24 @@ export class ConvRepo {
     this.incUnreadStmt.run(convId)
   }
 
+  markMentioned(convId: string): void {
+    this.markMentionedStmt.run(convId)
+  }
+
   markRead(convId: string): void {
     this.markReadStmt.run(convId)
+  }
+
+  setPinned(convId: string, pinned: boolean): void {
+    this.pinStmt.run(pinned ? 1 : 0, convId)
+  }
+
+  setMuted(convId: string, muted: boolean): void {
+    this.muteStmt.run(muted ? 1 : 0, convId)
+  }
+
+  remove(convId: string): void {
+    this.removeStmt.run(convId)
   }
 
   list(): ConvRow[] {

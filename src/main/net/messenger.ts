@@ -1,13 +1,16 @@
 import type { RemoteInfo } from 'node:dgram'
+import { createConnection } from 'node:net'
 import { EventEmitter } from 'node:events'
 import {
   MSG_TYPES,
   TIMINGS,
+  UDP_MAX_PAYLOAD,
   type AckPayload,
   type Envelope,
   type Timings
 } from '../../shared/protocol'
-import { makeEnvelope } from './codec'
+import { decodeTcpEnvelopeObject, makeEnvelope } from './codec'
+import { encodeFrame, FrameReader } from './frame'
 import type { UdpChannel } from './udp'
 import type { PeerRegistry } from './peer-registry'
 
@@ -136,9 +139,31 @@ export class Messenger extends EventEmitter {
     }
   }
 
+  /** TCP 控制帧入口：复用同一套入站白名单、去重和事件分发。 */
+  acceptTcpEnvelope(raw: Envelope): boolean {
+    const result = decodeTcpEnvelopeObject(raw)
+    if (!result.ok || !result.known) return false
+    const env = result.env
+    if (env.from === this.selfId) return false
+    if (
+      env.type !== MSG_TYPES.msg &&
+      env.type !== MSG_TYPES.fileCtl &&
+      env.type !== MSG_TYPES.group
+    ) {
+      return false
+    }
+    if (this.dedup.has(env.id)) return true
+    this.dedup.add(env.id, Date.now())
+    this.emit('incoming', env)
+    return true
+  }
+
   /** 发送并等待 ACK：按 ackRetrySchedule 退避重发，每次重发都重读对端最新地址。
    *  等待表按 (收件人, 信封 id) 复合键——群消息同一信封并发发往多个成员互不串线（§7.4） */
   private sendAwaitAck(peerId: string, env: Envelope): Promise<boolean> {
+    if (Buffer.byteLength(JSON.stringify(env), 'utf8') > UDP_MAX_PAYLOAD) {
+      return this.sendTcpAwaitAck(peerId, env)
+    }
     return new Promise((resolve) => {
       const key = this.queueKey(peerId, env.id)
       const old = this.pending.get(key)
@@ -168,6 +193,43 @@ export class Messenger extends EventEmitter {
         attempt += 1
       }
       step()
+    })
+  }
+
+  private sendTcpAwaitAck(peerId: string, env: Envelope): Promise<boolean> {
+    const record = this.registry.get(peerId)
+    if (!record) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      let settled = false
+      const socket = createConnection({ host: record.ip, port: record.profile.tcpPort })
+      let timer: ReturnType<typeof setTimeout>
+      const settle = (ok: boolean): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        socket.destroy()
+        resolve(ok)
+      }
+      timer = setTimeout(() => settle(false), 7_000)
+      const reader = new FrameReader(
+        (frame) => {
+          if (frame.type === 'msg-ack' && frame.ackFor === env.id) {
+            settle(true)
+            return
+          }
+          if (frame.type === 'err') settle(false)
+        },
+        () => undefined,
+        () => settle(false)
+      )
+
+      socket.setNoDelay(true)
+      socket.on('connect', () => {
+        socket.write(encodeFrame({ type: 'msg', envelope: env }))
+      })
+      socket.on('data', (chunk) => reader.feed(chunk))
+      socket.on('error', () => settle(false))
+      socket.on('close', () => settle(false))
     })
   }
 

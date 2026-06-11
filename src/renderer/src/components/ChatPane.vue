@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
@@ -9,8 +9,9 @@ import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
-import type { MessageView } from '../../../shared/ipc'
-import { RECALL_WINDOW_MS } from '../../../shared/protocol'
+import ForwardDialog from './ForwardDialog.vue'
+import type { MessageView, SettingsView } from '../../../shared/ipc'
+import { RECALL_WINDOW_MS, TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
@@ -22,10 +23,20 @@ const draft = ref('')
 const dragging = ref(false)
 const showEmoji = ref(false)
 const showMembers = ref(false)
+const showMentionPicker = ref(false)
+const mentionIds = ref<string[]>([])
+const pendingMentionAt = ref<number | null>(null)
 const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
+const forwardMsg = ref<MessageView | null>(null)
+const settings = ref<SettingsView | null>(null)
+let stopSettings: (() => void) | null = null
+interface TextPart {
+  text: string
+  url: string
+}
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -45,11 +56,33 @@ const peerName = computed(() => {
 const peerOnline = computed(() => peer.value?.online ?? false)
 /** 群：成员才可发；单聊：文本随时可发（离线走补发） */
 const canSend = computed(() => (isGroup.value ? (group.value?.amMember ?? false) : true))
+const mentionMembers = computed(() =>
+  group.value ? group.value.members.filter((id) => id !== chatStore.selfId) : []
+)
+const inputPlaceholder = computed(() => {
+  if (!canSend.value) return '你已不在该讨论组，无法发言'
+  return settings.value?.sendKey === 'ctrlEnter'
+    ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图直接发送'
+    : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
+})
+
+onMounted(async () => {
+  settings.value = await window.pantry.getSettings()
+  stopSettings = window.pantry.onSettingsUpdated((next) => {
+    settings.value = next
+  })
+})
+
+onUnmounted(() => {
+  stopSettings?.()
+})
 
 watch(
   () => chatStore.activeConv?.peerId,
   (id) => {
     showMembers.value = false
+    showMentionPicker.value = false
+    mentionIds.value = []
     if (isGroup.value && id) void groupsStore.ensure(id)
   },
   { immediate: true }
@@ -60,7 +93,8 @@ function senderName(msg: MessageView): string {
 }
 
 const draftBytes = computed(() => new TextEncoder().encode(draft.value.trim()).length)
-const overLimit = computed(() => draftBytes.value > 800)
+const overUdpLimit = computed(() => draftBytes.value > TEXT_UDP_LIMIT)
+const overLimit = computed(() => draftBytes.value > TEXT_TCP_LIMIT)
 
 /** 与上一条间隔 >5 分钟时插时间分隔（ui-design §5） */
 function needSeparator(msg: MessageView, index: number): boolean {
@@ -136,21 +170,67 @@ function insertEmoji(emoji: string): void {
   })
 }
 
+function insertNewline(): void {
+  const ta = inputEl.value
+  if (!ta) {
+    draft.value += '\n'
+    return
+  }
+  const start = ta.selectionStart ?? draft.value.length
+  const end = ta.selectionEnd ?? start
+  draft.value = draft.value.slice(0, start) + '\n' + draft.value.slice(end)
+  void nextTick(() => {
+    ta.focus()
+    ta.selectionStart = ta.selectionEnd = start + 1
+  })
+}
+
 async function send(): Promise<void> {
   const text = draft.value.trim()
   if (!text || overLimit.value || !canSend.value) return
+  const mentions = isGroup.value
+    ? [...new Set(mentionIds.value)].filter((id) => text.includes(`@${peersStore.nameOf(id)}`))
+    : []
   draft.value = ''
-  await chatStore.send(text)
+  mentionIds.value = []
+  showMentionPicker.value = false
+  await chatStore.send(text, mentions)
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key !== 'Enter') return
-  if (event.ctrlKey || event.metaKey) {
-    draft.value += '\n' // Ctrl/Cmd+Enter 换行（设置可互换，v0.1 先按默认）
+  if (event.key === '@' && isGroup.value && canSend.value && mentionMembers.value.length > 0) {
+    pendingMentionAt.value = inputEl.value?.selectionStart ?? draft.value.length
+    showMentionPicker.value = true
     return
   }
-  event.preventDefault()
-  void send()
+  if (event.key !== 'Enter') return
+  const modified = event.ctrlKey || event.metaKey
+  const mode = settings.value?.sendKey ?? 'enter'
+  if ((mode === 'enter' && !modified) || (mode === 'ctrlEnter' && modified)) {
+    event.preventDefault()
+    void send()
+    return
+  }
+  if (mode === 'enter' && modified) {
+    event.preventDefault()
+    insertNewline()
+  }
+}
+
+function insertMention(nodeId: string): void {
+  const name = peersStore.nameOf(nodeId)
+  const at = pendingMentionAt.value ?? draft.value.length
+  const ta = inputEl.value
+  const end = Math.max(at, ta?.selectionStart ?? at)
+  draft.value = `${draft.value.slice(0, at)}@${name} ${draft.value.slice(end)}`
+  mentionIds.value = [...new Set([...mentionIds.value, nodeId])]
+  showMentionPicker.value = false
+  pendingMentionAt.value = null
+  void nextTick(() => {
+    const pos = at + name.length + 2
+    inputEl.value?.focus()
+    if (inputEl.value) inputEl.value.selectionStart = inputEl.value.selectionEnd = pos
+  })
 }
 
 function statusHint(msg: MessageView): string {
@@ -159,6 +239,33 @@ function statusHint(msg: MessageView): string {
   if (msg.status === 'queued') return '对方上线后自动送达'
   if (msg.status === 'failed') return '发送失败，点击重发'
   return ''
+}
+
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi
+const URL_TRAILING = /[),.，。!！?？;；:：]+$/
+
+function textParts(text: string): TextPart[] {
+  const parts: TextPart[] = []
+  let last = 0
+  for (const match of text.matchAll(URL_RE)) {
+    const raw = match[0]
+    const index = match.index ?? 0
+    const trimmed = raw.replace(URL_TRAILING, '')
+    if (!trimmed) continue
+    if (index > last) parts.push({ text: text.slice(last, index), url: '' })
+    parts.push({ text: trimmed, url: trimmed })
+    const tailStart = index + trimmed.length
+    if (tailStart < index + raw.length) {
+      parts.push({ text: text.slice(tailStart, index + raw.length), url: '' })
+    }
+    last = index + raw.length
+  }
+  if (last < text.length) parts.push({ text: text.slice(last), url: '' })
+  return parts.length > 0 ? parts : [{ text, url: '' }]
+}
+
+function openTextLink(url: string): void {
+  void window.pantry.openUrl(url)
 }
 
 function canCopyMessage(msg: MessageView): boolean {
@@ -170,9 +277,12 @@ function canRecallMessage(msg: MessageView): boolean {
   return Date.now() - msg.ts <= RECALL_WINDOW_MS
 }
 
+function canForwardMessage(msg: MessageView): boolean {
+  return msg.status !== 'recalled' && msg.kind !== 'system'
+}
+
 function openMessageMenu(event: MouseEvent, msg: MessageView): void {
-  if (msg.kind === 'image' || msg.kind === 'sticker') return
-  if (!canCopyMessage(msg) && !canRecallMessage(msg)) return
+  if (!canCopyMessage(msg) && !canRecallMessage(msg) && !canForwardMessage(msg)) return
   msgMenu.value = { x: event.clientX, y: event.clientY, msg }
 }
 
@@ -192,6 +302,13 @@ async function recallSelectedMessage(): Promise<void> {
   msgMenu.value = null
   if (!msg || !canRecallMessage(msg)) return
   await chatStore.recall(msg.id)
+}
+
+function forwardSelectedMessage(): void {
+  const msg = msgMenu.value?.msg
+  msgMenu.value = null
+  if (!msg || !canForwardMessage(msg)) return
+  forwardMsg.value = msg
 }
 
 const IMG_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
@@ -257,6 +374,7 @@ async function onDrop(event: DragEvent): Promise<void> {
 
 <template>
   <div class="chat" @click="msgMenu = null" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
+    <ForwardDialog v-if="forwardMsg" :msg="forwardMsg" @close="forwardMsg = null" />
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <span class="title">{{ peerName }}</span>
@@ -292,7 +410,17 @@ async function onDrop(event: DragEvent): Promise<void> {
           <FileCard v-if="msg.kind === 'file'" :msg="msg" />
           <ImageBubble v-else-if="msg.kind === 'image' || msg.kind === 'sticker'" :msg="msg" />
           <div v-else class="bubble">
-            <span class="text">{{ msg.text }}</span>
+            <template v-for="(part, partIndex) in textParts(msg.text)" :key="partIndex">
+              <button
+                v-if="part.url"
+                class="text-link"
+                type="button"
+                @click.stop="openTextLink(part.url)"
+              >
+                {{ part.text }}
+              </button>
+              <span v-else>{{ part.text }}</span>
+            </template>
           </div>
           <span v-if="msg.isMine" class="status">
             <span v-if="msg.status === 'sending'" class="spin" title="发送中">◌</span>
@@ -333,6 +461,7 @@ async function onDrop(event: DragEvent): Promise<void> {
       @click.stop
     >
       <button v-if="canCopyMessage(msgMenu.msg)" @click="copySelectedMessage">复制</button>
+      <button v-if="canForwardMessage(msgMenu.msg)" @click="forwardSelectedMessage">转发</button>
       <button v-if="canRecallMessage(msgMenu.msg)" class="danger" @click="recallSelectedMessage">
         撤回
       </button>
@@ -378,22 +507,30 @@ async function onDrop(event: DragEvent): Promise<void> {
         <span v-if="isGroup" class="tool-hint">群内文件/图片将在后续版本支持</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
       </div>
+      <div v-if="showMentionPicker" class="mention-picker">
+        <button
+          v-for="id in mentionMembers"
+          :key="id"
+          type="button"
+          @mousedown.prevent="insertMention(id)"
+        >
+          {{ peersStore.nameOf(id) }}
+        </button>
+      </div>
       <textarea
         ref="inputEl"
         v-model="draft"
         class="input"
         :disabled="!canSend"
-        :placeholder="
-          canSend
-            ? '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
-            : '你已不在该讨论组，无法发言'
-        "
+        :placeholder="inputPlaceholder"
         @keydown="onKeydown"
         @paste="onPaste"
       ></textarea>
       <div class="input-bar">
         <span v-if="draftBytes > 600" class="counter" :class="{ over: overLimit }">
-          {{ draftBytes }} / 800 字节{{ overLimit ? '（超长文本将在 v0.2 随 TCP 通道支持）' : '' }}
+          {{ draftBytes }} / {{ TEXT_TCP_LIMIT }} 字节{{
+            overLimit ? '（文本过长）' : overUdpLimit ? '（将通过 TCP 发送）' : ''
+          }}
         </span>
         <button class="send" :disabled="!draft.trim() || overLimit || !canSend" @click="send">
           发送
@@ -429,6 +566,34 @@ async function onDrop(event: DragEvent): Promise<void> {
   gap: 4px;
   padding-bottom: 4px;
   position: relative;
+}
+.mention-picker {
+  position: absolute;
+  left: 12px;
+  bottom: 104px;
+  width: 220px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 4;
+}
+.mention-picker button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mention-picker button:hover {
+  background: var(--line);
 }
 .row.highlight {
   animation: hl 2.4s ease;
@@ -562,6 +727,17 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .row.mine .bubble {
   background: var(--bubble-mine);
+}
+.text-link {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  line-height: inherit;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+  user-select: text;
 }
 .status {
   font-size: 12px;

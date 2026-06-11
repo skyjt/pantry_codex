@@ -78,6 +78,13 @@ onMounted(() => {
       >
         打开所在文件夹
       </button>
+      <button
+        v-else-if="transfer?.status === 'failed' && transfer.direction === 'in'"
+        class="act primary"
+        @click="transfers.accept(ref_.transferId)"
+      >
+        继续
+      </button>
     </div>
   </div>
 </template>

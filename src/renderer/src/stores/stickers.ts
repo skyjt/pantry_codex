@@ -59,6 +59,16 @@ export const useStickersStore = defineStore('stickers', {
     async remove(id: string): Promise<void> {
       await window.pantry.removeSticker(id)
       this.list = this.list.filter((s) => s.id !== id)
+    },
+
+    async move(id: string, delta: -1 | 1): Promise<void> {
+      const index = this.list.findIndex((s) => s.id === id)
+      const next = index + delta
+      if (index < 0 || next < 0 || next >= this.list.length) return
+      const copy = [...this.list]
+      const [item] = copy.splice(index, 1)
+      copy.splice(next, 0, item)
+      this.list = await window.pantry.reorderStickers(copy.map((s) => s.id))
     }
   }
 })

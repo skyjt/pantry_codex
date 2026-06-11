@@ -3,7 +3,7 @@
 // 用 node:assert 而非 vitest —— vitest 跑在开发机新版 Node 上，加载不了 Electron ABI 的原生模块。
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from './db'
@@ -17,6 +17,7 @@ import { GroupRepo } from './group-repo'
 import { StickerRepo } from './sticker-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
 import { SearchService } from '../services/search'
+import { PorterService } from '../services/porter'
 import { PeerRegistry } from '../net/peer-registry'
 import type { PeerRecord } from '../net/peer-registry'
 
@@ -50,7 +51,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 5, '迁移版本应为 5')
+  assert.equal(db.pragma('user_version', { simple: true }), 6, '迁移版本应为 6')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -291,7 +292,65 @@ try {
   assert.equal(stickerRepo.remove('s-1'), '/tmp/s-1.webp', '删除返回路径供清理文件')
   assert.equal(stickerRepo.list().length, 1)
 
-  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/中文FTS 全部通过')
+  // 12. 迁移备份包：消息库 + 群/表情/传输元数据 + 图片/表情媒体
+  const imagePath = join(dir, 'image.webp')
+  const stickerPath = join(dir, 'sticker.webp')
+  writeFileSync(imagePath, Buffer.from('image-bytes'))
+  writeFileSync(stickerPath, Buffer.from('sticker-bytes'))
+  msgRepo.insert({
+    id: 'm-img',
+    convId,
+    senderId: 'node-self',
+    isMine: true,
+    kind: 'image',
+    content: '[图片]',
+    fileRef: JSON.stringify({ transferId: 't-img', name: 'image.webp', size: 11, count: 1, dir: false }),
+    ts: 5000,
+    status: 'sent'
+  })
+  transferRepo.insert({
+    transferId: 't-img',
+    msgId: 'm-img',
+    peerId: 'node-bob',
+    direction: 'out',
+    files: JSON.stringify({ name: 'image.webp', savedPath: imagePath }),
+    status: 'done',
+    total: 11,
+    ts: 5000
+  })
+  stickerRepo.insert('s-media', stickerPath, 64, 64, false)
+
+  const backupPath = join(dir, 'pantry.pantry-bak')
+  new PorterService(db, 'node-self', '我', join(dir, 'restore-src')).export('backup', backupPath)
+  const db2 = openDatabase(join(dir, 'imported.db'))
+  try {
+    const result = new PorterService(db2, 'node-new', '新我', join(dir, 'restored')).importBackup(
+      backupPath
+    )
+    assert.ok(result.imported >= 1, '备份导入应至少带入新增图片消息')
+    const importedMsg = db2.prepare('SELECT * FROM messages WHERE id = ?').get('m-img') as {
+      sender_id: string
+      is_mine: number
+    }
+    assert.equal(importedMsg.sender_id, 'node-new', '旧机器的我应映射为新机器身份')
+    assert.equal(importedMsg.is_mine, 1)
+    const importedTransfer = db2
+      .prepare('SELECT files FROM transfers WHERE transfer_id = ?')
+      .get('t-img') as { files: string }
+    const restoredPath = JSON.parse(importedTransfer.files).savedPath as string
+    assert.ok(restoredPath && restoredPath !== imagePath, '媒体应恢复到新用户数据目录')
+    assert.equal(existsSync(restoredPath), true, '恢复后的图片媒体文件应存在')
+    const importedSticker = db2.prepare('SELECT path FROM stickers WHERE id = ?').get('s-media') as {
+      path: string
+    }
+    assert.equal(existsSync(importedSticker.path), true, '恢复后的表情媒体文件应存在')
+    const importedGroup = new GroupRepo(db2).get('g-1')
+    assert.equal(importedGroup?.name, '新名')
+  } finally {
+    db2.close()
+  }
+
+  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/porter/中文FTS 全部通过')
 } finally {
   db.close()
   rmSync(dir, { recursive: true, force: true })

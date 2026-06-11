@@ -78,6 +78,35 @@ describe('codec', () => {
     expect(result).toEqual({ ok: false, reason: 'bad-payload:presence' })
   })
 
+  it('group-text mentions 白名单校验', () => {
+    const ok = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'group-text',
+      text: 'hi @alice',
+      groupId: 'group-1',
+      groupRev: 1,
+      mentions: ['node-alice']
+    })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const tooMany = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'group-text',
+      text: 'hi',
+      groupId: 'group-1',
+      groupRev: 1,
+      mentions: Array.from({ length: 51 }, (_, i) => `node-${i}`)
+    })
+    expect(decode(encode(tooMany))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+
+    const badId = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'group-text',
+      text: 'hi',
+      groupId: 'group-1',
+      groupRev: 1,
+      mentions: ['']
+    })
+    expect(decode(encode(badId))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
   it('recall 消息要求 targetId，群聊撤回要求 groupRev 配套', () => {
     const ok = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', {
       kind: 'recall',

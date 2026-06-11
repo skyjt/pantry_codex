@@ -40,7 +40,7 @@ const EMOJIS: string[] = [
 
     <div v-else class="grid sticker-grid">
       <div
-        v-for="s in stickers.list"
+        v-for="(s, index) in stickers.list"
         :key="s.id"
         class="stk"
         :class="{ disabled: !props.stickerEnabled }"
@@ -49,6 +49,10 @@ const EMOJIS: string[] = [
         @contextmenu.prevent="stickers.remove(s.id)"
       >
         <img :src="`pantry-sticker://${s.id}`" alt="表情" />
+        <span class="stk-actions" @click.stop>
+          <button :disabled="index === 0" @click="stickers.move(s.id, -1)">↑</button>
+          <button :disabled="index === stickers.list.length - 1" @click="stickers.move(s.id, 1)">↓</button>
+        </span>
       </div>
       <p v-if="stickers.list.length === 0" class="empty">
         还没有收藏——在聊天图片上右键「添加到表情」
@@ -121,6 +125,7 @@ const EMOJIS: string[] = [
   display: grid;
   place-items: center;
   background: var(--bg-list);
+  position: relative;
 }
 .stk:hover {
   outline: 2px solid var(--primary);
@@ -132,6 +137,30 @@ const EMOJIS: string[] = [
 .stk img {
   max-width: 100%;
   max-height: 100%;
+}
+.stk-actions {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: none;
+  gap: 2px;
+}
+.stk:hover .stk-actions {
+  display: flex;
+}
+.stk-actions button {
+  border: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.stk-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 .empty {
   grid-column: 1 / -1;

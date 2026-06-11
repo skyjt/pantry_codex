@@ -17,6 +17,24 @@
   --badge: #fa5151;
 }
 
+html[data-theme='dark'] {
+  --primary: #5bbf91;
+  --primary-weak: rgba(91, 191, 145, 0.18);
+  --text-1: #ecefed;
+  --text-2: #b4b9b6;
+  --text-3: #7f8782;
+  --bg-window: #171a18;
+  --bg-list: #202421;
+  --bg-chat: #111412;
+  --bubble-peer: #232823;
+  --bubble-mine: rgba(91, 191, 145, 0.2);
+  --line: #303630;
+  --online: #5fd48e;
+  --offline: #626a64;
+  --danger: #ff6b72;
+  --badge: #ff5f62;
+}
+
 * {
   margin: 0;
   padding: 0;

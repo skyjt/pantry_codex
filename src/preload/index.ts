@@ -5,6 +5,11 @@ import {
   type AppInfo,
   type AppSettingsPatch,
   type ConversationView,
+  type DataExportOptions,
+  type DataImportResult,
+  type ExportFormat,
+  type ForwardResult,
+  type ForwardTarget,
   type GroupPatch,
   type GroupView,
   type MessageView,
@@ -28,6 +33,7 @@ function subscribe<T>(channel: string, listener: (data: T) => void): () => void 
 // 渲染进程一切能力的唯一入口（tech-design §2 安全基线：sandbox + contextBridge）
 const api: PantryApi = {
   getAppInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IpcChannels.appInfo),
+  openUrl: (url: string): Promise<boolean> => ipcRenderer.invoke(IpcChannels.appOpenUrl, url),
   getNetState: (): Promise<NetState> => ipcRenderer.invoke(IpcChannels.netState),
   getPeers: (): Promise<PeerView[]> => ipcRenderer.invoke(IpcChannels.peersList),
   probePeer: (nodeId: string): Promise<boolean> =>
@@ -36,6 +42,12 @@ const api: PantryApi = {
   openConversation: (peerNodeId: string): Promise<ConversationView | null> =>
     ipcRenderer.invoke(IpcChannels.convOpen, peerNodeId),
   markRead: (convId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.convMarkRead, convId),
+  pinConversation: (convId: string, pinned: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.convPin, convId, pinned),
+  muteConversation: (convId: string, muted: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.convMute, convId, muted),
+  removeConversation: (convId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.convRemove, convId),
   pageMessages: (convId: string, beforeSeq: number | null, limit?: number): Promise<MessageView[]> =>
     ipcRenderer.invoke(IpcChannels.msgPage, convId, beforeSeq, limit),
   sendText: (peerNodeId: string, text: string): Promise<MessageView | null> =>
@@ -44,6 +56,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.msgResend, msgId),
   recallMessage: (msgId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.msgRecall, msgId),
+  forwardMessage: (msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> =>
+    ipcRenderer.invoke(IpcChannels.msgForward, msgId, targets),
   getSettings: (): Promise<SettingsView> => ipcRenderer.invoke(IpcChannels.settingsGet),
   saveProfile: (submit: ProfileSubmit): Promise<SettingsView> =>
     ipcRenderer.invoke(IpcChannels.settingsSaveProfile, submit),
@@ -62,6 +76,11 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.fileReveal, transferId),
   getTransfer: (transferId: string): Promise<TransferView | null> =>
     ipcRenderer.invoke(IpcChannels.transferGet, transferId),
+  listTransfers: (limit?: number): Promise<TransferView[]> =>
+    ipcRenderer.invoke(IpcChannels.transferList, limit),
+  exportData: (format: ExportFormat, options?: DataExportOptions): Promise<string | null> =>
+    ipcRenderer.invoke(IpcChannels.dataExport, format, options),
+  importData: (): Promise<DataImportResult | null> => ipcRenderer.invoke(IpcChannels.dataImport),
   sendImageBytes: (peerNodeId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.imgSendBytes, peerNodeId, name, bytes),
   offerImagePath: (peerNodeId: string, path: string): Promise<MessageView | null> =>
@@ -88,8 +107,8 @@ const api: PantryApi = {
   getGroup: (groupId: string): Promise<GroupView | null> =>
     ipcRenderer.invoke(IpcChannels.groupGet, groupId),
   listGroups: (): Promise<GroupView[]> => ipcRenderer.invoke(IpcChannels.groupList),
-  sendGroupText: (groupId: string, text: string): Promise<MessageView | null> =>
-    ipcRenderer.invoke(IpcChannels.groupSend, groupId, text),
+  sendGroupText: (groupId: string, text: string, mentions?: string[]): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupSend, groupId, text, mentions),
   startCapture: (): Promise<void> => ipcRenderer.invoke(IpcChannels.captureStart),
   captureDone: (bytes: ArrayBuffer, send: boolean): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.captureDone, bytes, send),
@@ -99,6 +118,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.stickerAdd, bytes, ext, w, h),
   listStickers: (): Promise<StickerView[]> => ipcRenderer.invoke(IpcChannels.stickerList),
   removeSticker: (id: string): Promise<void> => ipcRenderer.invoke(IpcChannels.stickerRemove, id),
+  reorderStickers: (ids: string[]): Promise<StickerView[]> =>
+    ipcRenderer.invoke(IpcChannels.stickerReorder, ids),
   sendSticker: (peerNodeId: string, stickerId: string): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.stickerSend, peerNodeId, stickerId),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
@@ -114,7 +135,8 @@ const api: PantryApi = {
     return () => ipcRenderer.removeListener(IpcEvents.captureInit, wrapped)
   },
   onCaptured: (listener) => subscribe<ArrayBuffer>(IpcEvents.captured, listener),
-  onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener)
+  onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener),
+  onSettingsUpdated: (listener) => subscribe<SettingsView>(IpcEvents.settingsUpdated, listener)
 }
 
 contextBridge.exposeInMainWorld('pantry', api)

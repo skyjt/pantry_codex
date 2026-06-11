@@ -12,6 +12,7 @@ const nick = ref(props.settings.nick)
 const company = ref(props.settings.company)
 const dept = ref(props.settings.dept)
 const team = ref(props.settings.team)
+const avatar = ref(props.settings.avatar)
 const fileDir = ref(props.settings.fileDir)
 
 const nickOk = computed(() => nick.value.trim().length > 0 && nick.value.trim().length <= 32)
@@ -28,6 +29,7 @@ async function finish(): Promise<void> {
     company: company.value.trim(),
     dept: dept.value.trim(),
     team: team.value.trim(),
+    avatar: avatar.value,
     fileDir: fileDir.value
   })
   emit('done')

@@ -18,6 +18,7 @@ export class TransferRepo {
   private readonly progressStmt: DatabaseT.Statement
   private readonly filesStmt: DatabaseT.Statement
   private readonly getStmt: DatabaseT.Statement
+  private readonly listStmt: DatabaseT.Statement
   private readonly resetActiveStmt: DatabaseT.Statement
 
   constructor(db: DatabaseT.Database) {
@@ -29,7 +30,8 @@ export class TransferRepo {
     this.progressStmt = db.prepare('UPDATE transfers SET bytes_done = ? WHERE transfer_id = ?')
     this.filesStmt = db.prepare('UPDATE transfers SET files = ? WHERE transfer_id = ?')
     this.getStmt = db.prepare('SELECT * FROM transfers WHERE transfer_id = ?')
-    // 启动自愈：上次会话残留的进行中传输全部置失败（v0.2 不做断点续传）
+    this.listStmt = db.prepare('SELECT * FROM transfers ORDER BY ts DESC LIMIT ?')
+    // 启动自愈：上次会话残留的进行中传输置失败，UI 可基于 .part 继续拉取。
     this.resetActiveStmt = db.prepare(
       "UPDATE transfers SET status = 'failed' WHERE status IN ('offering', 'accepted')"
     )
@@ -62,6 +64,10 @@ export class TransferRepo {
 
   get(transferId: string): TransferRow | undefined {
     return this.getStmt.get(transferId) as TransferRow | undefined
+  }
+
+  list(limit: number): TransferRow[] {
+    return this.listStmt.all(limit) as TransferRow[]
   }
 
   resetActive(): number {

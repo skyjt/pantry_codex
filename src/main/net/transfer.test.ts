@@ -104,6 +104,35 @@ describe('transfer 数据面回环', () => {
     ).rejects.toThrow(/peer:not-found/)
   })
 
+  it('已有 .part 时从断点续传并校验整文件哈希', async () => {
+    const src = makeTmp()
+    const dst = makeTmp()
+    const body = randomBytes(256 * 1024)
+    const half = Math.floor(body.length / 2)
+    writeFileSync(join(src, 'resume.bin'), body)
+    writeFileSync(join(dst, 'resume.bin.part'), body.subarray(0, half))
+    const outgoing = new Map<string, OutgoingFile>([
+      ['f1', { fileId: 'f1', absPath: join(src, 'resume.bin'), size: body.length }]
+    ])
+    const port = await startServer(new Map([['t-resume', outgoing]]))
+    let bytes = 0
+    await pullTransfer({
+      host: '127.0.0.1',
+      port,
+      selfId: 'node-receiver',
+      transferId: 't-resume',
+      files: [{ fileId: 'f1', relPath: 'resume.bin', size: body.length }],
+      saveDir: dst,
+      cancelRef: { canceled: false, socket: null },
+      onProgress: (d) => {
+        bytes += d
+      }
+    })
+
+    expect(readFileSync(join(dst, 'resume.bin')).equals(body)).toBe(true)
+    expect(bytes).toBe(body.length)
+  })
+
   it('重名避让：name.ext → name(1).ext', () => {
     const dir = makeTmp()
     writeFileSync(join(dir, 'a.txt'), '1')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { AppInfo, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
@@ -10,8 +10,11 @@ import SetupWizard from './components/SetupWizard.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import ProfileCard from './components/ProfileCard.vue'
 import GroupCreator from './components/GroupCreator.vue'
+import MassSender from './components/MassSender.vue'
 import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
+import { applyAppearance } from './utils/appearance'
+import { avatarText } from './utils/avatar'
 
 type Tab = 'chat' | 'contacts'
 
@@ -19,6 +22,7 @@ const tab = ref<Tab>('chat')
 const searchQuery = ref('')
 const selectedPeerId = ref<string | null>(null)
 const showGroupCreator = ref(false)
+const showMassSender = ref(false)
 const groupsStore = useGroupsStore()
 
 const selectedPeer = computed<PeerView | null>(() =>
@@ -43,6 +47,7 @@ const settings = ref<SettingsView | null>(null)
 const showWizard = ref(false)
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
+let stopSettings: (() => void) | null = null
 
 onMounted(async () => {
   void peersStore.init()
@@ -50,7 +55,16 @@ onMounted(async () => {
   void groupsStore.init()
   info.value = await window.pantry.getAppInfo()
   settings.value = await window.pantry.getSettings()
+  applyAppearance(settings.value)
   showWizard.value = settings.value !== null && !settings.value.setupDone
+  stopSettings = window.pantry.onSettingsUpdated((next) => {
+    settings.value = next
+    applyAppearance(next)
+  })
+})
+
+onUnmounted(() => {
+  stopSettings?.()
 })
 </script>
 
@@ -58,7 +72,7 @@ onMounted(async () => {
   <SetupWizard v-if="showWizard && settings" :settings="settings" @done="showWizard = false" />
   <div class="shell">
     <nav class="rail">
-      <div class="avatar">茶</div>
+      <div class="avatar">{{ avatarText(settings?.avatar ?? -1, settings?.nick ?? '茶') }}</div>
       <button
         class="rail-btn"
         :class="{ active: tab === 'chat' }"
@@ -86,9 +100,11 @@ onMounted(async () => {
       <div class="search-box">
         <input v-model="searchQuery" class="search" placeholder="搜索" />
         <button v-if="searchQuery" class="clear" title="清空" @click="searchQuery = ''">✕</button>
+        <button class="new-group" title="群发消息" @click="showMassSender = true">↗</button>
         <button class="new-group" title="发起讨论组" @click="showGroupCreator = true">＋</button>
       </div>
       <GroupCreator v-if="showGroupCreator" @close="showGroupCreator = false" />
+      <MassSender v-if="showMassSender" @close="showMassSender = false" />
       <SearchPanel
         v-if="searchQuery.trim()"
         :query="searchQuery.trim()"
@@ -213,7 +229,7 @@ onMounted(async () => {
 }
 .clear {
   position: absolute;
-  right: 18px;
+  right: 82px;
   top: 17px;
   border: none;
   background: transparent;

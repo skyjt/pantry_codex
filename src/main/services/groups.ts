@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import {
   GROUP_MAX_MEMBERS,
   MSG_TYPES,
-  TEXT_UDP_LIMIT,
+  TEXT_TCP_LIMIT,
   type Envelope,
   type GroupMeta,
   type GroupPayload,
@@ -117,18 +117,22 @@ export class GroupsService extends EventEmitter {
 
   // ---------- 群消息 ----------
 
-  sendText(groupId: string, text: string): MessageView | null {
+  sendText(groupId: string, text: string, mentions: string[] = []): MessageView | null {
     const meta = this.deps.groupRepo.get(groupId)
     const trimmed = text.trim()
     if (!meta || !meta.members.includes(this.deps.selfId) || !trimmed) return null
-    if (Buffer.byteLength(trimmed, 'utf8') > TEXT_UDP_LIMIT) return null
+    if (Buffer.byteLength(trimmed, 'utf8') > TEXT_TCP_LIMIT) return null
+    const cleanMentions = [...new Set(mentions)]
+      .filter((id) => id !== this.deps.selfId && meta.members.includes(id))
+      .slice(0, GROUP_MAX_MEMBERS)
 
     const convId = this.deps.convRepo.ensureGroup(groupId)
     const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, {
       kind: 'group-text',
       text: trimmed,
       groupId,
-      groupRev: meta.rev
+      groupRev: meta.rev,
+      ...(cleanMentions.length > 0 ? { mentions: cleanMentions } : {})
     })
     // 群消息不做按成员回执（v0.3 简化）：本端入库即 sent，离线成员由补发队列保送达
     this.deps.msgRepo.insert({
@@ -173,8 +177,14 @@ export class GroupsService extends EventEmitter {
     if (inserted) {
       this.deps.convRepo.bump(convId, env.ts)
       this.deps.convRepo.incUnread(convId)
+      const mentioned = Array.isArray(payload.mentions) && payload.mentions.includes(this.deps.selfId)
+      if (mentioned) this.deps.convRepo.markMentioned(convId)
       const row = this.deps.msgRepo.get(env.id)
-      if (row) this.emit('message', msgRowToView(row))
+      if (row) {
+        const view = msgRowToView(row)
+        if (mentioned) view.mentioned = true
+        this.emit('message', view)
+      }
       this.emitConvs()
     }
 

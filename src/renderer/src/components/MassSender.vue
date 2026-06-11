@@ -1,0 +1,206 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { usePeersStore } from '../stores/peers'
+import { useChatStore } from '../stores/chat'
+import { TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
+
+// 多选收件人群发（requirements 决议 #3）：拆成多个单聊上下文发送，不引入群发协议。
+
+const emit = defineEmits<{ close: [] }>()
+const peersStore = usePeersStore()
+const chatStore = useChatStore()
+
+const picked = ref(new Set<string>())
+const text = ref('')
+const sending = ref(false)
+const result = ref('')
+
+const bytes = computed(() => new TextEncoder().encode(text.value.trim()).length)
+const overUdpLimit = computed(() => bytes.value > TEXT_UDP_LIMIT)
+const overLimit = computed(() => bytes.value > TEXT_TCP_LIMIT)
+const canSend = computed(
+  () => picked.value.size > 0 && text.value.trim().length > 0 && !overLimit.value && !sending.value
+)
+
+function toggle(nodeId: string): void {
+  const next = new Set(picked.value)
+  if (next.has(nodeId)) next.delete(nodeId)
+  else next.add(nodeId)
+  picked.value = next
+  result.value = ''
+}
+
+async function sendAll(): Promise<void> {
+  if (!canSend.value) return
+  sending.value = true
+  result.value = ''
+  const body = text.value.trim()
+  const ids = [...picked.value]
+  let ok = 0
+  for (const id of ids) {
+    const view = await window.pantry.sendText(id, body)
+    if (view) ok += 1
+  }
+  sending.value = false
+  result.value = `已发送 ${ok}/${ids.length}`
+  if (ids[0]) await chatStore.openPeer(ids[0])
+}
+</script>
+
+<template>
+  <div class="mask" @click.self="emit('close')">
+    <div class="dialog">
+      <h3>群发消息</h3>
+      <div class="pick-list">
+        <label v-for="p in peersStore.peers" :key="p.nodeId" class="pick">
+          <input type="checkbox" :checked="picked.has(p.nodeId)" @change="toggle(p.nodeId)" />
+          <span class="dot" :class="p.online ? 'on' : 'off'"></span>
+          <span class="nm">{{ p.remark || p.nick }}</span>
+          <em v-if="!p.online" class="off-tag">离线</em>
+        </label>
+        <p v-if="peersStore.peers.length === 0" class="empty">还没有发现任何节点</p>
+      </div>
+      <textarea v-model="text" class="message" maxlength="4096"></textarea>
+      <div class="foot">
+        <span class="count">
+          已选 {{ picked.size }} 人
+          <template v-if="bytes > 600">
+            · {{ bytes }} / {{ TEXT_TCP_LIMIT }} 字节
+            <template v-if="overUdpLimit && !overLimit">· TCP</template>
+          </template>
+        </span>
+        <span class="result" :class="{ over: overLimit }">{{ overLimit ? '文本过长' : result }}</span>
+        <button class="ghost" @click="emit('close')">取消</button>
+        <button class="primary" :disabled="!canSend" @click="sendAll">
+          {{ sending ? '发送中' : '发送' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  z-index: 15;
+}
+.dialog {
+  width: 420px;
+  background: var(--bg-window);
+  border-radius: 8px;
+  padding: 18px 20px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16);
+}
+h3 {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+.pick-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px;
+  margin-bottom: 10px;
+}
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.pick:hover {
+  background: var(--line);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.dot.on {
+  background: var(--online);
+}
+.dot.off {
+  background: var(--offline);
+}
+.nm {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.off-tag {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.empty {
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+  padding: 16px 0;
+}
+.message {
+  width: 100%;
+  height: 110px;
+  resize: none;
+  border: 1px solid var(--line);
+  background: var(--bg-window);
+  color: var(--text-1);
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  user-select: text;
+}
+.message:focus {
+  border-color: var(--primary);
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.count {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.result {
+  font-size: 12px;
+  color: var(--primary);
+}
+.result.over {
+  color: var(--danger);
+}
+.primary {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  padding: 6px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.primary:disabled {
+  opacity: 0.4;
+}
+.ghost {
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 4px;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+</style>

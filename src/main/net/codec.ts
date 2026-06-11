@@ -6,6 +6,7 @@ import {
   MSG_TYPES,
   OFFER_FILES_PER_PACKET,
   PROTOCOL_VERSION,
+  TEXT_TCP_LIMIT,
   TEXT_UDP_LIMIT,
   UDP_MAX_INBOUND,
   type AckPayload,
@@ -74,7 +75,7 @@ export function validateProfile(p: unknown): p is Profile {
   return true
 }
 
-function validatePayload(type: string, payload: unknown): boolean {
+function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LIMIT): boolean {
   switch (type) {
     case MSG_TYPES.entry:
     case MSG_TYPES.alive:
@@ -103,10 +104,14 @@ function validatePayload(type: string, payload: unknown): boolean {
       }
       const text = (m as { text?: unknown }).text
       if (typeof text !== 'string' || text.length === 0) return false
-      if (Buffer.byteLength(text, 'utf8') > TEXT_UDP_LIMIT) return false
+      if (Buffer.byteLength(text, 'utf8') > textLimit) return false
       if (m.kind === 'group-text') {
         if (!isStr(m.groupId, LIMITS.id)) return false
         if (!isInt(m.groupRev) || m.groupRev! < 0) return false
+        if (m.mentions !== undefined) {
+          if (!Array.isArray(m.mentions) || m.mentions.length > GROUP_MAX_MEMBERS) return false
+          if (!m.mentions.every((id) => isStr(id, LIMITS.from))) return false
+        }
       }
       return true
     }
@@ -199,6 +204,10 @@ export function decode(buf: Buffer): DecodeResult {
     return { ok: false, reason: 'bad-json' }
   }
 
+  return decodeEnvelopeObject(raw)
+}
+
+export function decodeEnvelopeObject(raw: unknown, textLimit = TEXT_UDP_LIMIT): DecodeResult {
   if (!isRecord(raw)) return { ok: false, reason: 'not-object' }
   if (raw.v !== PROTOCOL_VERSION) return { ok: false, reason: 'version' }
   if (!isStr(raw.type, LIMITS.type)) return { ok: false, reason: 'bad-type' }
@@ -208,9 +217,13 @@ export function decode(buf: Buffer): DecodeResult {
   if (raw.payload === undefined) return { ok: false, reason: 'no-payload' }
 
   const known = KNOWN_TYPES.has(raw.type)
-  if (known && !validatePayload(raw.type, raw.payload)) {
+  if (known && !validatePayload(raw.type, raw.payload, textLimit)) {
     return { ok: false, reason: `bad-payload:${raw.type}` }
   }
 
   return { ok: true, env: raw as unknown as Envelope, known }
+}
+
+export function decodeTcpEnvelopeObject(raw: unknown): DecodeResult {
+  return decodeEnvelopeObject(raw, TEXT_TCP_LIMIT)
 }

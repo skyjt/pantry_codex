@@ -9,8 +9,10 @@ export const DEFAULT_TCP_PORT = 17879
 export const UDP_MAX_PAYLOAD = 1200
 /** 入站硬上限，超过直接丢弃 */
 export const UDP_MAX_INBOUND = 4096
-/** 文本超过此长度走 TCP（protocol §9，v0.1 暂未用到） */
+/** 文本超过此长度走 TCP 控制帧（protocol §7.2 / §9） */
 export const TEXT_UDP_LIMIT = 800
+/** 文本输入硬上限；超出不发送 */
+export const TEXT_TCP_LIMIT = 4096
 
 /** 时序参数（protocol §9）。测试中可整体注入缩短。 */
 export const TIMINGS = {
@@ -141,6 +143,8 @@ export type MsgPayload =
       groupId: string
       /** 发送方所见群元数据版本，落后方触发 need 同步（§7.4） */
       groupRev: number
+      /** 被 @ 的成员 nodeId；仅用于本地加强提醒，不改变投递范围 */
+      mentions?: string[]
       /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
       resend?: boolean
     }
@@ -242,7 +246,22 @@ export interface ErrFrame {
   type: 'err'
   reason: string
 }
-export type TcpFrame = PullFrame | PullOkFrame | DoneFrame | FinishFrame | ErrFrame
+export interface TcpMsgFrame {
+  type: 'msg'
+  envelope: Envelope
+}
+export interface TcpMsgAckFrame {
+  type: 'msg-ack'
+  ackFor: string
+}
+export type TcpFrame =
+  | PullFrame
+  | PullOkFrame
+  | DoneFrame
+  | FinishFrame
+  | ErrFrame
+  | TcpMsgFrame
+  | TcpMsgAckFrame
 
 export const MSG_TYPES = {
   entry: 'entry',

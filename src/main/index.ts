@@ -21,6 +21,11 @@ import {
   IpcChannels,
   IpcEvents,
   type AppInfo,
+  type AppSettingsPatch,
+  type DataExportOptions,
+  type DataImportResult,
+  type ExportFormat,
+  type ForwardTarget,
   type MessageView,
   type NetState,
   type PeerView,
@@ -38,6 +43,8 @@ import { TransferRepo } from './store/transfer-repo'
 import { GroupRepo } from './store/group-repo'
 import { FilesService } from './services/files'
 import { GroupsService } from './services/groups'
+import { ForwardService } from './services/forward'
+import { PorterService } from './services/porter'
 import { SearchService } from './services/search'
 import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
@@ -68,9 +75,11 @@ if (!gotLock) {
 } else {
   let mainWindow: BrowserWindow | null = null
 
-  // ---- 网络栈（端口可被环境变量覆盖，便于联调；正式配置入设置页后接管） ----
-  const udpPort = Number(process.env['PANTRY_UDP_PORT']) || DEFAULT_UDP_PORT
-  const tcpPort = Number(process.env['PANTRY_TCP_PORT']) || DEFAULT_TCP_PORT
+  // ---- 网络栈（环境变量仅供本机联调覆盖；正式端口从设置读取，重启生效） ----
+  const envUdpPort = parsePort(process.env['PANTRY_UDP_PORT'])
+  const envTcpPort = parsePort(process.env['PANTRY_TCP_PORT'])
+  let udpPort = envUdpPort ?? DEFAULT_UDP_PORT
+  let tcpPort = envTcpPort ?? DEFAULT_TCP_PORT
   const manualPeers: ManualPeer[] = (process.env['PANTRY_PEERS'] ?? '')
     .split(',')
     .map((item) => item.trim())
@@ -90,6 +99,8 @@ if (!gotLock) {
   let chat: ChatService | null = null
   let files: FilesService | null = null
   let groups: GroupsService | null = null
+  let forward: ForwardService | null = null
+  let porter: PorterService | null = null
   let search: SearchService | null = null
   let msgRepoRef: MsgRepo | null = null
   let stickerRepo: StickerRepo | null = null
@@ -99,11 +110,111 @@ if (!gotLock) {
   let tray: Tray | null = null
   let isQuitting = false
 
+  function parsePort(value: string | undefined): number | null {
+    if (!value) return null
+    const n = Number(value)
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null
+  }
+
+  function parsePortValue(value: unknown): number | null {
+    const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+    return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null
+  }
+
   function showMainWindow(): void {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  }
+
+  function toggleMainWindow(): void {
+    if (!mainWindow) return
+    if (mainWindow.isVisible() && mainWindow.isFocused()) {
+      mainWindow.hide()
+      return
+    }
+    showMainWindow()
+  }
+
+  function broadcastSettings(): SettingsView {
+    const view = settingsView()
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send(IpcEvents.settingsUpdated, view)
+    }
+    return view
+  }
+
+  function normalizeShortcut(input: unknown): string | null {
+    if (typeof input !== 'string') return null
+    const value = input.trim()
+    if (value.length > 64) return null
+    // Electron accelerator 只需字母、数字、空格、+、-；空串表示禁用。
+    return /^[A-Za-z0-9+\- ]*$/.test(value) ? value : null
+  }
+
+  function normalizeExportOptions(input: unknown): DataExportOptions | undefined {
+    if (typeof input !== 'object' || input === null) return undefined
+    const raw = input as Record<string, unknown>
+    const out: DataExportOptions = {}
+    if (typeof raw.convId === 'string' && raw.convId.length > 0 && raw.convId.length <= 128) {
+      out.convId = raw.convId
+    }
+    if (typeof raw.fromTs === 'number' && Number.isFinite(raw.fromTs) && raw.fromTs >= 0) {
+      out.fromTs = Math.floor(raw.fromTs)
+    }
+    if (typeof raw.toTs === 'number' && Number.isFinite(raw.toTs) && raw.toTs >= 0) {
+      out.toTs = Math.floor(raw.toTs)
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  function registerGlobalShortcuts(): void {
+    const cfg = appState?.config
+    if (!cfg) return
+    globalShortcut.unregisterAll()
+    const captureShortcut = cfg.captureShortcut.trim()
+    if (captureShortcut) {
+      const ok = globalShortcut.register(captureShortcut, () => void startCapture())
+      if (!ok) console.warn('[shortcut] 截图快捷键注册失败：', captureShortcut)
+    }
+    const showHideShortcut = cfg.showHideShortcut.trim()
+    if (showHideShortcut) {
+      const ok = globalShortcut.register(showHideShortcut, () => toggleMainWindow())
+      if (!ok) console.warn('[shortcut] 显示/隐藏快捷键注册失败：', showHideShortcut)
+    }
+  }
+
+  function applyAutoLaunch(enabled: boolean): void {
+    if (process.env['PANTRY_SMOKE']) return
+    if (!app.isPackaged) return
+    try {
+      if (process.platform === 'linux') {
+        const dir = join(app.getPath('home'), '.config', 'autostart')
+        const file = join(dir, 'pantry.desktop')
+        if (!enabled) {
+          rmSync(file, { force: true })
+          return
+        }
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(
+          file,
+          [
+            '[Desktop Entry]',
+            'Type=Application',
+            'Name=茶话间',
+            `Exec="${process.execPath}"`,
+            'Terminal=false',
+            'X-GNOME-Autostart-enabled=true',
+            ''
+          ].join('\n')
+        )
+        return
+      }
+      app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true })
+    } catch (err) {
+      console.warn('[system] 开机自启设置失败：', err)
+    }
   }
 
   function toPeerView(record: PeerRecord): PeerView {
@@ -224,6 +335,18 @@ if (!gotLock) {
       groups.on('convs', onConvs)
       groups.on('group', (view) => mainWindow?.webContents.send(IpcEvents.groupUpdated, view))
 
+      forward = new ForwardService({
+        msgRepo: new MsgRepo(db),
+        chat,
+        groups,
+        files
+      })
+      porter = new PorterService(
+        db,
+        state.nodeId,
+        state.config.nick,
+        join(app.getPath('userData'), 'data', 'imported-media')
+      )
       search = new SearchService(db, registry, (id) => remarks.get(id) ?? '')
       msgRepoRef = new MsgRepo(db)
       stickerRepo = new StickerRepo(db)
@@ -311,12 +434,23 @@ if (!gotLock) {
     if (msg.isMine) return
     if (msg.kind === 'system') return
     if (appState && appState.config.notifications === false) return
+    if (chat?.listConversations().find((conv) => conv.id === msg.convId)?.muted) return
     if (mainWindow && mainWindow.isFocused() && mainWindow.isVisible()) return
     if (!Notification.isSupported()) return
 
     const nick = registry?.get(msg.senderId)?.profile.nick ?? '新消息'
-    const body = msg.text.length > 60 ? `${msg.text.slice(0, 60)}…` : msg.text
-    const notification = new Notification({ title: nick, body, silent: true }) // 决议：默认静音
+    const title = msg.mentioned ? `${nick} @了你` : nick
+    const preview =
+      appState?.config.showMessagePreview === false
+        ? '收到一条新消息'
+        : msg.text.length > 60
+          ? `${msg.text.slice(0, 60)}…`
+          : msg.text
+    const notification = new Notification({
+      title,
+      body: preview,
+      silent: appState?.config.sound === 'none'
+    })
     notification.on('click', () => {
       showMainWindow()
       mainWindow?.webContents.send(IpcEvents.openConv, msg.convId)
@@ -348,7 +482,7 @@ if (!gotLock) {
     mainWindow.once('ready-to-show', () => mainWindow?.show())
     // 关窗 = 进托盘常驻（F-SYS-1）；托盘不可用的桌面环境降级为直接退出
     mainWindow.on('close', (event) => {
-      if (isQuitting || !tray) return
+      if (isQuitting || !tray || appState?.config.closeToTray === false) return
       event.preventDefault()
       mainWindow?.hide()
     })
@@ -376,6 +510,18 @@ if (!gotLock) {
     }
   })
 
+  ipcMain.handle(IpcChannels.appOpenUrl, async (_event, raw: unknown): Promise<boolean> => {
+    if (typeof raw !== 'string' || raw.length > 2048) return false
+    try {
+      const url = new URL(raw)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+      await shell.openExternal(url.toString())
+      return true
+    } catch {
+      return false
+    }
+  })
+
   ipcMain.handle(IpcChannels.netState, (): NetState => netState)
 
   ipcMain.handle(IpcChannels.peersList, (): PeerView[] => peerViews())
@@ -394,6 +540,22 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.convMarkRead, (_event, convId: unknown) => {
     if (typeof convId === 'string' && convId.length <= 128) chat?.markRead(convId)
+  })
+
+  ipcMain.handle(IpcChannels.convPin, (_event, convId: unknown, pinned: unknown) => {
+    if (typeof convId === 'string' && convId.length <= 128 && typeof pinned === 'boolean') {
+      chat?.setPinned(convId, pinned)
+    }
+  })
+
+  ipcMain.handle(IpcChannels.convMute, (_event, convId: unknown, muted: unknown) => {
+    if (typeof convId === 'string' && convId.length <= 128 && typeof muted === 'boolean') {
+      chat?.setMuted(convId, muted)
+    }
+  })
+
+  ipcMain.handle(IpcChannels.convRemove, (_event, convId: unknown) => {
+    if (typeof convId === 'string' && convId.length <= 128) chat?.removeConversation(convId)
   })
 
   ipcMain.handle(IpcChannels.msgPage, (_event, convId: unknown, beforeSeq: unknown, limit: unknown) => {
@@ -419,22 +581,55 @@ if (!gotLock) {
     return chat?.recall(msgId) ?? false
   })
 
+  ipcMain.handle(IpcChannels.msgForward, async (_event, msgId: unknown, targets: unknown) => {
+    if (typeof msgId !== 'string' || msgId.length === 0 || msgId.length > 64) {
+      return { ok: 0, total: 0, messages: [] }
+    }
+    if (!Array.isArray(targets) || targets.length === 0 || targets.length > 50) {
+      return { ok: 0, total: 0, messages: [] }
+    }
+    const clean: ForwardTarget[] = []
+    for (const item of targets) {
+      if (typeof item !== 'object' || item === null) continue
+      const target = item as Record<string, unknown>
+      if ((target.type !== 'single' && target.type !== 'group') || typeof target.id !== 'string') {
+        continue
+      }
+      if (target.id.length === 0 || target.id.length > 64) continue
+      clean.push({ type: target.type, id: target.id })
+    }
+    return forward?.forward(msgId, clean) ?? { ok: 0, total: clean.length, messages: [] }
+  })
+
   function settingsView(): SettingsView {
     const c = appState?.config
+    const fontScale = c && (c.fontScale === 110 || c.fontScale === 125) ? c.fontScale : 100
+    const sound =
+      c?.sound === 'drop' || c?.sound === 'wood' || c?.sound === 'ding' ? c.sound : 'none'
     return {
       nick: c?.nick ?? '',
       company: c?.company ?? '',
       dept: c?.dept ?? '',
       team: c?.team ?? '',
+      avatar: c?.avatar ?? -1,
       setupDone: c?.setupDone ?? true,
       fileDir: c?.fileDir ?? '',
       defaultFileDir: join(app.getPath('downloads'), '茶话间'),
       notifications: c?.notifications !== false,
       manualPeers: c?.manualPeers ?? [],
       scanRanges: c?.scanRanges ?? [],
-      udpPort,
-      tcpPort,
-      hideOnCapture: c?.hideOnCapture !== false
+      udpPort: c?.udpPort ?? udpPort,
+      tcpPort: c?.tcpPort ?? tcpPort,
+      hideOnCapture: c?.hideOnCapture !== false,
+      autoLaunch: c?.autoLaunch !== false,
+      closeToTray: c?.closeToTray !== false,
+      theme: c?.theme === 'dark' ? 'dark' : 'light',
+      fontScale,
+      showMessagePreview: c?.showMessagePreview !== false,
+      sound,
+      sendKey: c?.sendKey === 'ctrlEnter' ? 'ctrlEnter' : 'enter',
+      captureShortcut: c?.captureShortcut ?? 'CommandOrControl+Alt+A',
+      showHideShortcut: c?.showHideShortcut ?? 'CommandOrControl+Alt+P'
     }
   }
 
@@ -448,6 +643,10 @@ if (!gotLock) {
       str(s.company, LIMITS.company, true) &&
       str(s.dept, LIMITS.dept, true) &&
       str(s.team, LIMITS.team, true) &&
+      typeof s.avatar === 'number' &&
+      Number.isInteger(s.avatar) &&
+      s.avatar >= -1 &&
+      s.avatar <= 999 &&
       typeof s.fileDir === 'string' &&
       s.fileDir.length <= 1024
     )
@@ -462,9 +661,19 @@ if (!gotLock) {
         company: submit.company.trim(),
         dept: submit.dept.trim(),
         team: submit.team.trim(),
+        avatar: submit.avatar,
         fileDir: submit.fileDir.trim()
       })
+      if (db) {
+        porter = new PorterService(
+          db,
+          appState.nodeId,
+          appState.config.nick,
+          join(app.getPath('userData'), 'data', 'imported-media')
+        )
+      }
       discovery?.announceProfile() // 资料变更即时广播（F-DISC-7 的发送侧）
+      broadcastSettings()
     }
     return settingsView()
   })
@@ -527,6 +736,53 @@ if (!gotLock) {
     return files?.transferView(transferId) ?? null
   })
 
+  ipcMain.handle(IpcChannels.transferList, (_event, limit: unknown) => {
+    const lim = typeof limit === 'number' && Number.isInteger(limit) ? limit : 30
+    return files?.listTransfers(lim) ?? []
+  })
+
+  ipcMain.handle(
+    IpcChannels.dataExport,
+    async (_event, format: unknown, options: unknown): Promise<string | null> => {
+      if (format !== 'backup' && format !== 'html' && format !== 'txt') return null
+      if (!mainWindow || !porter) return null
+      const fmt = format as ExportFormat
+      const exportOptions = normalizeExportOptions(options)
+      const ext = fmt === 'backup' ? 'pantry-bak' : fmt
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: '导出聊天记录',
+        defaultPath: `茶话间导出-${new Date().toISOString().slice(0, 10)}.${ext}`,
+        filters: [{ name: ext.toUpperCase(), extensions: [ext] }]
+      })
+      if (result.canceled || !result.filePath) return null
+      try {
+        porter.export(fmt, result.filePath, exportOptions)
+        return result.filePath
+      } catch (err) {
+        console.warn('[porter] 导出失败：', err)
+        return null
+      }
+    }
+  )
+
+  ipcMain.handle(IpcChannels.dataImport, async (): Promise<DataImportResult | null> => {
+    if (!mainWindow || !porter) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '导入聊天记录备份',
+      properties: ['openFile'],
+      filters: [{ name: 'Pantry Backup', extensions: ['pantry-bak', 'zip'] }]
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    try {
+      const imported = porter.importBackup(result.filePaths[0])
+      chat?.emit('convs', chat.listConversations())
+      return imported
+    } catch (err) {
+      console.warn('[porter] 导入失败：', err)
+      return null
+    }
+  })
+
   const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
 
   ipcMain.handle(
@@ -555,7 +811,7 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.settingsSaveApp, (_event, patch: unknown): SettingsView => {
     if (appState && typeof patch === 'object' && patch !== null) {
       const p = patch as Record<string, unknown>
-      const clean: Parameters<typeof saveAppSettings>[1] = {}
+      const clean: AppSettingsPatch = {}
       if (typeof p.notifications === 'boolean') clean.notifications = p.notifications
       if (Array.isArray(p.manualPeers)) {
         clean.manualPeers = p.manualPeers
@@ -567,8 +823,34 @@ if (!gotLock) {
           .filter((s): s is string => typeof s === 'string')
           .slice(0, 20)
       }
+      const nextUdpPort = parsePortValue(p.udpPort)
+      if (nextUdpPort !== null) clean.udpPort = nextUdpPort
+      const nextTcpPort = parsePortValue(p.tcpPort)
+      if (nextTcpPort !== null) clean.tcpPort = nextTcpPort
       if (typeof p.hideOnCapture === 'boolean') clean.hideOnCapture = p.hideOnCapture
+      if (typeof p.autoLaunch === 'boolean') clean.autoLaunch = p.autoLaunch
+      if (typeof p.closeToTray === 'boolean') clean.closeToTray = p.closeToTray
+      if (p.theme === 'light' || p.theme === 'dark') clean.theme = p.theme
+      if (p.fontScale === 100 || p.fontScale === 110 || p.fontScale === 125) {
+        clean.fontScale = p.fontScale
+      }
+      if (typeof p.showMessagePreview === 'boolean') {
+        clean.showMessagePreview = p.showMessagePreview
+      }
+      if (p.sound === 'none' || p.sound === 'drop' || p.sound === 'wood' || p.sound === 'ding') {
+        clean.sound = p.sound
+      }
+      if (p.sendKey === 'enter' || p.sendKey === 'ctrlEnter') clean.sendKey = p.sendKey
+      const captureShortcut = normalizeShortcut(p.captureShortcut)
+      if (captureShortcut !== null) clean.captureShortcut = captureShortcut
+      const showHideShortcut = normalizeShortcut(p.showHideShortcut)
+      if (showHideShortcut !== null) clean.showHideShortcut = showHideShortcut
       saveAppSettings(appState, clean)
+      if (clean.autoLaunch !== undefined) applyAutoLaunch(clean.autoLaunch)
+      if (clean.captureShortcut !== undefined || clean.showHideShortcut !== undefined) {
+        registerGlobalShortcuts()
+      }
+      return broadcastSettings()
     }
     return settingsView()
   })
@@ -646,10 +928,14 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.groupList, () => groups?.list() ?? [])
 
-  ipcMain.handle(IpcChannels.groupSend, (_event, groupId: unknown, text: unknown) => {
+  ipcMain.handle(IpcChannels.groupSend, (_event, groupId: unknown, text: unknown, mentions: unknown) => {
     if (typeof groupId !== 'string' || groupId.length > 64) return null
     if (typeof text !== 'string' || text.length === 0 || text.length > 4096) return null
-    return groups?.sendText(groupId, text) ?? null
+    const cleanMentions =
+      Array.isArray(mentions) && mentions.every((m) => typeof m === 'string' && m.length <= 64)
+        ? (mentions as string[]).slice(0, 50)
+        : []
+    return groups?.sendText(groupId, text, cleanMentions) ?? null
   })
 
   ipcMain.handle(IpcChannels.captureStart, () => startCapture())
@@ -716,6 +1002,18 @@ if (!gotLock) {
     if (path) rmSync(path, { force: true })
   })
 
+  ipcMain.handle(IpcChannels.stickerReorder, (_event, ids: unknown) => {
+    if (!stickerRepo || !Array.isArray(ids)) return []
+    const clean = ids.filter((id): id is string => typeof id === 'string' && id.length <= 64)
+    stickerRepo.reorder(clean)
+    return stickerRepo.list().map((r) => ({
+      id: r.id,
+      w: r.w,
+      h: r.h,
+      animated: r.animated !== 0
+    }))
+  })
+
   ipcMain.handle(IpcChannels.stickerSend, async (_event, peerId: unknown, id: unknown) => {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (typeof id !== 'string' || id.length > 64 || !stickerRepo) return null
@@ -763,7 +1061,12 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort)
+    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort)
+    udpPort = envUdpPort ?? appState.config.udpPort
+    tcpPort = envTcpPort ?? appState.config.tcpPort
+    netState.udpPort = udpPort
+    appState.profile.tcpPort = tcpPort
+    applyAutoLaunch(appState.config.autoLaunch)
 
     // pantry-img://<transferId> —— 渲染层取图的唯一通道（绕开 file:// 的 CSP/安全限制，
     // 且只放行 transfers 表里登记过的路径，不开任意文件读取口子）
@@ -805,13 +1108,7 @@ if (!gotLock) {
       }
     })
     void startNet()
-
-    // 截图全局快捷键（F-CAP-1，默认 Ctrl/Cmd+Alt+A；自定义入设置 P1）
-    try {
-      globalShortcut.register('CommandOrControl+Alt+A', () => void startCapture())
-    } catch (err) {
-      console.warn('[capture] 快捷键注册失败（可能被占用）：', err)
-    }
+    registerGlobalShortcuts()
 
     // 冒烟模式：窗口能起、1.5s 后干净退出即算通过（tech-design §10 的 CI 烟测同款）
     if (process.env['PANTRY_SMOKE']) {
@@ -842,7 +1139,7 @@ if (!gotLock) {
     db = null
   })
 
-  // v0.1 尚未实现托盘常驻：关窗即退出；托盘落地后改为隐藏到托盘
+  // 所有窗口都关闭时退出；主窗关闭到托盘由 createMainWindow 的 close 事件拦截。
   app.on('window-all-closed', () => {
     app.quit()
   })

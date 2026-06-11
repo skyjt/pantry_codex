@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import {
   MSG_TYPES,
   RECALL_WINDOW_MS,
-  TEXT_UDP_LIMIT,
+  TEXT_TCP_LIMIT,
   type Envelope,
   type MsgPayload
 } from '../../shared/protocol'
@@ -73,10 +73,25 @@ export class ChatService extends EventEmitter {
     this.emitConvs()
   }
 
+  setPinned(convId: string, pinned: boolean): void {
+    this.deps.convRepo.setPinned(convId, pinned)
+    this.emitConvs()
+  }
+
+  setMuted(convId: string, muted: boolean): void {
+    this.deps.convRepo.setMuted(convId, muted)
+    this.emitConvs()
+  }
+
+  removeConversation(convId: string): void {
+    this.deps.convRepo.remove(convId)
+    this.emitConvs()
+  }
+
   /** 发文本：入库（sending）→ 立即回显 → 异步走网络，结果经 status 事件回推 */
   sendText(peerId: string, text: string): MessageView | null {
     const trimmed = text.trim()
-    if (!trimmed || Buffer.byteLength(trimmed, 'utf8') > TEXT_UDP_LIMIT) return null
+    if (!trimmed || Buffer.byteLength(trimmed, 'utf8') > TEXT_TCP_LIMIT) return null
 
     const convId = this.deps.convRepo.ensureSingle(peerId)
     const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, {

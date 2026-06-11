@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import type { ConversationView, MessageView } from '../../../shared/ipc'
+import type { ConversationView, ForwardResult, ForwardTarget, MessageView } from '../../../shared/ipc'
 
 // 主进程聊天数据的投影 + 乐观更新（tech-design §7 状态流）
 export const useChatStore = defineStore('chat', {
@@ -105,6 +105,20 @@ export const useChatStore = defineStore('chat', {
       this.viewingHistory = false
     },
 
+    async pinConversation(convId: string, pinned: boolean): Promise<void> {
+      await window.pantry.pinConversation(convId, pinned)
+    },
+
+    async muteConversation(convId: string, muted: boolean): Promise<void> {
+      await window.pantry.muteConversation(convId, muted)
+    },
+
+    async removeConversation(convId: string): Promise<void> {
+      await window.pantry.removeConversation(convId)
+      if (this.activeConvId === convId) this.activeConvId = null
+      delete this.messages[convId]
+    },
+
     async loadEarlier(): Promise<number> {
       const convId = this.activeConvId
       if (!convId) return 0
@@ -115,12 +129,12 @@ export const useChatStore = defineStore('chat', {
       return earlier.length
     },
 
-    async send(text: string): Promise<boolean> {
+    async send(text: string, mentions: string[] = []): Promise<boolean> {
       const conv = this.activeConv
       if (!conv) return false
       const view =
         conv.type === 'group'
-          ? await window.pantry.sendGroupText(conv.peerId, text)
+          ? await window.pantry.sendGroupText(conv.peerId, text, mentions)
           : await window.pantry.sendText(conv.peerId, text)
       if (!view) return false
       const list = (this.messages[conv.id] ??= [])
@@ -134,6 +148,15 @@ export const useChatStore = defineStore('chat', {
 
     async recall(msgId: string): Promise<boolean> {
       return window.pantry.recallMessage(msgId)
+    },
+
+    async forward(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> {
+      const result = await window.pantry.forwardMessage(msgId, targets)
+      for (const msg of result.messages) {
+        const list = this.messages[msg.convId]
+        if (list && !list.some((m) => m.id === msg.id)) list.push(msg)
+      }
+      return result
     },
 
     /** 发文件（选择器或拖拽）；对方离线时主进程返回 null（决议 #4） */

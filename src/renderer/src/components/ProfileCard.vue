@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { PeerView } from '../../../shared/ipc'
+import { avatarText } from '../utils/avatar'
 
 // 联系人资料卡（ui-design §4）：信息 + 本地备注（F-DISC-9）+ 发消息入口
 
@@ -34,7 +35,7 @@ function orgPath(p: PeerView): string {
     <div class="card">
       <div class="head">
         <span class="avatar" :class="{ off: !peer.online }">{{
-          (peer.remark || peer.nick).slice(0, 1)
+          avatarText(peer.avatar, peer.remark || peer.nick)
         }}</span>
         <div class="who">
           <div class="name">

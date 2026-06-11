@@ -5,6 +5,7 @@ import { UdpChannel } from './udp'
 import { PeerRegistry } from './peer-registry'
 import { Discovery } from './discovery'
 import { Messenger, type DedupStore, type QueueStore } from './messenger'
+import { TransferServer } from './transfer'
 
 // 消息层回环集成：两套完整栈（udp+registry+discovery+messenger）在 127.0.0.1 对发。
 // 存储用内存实现 —— vitest 不碰 native 模块；SQLite 实现由 npm run test:db 验证。
@@ -89,6 +90,7 @@ interface Stack {
 }
 
 const stacks: Stack[] = []
+const tcpServers: TransferServer[] = []
 
 async function makeStack(
   name: string,
@@ -130,11 +132,25 @@ async function waitFor(cond: () => boolean, timeout = 3000): Promise<void> {
 }
 
 afterEach(async () => {
+  for (const server of tcpServers.splice(0)) await server.stop()
   for (const stack of stacks.splice(0)) {
     stack.discovery.stop()
     await stack.udp.stop()
   }
 })
+
+async function startTcpReceiver(stack: Stack): Promise<void> {
+  const server = new TransferServer(
+    stack.profile.tcpPort,
+    {
+      resolve: () => null,
+      receiveMessage: (env) => stack.messenger.acceptTcpEnvelope(env)
+    },
+    '127.0.0.1'
+  )
+  tcpServers.push(server)
+  await server.start()
+}
 
 function textEnv(from: string, text: string): Envelope<MsgPayload> {
   return makeEnvelope<MsgPayload>(MSG_TYPES.msg, from, { kind: 'text', text })
@@ -158,6 +174,28 @@ describe('messenger 回环集成', () => {
     const payload = b.incoming[0].payload as MsgPayload
     expect(payload.kind).toBe('text')
     if (payload.kind === 'text') expect(payload.text).toBe('你好，鲍勃')
+    expect(a.queue.items).toHaveLength(0)
+  })
+
+  it('超长文本通过 TCP 控制帧直达', async () => {
+    nextPort += 20
+    const a = await makeStack('alice', nextPort)
+    const b = await makeStack('bob', nextPort + 5, [{ host: '127.0.0.1', port: a.port }])
+    await startTcpReceiver(b)
+    a.discovery.start()
+    b.discovery.start()
+    await waitFor(() => a.registry.get(b.profile.nodeId)?.online === true)
+
+    const longText = '这是一段超长文本'.repeat(150)
+    const outcome = await a.messenger.sendUserMessage(
+      b.profile.nodeId,
+      textEnv(a.profile.nodeId, longText)
+    )
+    expect(outcome).toBe('sent')
+    expect(b.incoming).toHaveLength(1)
+    const payload = b.incoming[0].payload as MsgPayload
+    expect(payload.kind).toBe('text')
+    if (payload.kind === 'text') expect(payload.text).toBe(longText)
     expect(a.queue.items).toHaveLength(0)
   })
 

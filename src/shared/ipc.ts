@@ -5,16 +5,21 @@ import type { Platform } from './protocol'
 
 export const IpcChannels = {
   appInfo: 'app:info',
+  appOpenUrl: 'app:open-url',
   netState: 'net:get-state',
   peersList: 'peers:list',
   peersProbe: 'peers:probe',
   convList: 'conv:list',
   convOpen: 'conv:open',
   convMarkRead: 'conv:mark-read',
+  convPin: 'conv:pin',
+  convMute: 'conv:mute',
+  convRemove: 'conv:remove',
   msgPage: 'msg:page',
   msgSend: 'msg:send',
   msgResend: 'msg:resend',
   msgRecall: 'msg:recall',
+  msgForward: 'msg:forward',
   settingsGet: 'settings:get',
   settingsSaveProfile: 'settings:save-profile',
   settingsPickDir: 'settings:pick-dir',
@@ -25,6 +30,9 @@ export const IpcChannels = {
   fileCancel: 'file:cancel',
   fileReveal: 'file:reveal',
   transferGet: 'transfer:get',
+  transferList: 'transfer:list',
+  dataExport: 'data:export',
+  dataImport: 'data:import',
   imgSendBytes: 'img:send-bytes',
   imgOfferPath: 'img:offer-path',
   imgSaveAs: 'img:save-as',
@@ -47,6 +55,7 @@ export const IpcChannels = {
   stickerAdd: 'sticker:add',
   stickerList: 'sticker:list',
   stickerRemove: 'sticker:remove',
+  stickerReorder: 'sticker:reorder',
   stickerSend: 'sticker:send'
 } as const
 
@@ -64,7 +73,9 @@ export const IpcEvents = {
   /** 截图完成且选择"发送"→ 主窗（发到当前会话） */
   captured: 'ui:captured',
   /** 点击系统通知/托盘 → 主窗定位到会话 */
-  openConv: 'ui:open-conv'
+  openConv: 'ui:open-conv',
+  /** 设置页保存后广播给所有窗口，统一主题/字体等外观 */
+  settingsUpdated: 'settings:updated'
 } as const
 
 export interface AppInfo {
@@ -110,6 +121,7 @@ export interface ConversationView {
   unread: number
   pinned: boolean
   muted: boolean
+  mentioned: boolean
   preview: string
 }
 
@@ -133,6 +145,8 @@ export interface MessageView {
   ts: number
   seq: number
   status: 'sending' | 'sent' | 'queued' | 'failed' | 'recalled'
+  /** 入站群消息是否 @ 到本机；用于本次事件的加强提醒 */
+  mentioned?: boolean
 }
 
 /** 传输状态视图（文件卡片的数据源） */
@@ -154,6 +168,30 @@ export interface MsgStatusEvent {
   id: string
   convId: string
   status: MessageView['status']
+}
+
+export interface ForwardTarget {
+  type: 'single' | 'group'
+  id: string
+}
+
+export interface ForwardResult {
+  ok: number
+  total: number
+  messages: MessageView[]
+}
+
+export type ExportFormat = 'backup' | 'html' | 'txt'
+
+export interface DataExportOptions {
+  convId?: string
+  fromTs?: number
+  toTs?: number
+}
+
+export interface DataImportResult {
+  imported: number
+  skipped: number
 }
 
 /** 讨论组视图（F-MSG-4）：amMember=false 表示已退出/被移出（历史保留、禁发） */
@@ -203,6 +241,7 @@ export interface SettingsView {
   company: string
   dept: string
   team: string
+  avatar: number
   setupDone: boolean
   /** 用户自选的文件保存目录；空 = 跟随默认 */
   fileDir: string
@@ -215,13 +254,35 @@ export interface SettingsView {
   tcpPort: number
   /** 截图时隐藏茶话间窗口（决议 #22） */
   hideOnCapture: boolean
+  autoLaunch: boolean
+  closeToTray: boolean
+  theme: 'light' | 'dark'
+  fontScale: 100 | 110 | 125
+  showMessagePreview: boolean
+  sound: 'none' | 'drop' | 'wood' | 'ding'
+  sendKey: 'enter' | 'ctrlEnter'
+  /** Electron accelerator；空串 = 禁用 */
+  captureShortcut: string
+  /** Electron accelerator；空串 = 禁用 */
+  showHideShortcut: string
 }
 
 export interface AppSettingsPatch {
   notifications?: boolean
   manualPeers?: string[]
   scanRanges?: string[]
+  udpPort?: number
+  tcpPort?: number
   hideOnCapture?: boolean
+  autoLaunch?: boolean
+  closeToTray?: boolean
+  theme?: SettingsView['theme']
+  fontScale?: SettingsView['fontScale']
+  showMessagePreview?: boolean
+  sound?: SettingsView['sound']
+  sendKey?: SettingsView['sendKey']
+  captureShortcut?: string
+  showHideShortcut?: string
 }
 
 export interface StickerView {
@@ -236,12 +297,15 @@ export interface ProfileSubmit {
   company: string
   dept: string
   team: string
+  avatar: number
   fileDir: string
 }
 
 /** preload 经 contextBridge 暴露到 window.pantry 的 API 形状 */
 export interface PantryApi {
   getAppInfo(): Promise<AppInfo>
+  /** 用户点击聊天链接后交给系统浏览器；仅允许 http/https */
+  openUrl(url: string): Promise<boolean>
   getPeers(): Promise<PeerView[]>
   getNetState(): Promise<NetState>
   /** 按需探活（F-DISC-8）；返回是否已发出 */
@@ -250,12 +314,16 @@ export interface PantryApi {
   /** 打开（或创建）与某节点的会话：清未读 + 触发探活；存储不可用时返回 null */
   openConversation(peerNodeId: string): Promise<ConversationView | null>
   markRead(convId: string): Promise<void>
+  pinConversation(convId: string, pinned: boolean): Promise<void>
+  muteConversation(convId: string, muted: boolean): Promise<void>
+  removeConversation(convId: string): Promise<void>
   /** 倒序游标分页；beforeSeq 传 null 取最新一页，返回按时间升序 */
   pageMessages(convId: string, beforeSeq: number | null, limit?: number): Promise<MessageView[]>
   /** 发文本；超长（>800 字节）或空白返回 null */
   sendText(peerNodeId: string, text: string): Promise<MessageView | null>
   resendMessage(msgId: string): Promise<boolean>
   recallMessage(msgId: string): Promise<boolean>
+  forwardMessage(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult>
   getSettings(): Promise<SettingsView>
   /** 保存资料（向导/设置）：资料有变自动广播刷新全网 */
   saveProfile(submit: ProfileSubmit): Promise<SettingsView>
@@ -272,6 +340,9 @@ export interface PantryApi {
   /** 完成后在文件管理器中显示 */
   revealTransfer(transferId: string): Promise<void>
   getTransfer(transferId: string): Promise<TransferView | null>
+  listTransfers(limit?: number): Promise<TransferView[]>
+  exportData(format: ExportFormat, options?: DataExportOptions): Promise<string | null>
+  importData(): Promise<DataImportResult | null>
   /** 粘贴的图片字节 → 落本机图片缓存 → 以 purpose:image 发起传输 */
   sendImageBytes(peerNodeId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null>
   /** 磁盘上的图片文件按图片消息发送（拖拽/选择器入口） */
@@ -299,7 +370,7 @@ export interface PantryApi {
   leaveGroup(groupId: string): Promise<void>
   getGroup(groupId: string): Promise<GroupView | null>
   listGroups(): Promise<GroupView[]>
-  sendGroupText(groupId: string, text: string): Promise<MessageView | null>
+  sendGroupText(groupId: string, text: string, mentions?: string[]): Promise<MessageView | null>
   /** 触发截图（等价全局快捷键） */
   startCapture(): Promise<void>
   /** 截图框选完成：写剪贴板；send=true 时同时回推主窗发送到当前会话 */
@@ -310,6 +381,7 @@ export interface PantryApi {
   addSticker(bytes: ArrayBuffer, ext: string, w: number, h: number): Promise<StickerView | null>
   listStickers(): Promise<StickerView[]>
   removeSticker(id: string): Promise<void>
+  reorderStickers(ids: string[]): Promise<StickerView[]>
   /** 发送收藏的表情到某节点 */
   sendSticker(peerNodeId: string, stickerId: string): Promise<MessageView | null>
   /** 订阅通讯录变化；返回退订函数 */
@@ -325,4 +397,6 @@ export interface PantryApi {
   onCaptured(listener: (bytes: ArrayBuffer) => void): () => void
   /** 点通知/托盘后主进程要求打开某会话 */
   onOpenConv(listener: (convId: string) => void): () => void
+  /** 设置变更后同步主窗/设置窗外观 */
+  onSettingsUpdated(listener: (settings: SettingsView) => void): () => void
 }

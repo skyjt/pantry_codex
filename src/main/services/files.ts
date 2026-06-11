@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readdirSync, statSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   IMG_AUTO_ACCEPT,
   MAX_FILES_PER_TRANSFER,
@@ -100,7 +100,8 @@ export class FilesService extends EventEmitter {
           const out = this.outgoing.get(transferId)
           if (!out || !out.accepted) return null
           return out.files.get(fileId) ?? null
-        }
+        },
+        receiveMessage: (env) => this.deps.messenger.acceptTcpEnvelope(env)
       },
       deps.bindAddress
     )
@@ -170,7 +171,6 @@ export class FilesService extends EventEmitter {
       want !== 'file' && !hasDir && fileCount === 1 && totalSize <= IMG_AUTO_ACCEPT
         ? want
         : undefined
-    const asImage = purpose !== undefined
 
     const transferId = randomUUID()
     const rootName =
@@ -202,10 +202,10 @@ export class FilesService extends EventEmitter {
       msgId,
       peerId,
       direction: 'out',
-      // 发送侧图片 savedPath=源文件：自己的气泡立即可渲染
+      // 发送侧记录单路径源文件/目录：图片可立即渲染，文件可再次转发。
       files: JSON.stringify({
         name: rootName,
-        ...(asImage ? { savedPath: paths[0] } : {})
+        ...(paths.length === 1 ? { savedPath: paths[0] } : {})
       } satisfies FilesBlob),
       status: 'offering',
       total: totalSize,
@@ -260,14 +260,21 @@ export class FilesService extends EventEmitter {
   async accept(transferId: string, saveDirOverride?: string): Promise<boolean> {
     const inc = this.incoming.get(transferId)
     const row = this.deps.transferRepo.get(transferId)
-    if (!inc || !row || row.status !== 'offering') return false
+    if (!inc || !row || (row.status !== 'offering' && row.status !== 'failed')) return false
     const peer = this.deps.registry.get(inc.peerId)
     if (!peer || !peer.online) {
       this.finish(transferId, 'failed')
       return false
     }
 
-    const base = saveDirOverride || this.deps.getSaveDir()
+    let rememberedBase = ''
+    try {
+      const blob = JSON.parse(row.files) as FilesBlob
+      if (row.status === 'failed' && blob.savedPath) rememberedBase = dirname(blob.savedPath)
+    } catch {
+      rememberedBase = ''
+    }
+    const base = saveDirOverride || rememberedBase || this.deps.getSaveDir()
     // 根级重名避让：同名首段统一改名，保持目录结构（F-FILE-3）
     const rootMap = new Map<string, string>()
     for (const plan of inc.plans) {
@@ -285,6 +292,8 @@ export class FilesService extends EventEmitter {
     const savedPath = join(base, plans[0].relPath.split('/')[0])
 
     this.deps.transferRepo.updateStatus(transferId, 'accepted')
+    inc.bytesDone = 0
+    inc.cancelRef = { canceled: false, socket: null }
     this.updateBlob(transferId, { savedPath })
     this.emitTransfer(transferId, true)
 
@@ -389,6 +398,13 @@ export class FilesService extends EventEmitter {
       name: blob.name,
       savedPath: blob.savedPath ?? ''
     }
+  }
+
+  listTransfers(limit = 30): TransferView[] {
+    return this.deps.transferRepo
+      .list(Math.max(1, Math.min(100, limit)))
+      .map((row) => this.transferView(row.transfer_id))
+      .filter((view): view is TransferView => view !== null)
   }
 
   // ---------- 控制面入站 ----------
@@ -536,7 +552,7 @@ export class FilesService extends EventEmitter {
   private finish(transferId: string, status: 'done' | 'declined' | 'canceled' | 'failed'): void {
     this.deps.transferRepo.updateStatus(transferId, status)
     this.outgoing.delete(transferId)
-    this.incoming.delete(transferId)
+    if (status !== 'failed') this.incoming.delete(transferId)
     this.emitTransfer(transferId, true)
   }
 

@@ -130,6 +130,11 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     sort     INTEGER NOT NULL DEFAULT 0,
     added    INTEGER NOT NULL
   );
+  `,
+
+  // v6：群内 @ 本地会话标记（打开会话即清除）
+  `
+  ALTER TABLE conversations ADD COLUMN mentioned INTEGER NOT NULL DEFAULT 0;
   `
 ]
 
