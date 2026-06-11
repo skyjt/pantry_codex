@@ -20,12 +20,12 @@ export interface NewMessage {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image' | 'sticker'
+  kind: 'text' | 'file' | 'image' | 'sticker' | 'system'
   content: string
   /** 文件消息：FileRefView 的 JSON */
   fileRef?: string
   ts: number
-  status: 'sending' | 'sent' | 'queued' | 'failed'
+  status: 'sending' | 'sent' | 'queued' | 'failed' | 'recalled'
 }
 
 /** 行 → 渲染层视图（chat 与 files 服务共用） */
@@ -44,7 +44,10 @@ export function msgRowToView(row: MsgRow): MessageView {
     senderId: row.sender_id,
     isMine: row.is_mine !== 0,
     kind:
-      row.kind === 'file' || row.kind === 'image' || row.kind === 'sticker'
+      row.kind === 'file' ||
+      row.kind === 'image' ||
+      row.kind === 'sticker' ||
+      row.kind === 'system'
         ? (row.kind as MessageView['kind'])
         : 'text',
     text: row.content,
@@ -63,6 +66,8 @@ export class MsgRepo {
   private readonly pageFirstStmt: DatabaseT.Statement
   private readonly aroundStmt: DatabaseT.Statement
   private readonly statusStmt: DatabaseT.Statement
+  private readonly recallStmt: DatabaseT.Statement
+  private readonly deleteFtsStmt: DatabaseT.Statement
   private readonly getStmt: DatabaseT.Statement
   private readonly resetSendingStmt: DatabaseT.Statement
 
@@ -83,6 +88,10 @@ export class MsgRepo {
       'SELECT * FROM messages WHERE conv_id = ? AND seq BETWEEN ? AND ? ORDER BY seq ASC'
     )
     this.statusStmt = db.prepare('UPDATE messages SET status = ? WHERE id = ?')
+    this.recallStmt = db.prepare(
+      "UPDATE messages SET status = 'recalled', content = '', file_ref = NULL WHERE id = ?"
+    )
+    this.deleteFtsStmt = db.prepare('DELETE FROM messages_fts WHERE msg_id = ?')
     this.getStmt = db.prepare('SELECT * FROM messages WHERE id = ?')
     // 启动自愈（决议 #22）：残留"发送中"复位为失败，杜绝永远转圈
     this.resetSendingStmt = db.prepare(
@@ -106,7 +115,7 @@ export class MsgRepo {
       status: msg.status
     })
     if (info.changes === 0) return false
-    const tokens = toFtsTokens(msg.content)
+    const tokens = msg.kind === 'system' ? '' : toFtsTokens(msg.content)
     if (tokens) this.insertFtsStmt.run(msg.id, tokens)
     return true
   }
@@ -129,6 +138,12 @@ export class MsgRepo {
 
   updateStatus(msgId: string, status: string): void {
     this.statusStmt.run(status, msgId)
+  }
+
+  recall(msgId: string): boolean {
+    const info = this.recallStmt.run(msgId)
+    this.deleteFtsStmt.run(msgId)
+    return info.changes > 0
   }
 
   get(msgId: string): MsgRow | undefined {

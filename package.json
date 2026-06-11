@@ -1,7 +1,7 @@
 {
   "name": "pantry",
   "productName": "茶话间",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "茶话间（Pantry）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
   "private": true,
   "main": "./out/main/index.js",
@@ -22,7 +22,87 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "test:db": "esbuild src/main/store/db-selftest.ts --bundle --platform=node --target=node16 --external:better-sqlite3 --outfile=out/db-selftest.cjs --log-level=warning && cross-env ELECTRON_RUN_AS_NODE=1 electron out/db-selftest.cjs",
-    "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron ."
+    "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron .",
+    "dist:win": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --win --x64",
+    "dist:linux": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --linux --x64",
+    "dist:mac": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.pantry.app",
+    "productName": "茶话间",
+    "electronVersion": "22.3.27",
+    "asar": true,
+    "asarUnpack": [
+      "**/better_sqlite3.node"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "publish": null,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network",
+      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+    }
   },
   "devDependencies": {
     "@electron/rebuild": "3.6.0",
@@ -31,6 +111,7 @@
     "@vitejs/plugin-vue": "5.2.1",
     "cross-env": "7.0.3",
     "electron": "22.3.27",
+    "electron-builder": "24.13.3",
     "electron-vite": "2.3.0",
     "pinia": "2.2.6",
     "typescript": "5.6.3",

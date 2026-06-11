@@ -169,6 +169,7 @@ if (!gotLock) {
         selfId: state.nodeId,
         convRepo: new ConvRepo(db),
         msgRepo: new MsgRepo(db),
+        groupRepo: new GroupRepo(db),
         messenger,
         probe: (peerId) => {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
@@ -308,6 +309,7 @@ if (!gotLock) {
   /** 新消息系统通知（F-SYS-2）：窗口聚焦时不打扰（应用内角标已可见）；点击直达会话 */
   function notifyIncoming(msg: MessageView): void {
     if (msg.isMine) return
+    if (msg.kind === 'system') return
     if (appState && appState.config.notifications === false) return
     if (mainWindow && mainWindow.isFocused() && mainWindow.isVisible()) return
     if (!Notification.isSupported()) return
@@ -410,6 +412,11 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.msgResend, (_event, msgId: unknown): boolean => {
     if (typeof msgId !== 'string' || msgId.length === 0 || msgId.length > 64) return false
     return chat?.resend(msgId) ?? false
+  })
+
+  ipcMain.handle(IpcChannels.msgRecall, (_event, msgId: unknown): boolean => {
+    if (typeof msgId !== 'string' || msgId.length === 0 || msgId.length > 64) return false
+    return chat?.recall(msgId) ?? false
   })
 
   function settingsView(): SettingsView {

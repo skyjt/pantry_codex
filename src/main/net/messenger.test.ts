@@ -155,7 +155,9 @@ describe('messenger 回环集成', () => {
     )
     expect(outcome).toBe('sent')
     expect(b.incoming).toHaveLength(1)
-    expect((b.incoming[0].payload as MsgPayload).text).toBe('你好，鲍勃')
+    const payload = b.incoming[0].payload as MsgPayload
+    expect(payload.kind).toBe('text')
+    if (payload.kind === 'text') expect(payload.text).toBe('你好，鲍勃')
     expect(a.queue.items).toHaveLength(0)
   })
 
@@ -234,9 +236,23 @@ describe('messenger 回环集成', () => {
     b2.discovery.start() // entry → A 的 registry 翻在线 → 补发发车
 
     await waitFor(() => b2.incoming.length === 1)
-    expect((b2.incoming[0].payload as MsgPayload).text).toBe('你不在的时候发的')
+    const payload = b2.incoming[0].payload as MsgPayload
+    expect(payload.kind).toBe('text')
+    if (payload.kind === 'text') expect(payload.text).toBe('你不在的时候发的')
     expect((b2.incoming[0].payload as { resend?: boolean }).resend).toBe(true)
     await waitFor(() => a.queue.items.length === 0)
     expect(sentStatuses).toContain('sent')
+  })
+
+  it('撤回发送中的消息会取消后续入队，避免原文离线补发', async () => {
+    nextPort += 2
+    const a = await makeStack('alice', nextPort)
+    const env = textEnv(a.profile.nodeId, '这条会立刻撤回')
+
+    const sending = a.messenger.sendUserMessage('node-missing', env)
+    a.messenger.dropQueuedMessage(env.id, ['node-missing'])
+
+    await expect(sending).resolves.toBe('queued')
+    expect(a.queue.items).toHaveLength(0)
   })
 })

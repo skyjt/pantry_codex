@@ -89,10 +89,21 @@ function validatePayload(type: string, payload: unknown): boolean {
     case MSG_TYPES.msg: {
       if (!isRecord(payload)) return false
       const m = payload as Partial<MsgPayload>
-      if (m.kind !== 'text' && m.kind !== 'group-text') return false
-      if (typeof m.text !== 'string' || m.text.length === 0) return false
-      if (Buffer.byteLength(m.text, 'utf8') > TEXT_UDP_LIMIT) return false
+      if (m.kind !== 'text' && m.kind !== 'group-text' && m.kind !== 'recall') return false
       if (m.resend !== undefined && typeof m.resend !== 'boolean') return false
+      if (m.kind === 'recall') {
+        if (!isStr(m.targetId, LIMITS.id)) return false
+        if (m.groupId !== undefined) {
+          if (!isStr(m.groupId, LIMITS.id)) return false
+          if (!isInt(m.groupRev) || m.groupRev < 0) return false
+        } else if (m.groupRev !== undefined) {
+          return false
+        }
+        return true
+      }
+      const text = (m as { text?: unknown }).text
+      if (typeof text !== 'string' || text.length === 0) return false
+      if (Buffer.byteLength(text, 'utf8') > TEXT_UDP_LIMIT) return false
       if (m.kind === 'group-text') {
         if (!isStr(m.groupId, LIMITS.id)) return false
         if (!isInt(m.groupRev) || m.groupRev! < 0) return false

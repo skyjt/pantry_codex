@@ -42,6 +42,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.msgSend, peerNodeId, text),
   resendMessage: (msgId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.msgResend, msgId),
+  recallMessage: (msgId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.msgRecall, msgId),
   getSettings: (): Promise<SettingsView> => ipcRenderer.invoke(IpcChannels.settingsGet),
   saveProfile: (submit: ProfileSubmit): Promise<SettingsView> =>
     ipcRenderer.invoke(IpcChannels.settingsSaveProfile, submit),

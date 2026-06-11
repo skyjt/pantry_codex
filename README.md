@@ -6,7 +6,7 @@
 
 产品形态参考：**内网通、飞秋（FeiQ）、IP Messenger（ipmsg）、iptux**。
 
-**项目状态：开发中**。v0.1 里程碑已落地（同网段发现、单聊文本与离线补发、托盘通知、首启向导），进度以 `git log` 为准，里程碑规划见 [docs/tech-design.md](docs/tech-design.md) §12。
+**项目状态：v0.4.0 首个可交付预览版准备中**。v0.1–v0.3 里程碑已落地，v0.4 已完成文本/群文本消息撤回；Windows 与 Debian 的真实打包运行测试放在最终交付前由目标平台执行。进度以 `git log` 为准，里程碑规划见 [docs/tech-design.md](docs/tech-design.md) §12。
 
 ## 核心特性（规划）
 
@@ -134,9 +134,9 @@ npm test             # vitest：协议编解码 + 发现层回环集成 + 纯函
 npm run test:db      # 数据库自测（在 Electron 内置 Node 真实 ABI 上执行）
 npm run typecheck    # node16 / chrome108 两套类型基线
 npm run smoke        # 构建 + 启动冒烟（1.5s 干净退出）
-npm run dist:win     # NSIS 安装包 + 便携版（x64）—— 规划中
-npm run dist:linux   # deb + AppImage（x64 / arm64）—— 规划中
-npm run dist:mac     # dmg + zip（universal）—— 规划中
+npm run dist:win     # NSIS 安装包 + 便携版（x64；请在 Windows/Win7 VM 测试）
+npm run dist:linux   # deb + AppImage（x64；请在 Debian 10 环境测试）
+npm run dist:mac     # dmg + zip（当前 macOS 架构；正式 universal 包后续专项）
 ```
 
 本机双实例联调（验证发现/消息链路，不需要两台机器）：

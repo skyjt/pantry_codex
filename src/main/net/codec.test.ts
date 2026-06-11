@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { decode, encode, makeEnvelope } from './codec'
-import { MSG_TYPES, UDP_MAX_INBOUND, type Profile, type ProfilePayload } from '../../shared/protocol'
+import {
+  MSG_TYPES,
+  UDP_MAX_INBOUND,
+  type MsgPayload,
+  type Profile,
+  type ProfilePayload
+} from '../../shared/protocol'
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
   return {
@@ -70,6 +76,29 @@ describe('codec', () => {
     const env = makeEnvelope(MSG_TYPES.presence, 'node-aaaa', { seq: -1, profileRev: 1 })
     const result = decode(encode(env))
     expect(result).toEqual({ ok: false, reason: 'bad-payload:presence' })
+  })
+
+  it('recall 消息要求 targetId，群聊撤回要求 groupRev 配套', () => {
+    const ok = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'recall',
+      targetId: 'msg-target',
+      groupId: 'group-1',
+      groupRev: 2
+    })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const missingTarget = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'recall' })
+    expect(decode(encode(missingTarget))).toEqual({
+      ok: false,
+      reason: 'bad-payload:msg'
+    })
+
+    const missingRev = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'recall',
+      targetId: 'msg-target',
+      groupId: 'group-1'
+    })
+    expect(decode(encode(missingRev))).toEqual({ ok: false, reason: 'bad-payload:msg' })
   })
 
   it('缺 payload 拒收', () => {

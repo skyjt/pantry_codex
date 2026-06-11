@@ -30,6 +30,8 @@ export const TIMINGS = {
   /** 补发队列保留时长 / 单节点上限（决议 #6） */
   queueTtl: 7 * 24 * 3_600_000,
   queueMaxPerPeer: 200,
+  /** 自己消息可撤回窗口（决议 #23） */
+  recallWindow: 2 * 60_000,
   /** 已收消息 ID 去重窗口（§7.2） */
   dedupTtl: 24 * 3_600_000,
   /** gossip 周期交换间隔（§6.3，另有"结识即交换"） */
@@ -123,17 +125,35 @@ export interface PeersPayload {
 /** 群成员上限（requirements F-MSG-4） */
 export const GROUP_MAX_MEMBERS = 50
 
-/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊（逐成员单播，信封 id 跨成员复用） */
-export interface MsgPayload {
-  kind: 'text' | 'group-text'
-  text: string
-  /** 仅 group-text */
-  groupId?: string
-  /** 仅 group-text：发送方所见群元数据版本，落后方触发 need 同步（§7.4） */
-  groupRev?: number
-  /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
-  resend?: boolean
-}
+export const RECALL_WINDOW_MS = TIMINGS.recallWindow
+
+/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊；recall=撤回指令 */
+export type MsgPayload =
+  | {
+      kind: 'text'
+      text: string
+      /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
+      resend?: boolean
+    }
+  | {
+      kind: 'group-text'
+      text: string
+      groupId: string
+      /** 发送方所见群元数据版本，落后方触发 need 同步（§7.4） */
+      groupRev: number
+      /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
+      resend?: boolean
+    }
+  | {
+      kind: 'recall'
+      /** 要撤回的原消息 id */
+      targetId: string
+      /** 群聊撤回时携带，用于定位会话与触发元数据补齐 */
+      groupId?: string
+      groupRev?: number
+      /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
+      resend?: boolean
+    }
 
 /** 群元数据（§7.4）：rev 单调递增，冲突按 (rev, updatedTs) 取大（LWW） */
 export interface GroupMeta {

@@ -14,6 +14,7 @@ export const IpcChannels = {
   msgPage: 'msg:page',
   msgSend: 'msg:send',
   msgResend: 'msg:resend',
+  msgRecall: 'msg:recall',
   settingsGet: 'settings:get',
   settingsSaveProfile: 'settings:save-profile',
   settingsPickDir: 'settings:pick-dir',
@@ -126,12 +127,12 @@ export interface MessageView {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image' | 'sticker'
+  kind: 'text' | 'file' | 'image' | 'sticker' | 'system'
   text: string
   fileRef?: FileRefView
   ts: number
   seq: number
-  status: 'sending' | 'sent' | 'queued' | 'failed'
+  status: 'sending' | 'sent' | 'queued' | 'failed' | 'recalled'
 }
 
 /** 传输状态视图（文件卡片的数据源） */
@@ -254,6 +255,7 @@ export interface PantryApi {
   /** 发文本；超长（>800 字节）或空白返回 null */
   sendText(peerNodeId: string, text: string): Promise<MessageView | null>
   resendMessage(msgId: string): Promise<boolean>
+  recallMessage(msgId: string): Promise<boolean>
   getSettings(): Promise<SettingsView>
   /** 保存资料（向导/设置）：资料有变自动广播刷新全网 */
   saveProfile(submit: ProfileSubmit): Promise<SettingsView>

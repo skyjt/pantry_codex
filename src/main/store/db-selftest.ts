@@ -160,6 +160,13 @@ try {
   )
   msgRepo.updateStatus('m-1', 'sent')
   assert.equal(msgRepo.get('m-1')?.status, 'sent')
+  assert.equal(msgRepo.recall('m-1'), true, '撤回应更新原消息')
+  assert.equal(msgRepo.get('m-1')?.status, 'recalled')
+  assert.equal(msgRepo.get('m-1')?.content, '', '撤回后原正文不再保留在消息行')
+  const recalledHits = db
+    .prepare('SELECT msg_id FROM messages_fts WHERE messages_fts MATCH ?')
+    .all(toFtsQuery('第一条')) as unknown[]
+  assert.equal(recalledHits.length, 0, '撤回后原正文不得继续被 FTS 搜到')
   convRepo.markRead(convId)
   assert.equal(convRepo.get(convId)?.unread, 0)
 

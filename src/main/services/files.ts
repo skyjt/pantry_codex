@@ -566,6 +566,7 @@ export class FilesService extends EventEmitter {
   private applyMsgStatus(msgId: string, status: MessageView['status']): void {
     const row = this.deps.msgRepo.get(msgId)
     if (!row) return
+    if (row.status === 'recalled' && status !== 'recalled') return
     this.deps.msgRepo.updateStatus(msgId, status)
     const event: MsgStatusEvent = { id: msgId, convId: row.conv_id, status }
     this.emit('status', event)

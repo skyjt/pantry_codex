@@ -10,6 +10,7 @@ import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import type { MessageView } from '../../../shared/ipc'
+import { RECALL_WINDOW_MS } from '../../../shared/protocol'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
@@ -24,6 +25,7 @@ const showMembers = ref(false)
 const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
+const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -153,9 +155,43 @@ function onKeydown(event: KeyboardEvent): void {
 
 function statusHint(msg: MessageView): string {
   if (msg.kind === 'file') return '' // 文件卡片自带状态行
+  if (msg.status === 'recalled') return ''
   if (msg.status === 'queued') return '对方上线后自动送达'
   if (msg.status === 'failed') return '发送失败，点击重发'
   return ''
+}
+
+function canCopyMessage(msg: MessageView): boolean {
+  return msg.kind === 'text' && msg.status !== 'recalled'
+}
+
+function canRecallMessage(msg: MessageView): boolean {
+  if (!msg.isMine || msg.kind !== 'text' || msg.status === 'recalled') return false
+  return Date.now() - msg.ts <= RECALL_WINDOW_MS
+}
+
+function openMessageMenu(event: MouseEvent, msg: MessageView): void {
+  if (msg.kind === 'image' || msg.kind === 'sticker') return
+  if (!canCopyMessage(msg) && !canRecallMessage(msg)) return
+  msgMenu.value = { x: event.clientX, y: event.clientY, msg }
+}
+
+async function copySelectedMessage(): Promise<void> {
+  const msg = msgMenu.value?.msg
+  msgMenu.value = null
+  if (!msg || !canCopyMessage(msg)) return
+  try {
+    await navigator.clipboard.writeText(msg.text)
+  } catch {
+    // 浏览器剪贴板不可用时静默失败；不影响撤回等核心流程。
+  }
+}
+
+async function recallSelectedMessage(): Promise<void> {
+  const msg = msgMenu.value?.msg
+  msgMenu.value = null
+  if (!msg || !canRecallMessage(msg)) return
+  await chatStore.recall(msg.id)
 }
 
 const IMG_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']
@@ -220,7 +256,7 @@ async function onDrop(event: DragEvent): Promise<void> {
 </script>
 
 <template>
-  <div class="chat" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
+  <div class="chat" @click="msgMenu = null" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <span class="title">{{ peerName }}</span>
@@ -239,11 +275,19 @@ async function onDrop(event: DragEvent): Promise<void> {
       <div v-if="loadingEarlier" class="sep">加载更早的消息…</div>
       <template v-for="(msg, i) in chatStore.activeMessages" :key="msg.id">
         <div v-if="needSeparator(msg, i)" class="sep">{{ separatorTime(msg.ts) }}</div>
-        <div v-if="isGroup && !msg.isMine" class="sender">{{ senderName(msg) }}</div>
         <div
+          v-if="isGroup && !msg.isMine && msg.kind !== 'system' && msg.status !== 'recalled'"
+          class="sender"
+        >
+          {{ senderName(msg) }}
+        </div>
+        <div v-if="msg.kind === 'system'" class="system-line">{{ msg.text }}</div>
+        <div
+          v-else-if="msg.status !== 'recalled'"
           :id="`msg-${msg.id}`"
           class="row"
           :class="[msg.isMine ? 'mine' : 'peer', { highlight: msg.id === chatStore.highlightId }]"
+          @contextmenu.prevent="openMessageMenu($event, msg)"
         >
           <FileCard v-if="msg.kind === 'file'" :msg="msg" />
           <ImageBubble v-else-if="msg.kind === 'image' || msg.kind === 'sticker'" :msg="msg" />
@@ -281,6 +325,18 @@ async function onDrop(event: DragEvent): Promise<void> {
     <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
       ↓ 回到最新
     </button>
+
+    <div
+      v-if="msgMenu"
+      class="msg-menu"
+      :style="{ left: `${msgMenu.x}px`, top: `${msgMenu.y}px` }"
+      @click.stop
+    >
+      <button v-if="canCopyMessage(msgMenu.msg)" @click="copySelectedMessage">复制</button>
+      <button v-if="canRecallMessage(msgMenu.msg)" class="danger" @click="recallSelectedMessage">
+        撤回
+      </button>
+    </div>
 
     <footer class="input-area">
       <div class="toolbar">
@@ -476,6 +532,12 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--text-3);
   margin: 10px 0 6px;
 }
+.system-line {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 8px 0;
+}
 .row {
   display: flex;
   align-items: flex-end;
@@ -518,6 +580,34 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .status .queued {
   cursor: pointer;
+}
+.msg-menu {
+  position: fixed;
+  min-width: 96px;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  z-index: 20;
+}
+.msg-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  text-align: left;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.msg-menu button:hover {
+  background: var(--line);
+}
+.msg-menu button.danger {
+  color: var(--danger);
 }
 .spin {
   display: inline-block;

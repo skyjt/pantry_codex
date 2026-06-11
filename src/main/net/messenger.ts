@@ -45,6 +45,7 @@ export class Messenger extends EventEmitter {
   private readonly t: Timings
   private readonly pending = new Map<string, PendingEntry>()
   private readonly flushing = new Set<string>()
+  private readonly cancelledQueued = new Set<string>()
 
   constructor(opts: {
     udp: UdpChannel
@@ -73,8 +74,13 @@ export class Messenger extends EventEmitter {
 
   /** 发送用户消息：ACK 确认即 sent；重传耗尽 → 入队 + 对端标离线，返回 queued */
   async sendUserMessage(peerId: string, env: Envelope): Promise<SendOutcome> {
+    const key = this.queueKey(peerId, env.id)
     const acked = await this.sendAwaitAck(peerId, env)
-    if (acked) return 'sent'
+    if (acked) {
+      this.cancelledQueued.delete(key)
+      return 'sent'
+    }
+    if (this.cancelledQueued.delete(key)) return 'queued'
     this.queue.enqueue(env.id, peerId, JSON.stringify(env), Date.now())
     this.registry.markOffline(peerId) // 连发不应 → 立即标离线，不等心跳超时（§6.2）
     return 'queued'
@@ -93,6 +99,8 @@ export class Messenger extends EventEmitter {
     this.flushing.add(peerId)
     try {
       for (const item of this.queue.listByPeer(peerId)) {
+        const key = this.queueKey(peerId, item.msgId)
+        if (this.cancelledQueued.delete(key)) continue
         let env: Envelope
         try {
           env = JSON.parse(item.envelopeJson) as Envelope
@@ -104,6 +112,7 @@ export class Messenger extends EventEmitter {
         const acked = await this.sendAwaitAck(peerId, env)
         if (!acked) break
         this.queue.remove(item.msgId, peerId)
+        this.cancelledQueued.delete(key)
         this.emit('status', item.msgId, 'sent')
       }
     } finally {
@@ -117,11 +126,21 @@ export class Messenger extends EventEmitter {
     return this.queue.prune(this.t.queueTtl, this.t.queueMaxPerPeer)
   }
 
+  /** 上层撤回原消息后，补发队列里不能再保留原文信封。 */
+  dropQueuedMessage(msgId: string, peerIds: string[]): void {
+    for (const peerId of peerIds) {
+      const key = this.queueKey(peerId, msgId)
+      this.cancelledQueued.add(key)
+      this.pending.get(key)?.settle(false)
+      this.queue.remove(msgId, peerId)
+    }
+  }
+
   /** 发送并等待 ACK：按 ackRetrySchedule 退避重发，每次重发都重读对端最新地址。
    *  等待表按 (收件人, 信封 id) 复合键——群消息同一信封并发发往多个成员互不串线（§7.4） */
   private sendAwaitAck(peerId: string, env: Envelope): Promise<boolean> {
     return new Promise((resolve) => {
-      const key = `${peerId}|${env.id}`
+      const key = this.queueKey(peerId, env.id)
       const old = this.pending.get(key)
       old?.settle(false) // 同键重入（手动重发）：先了结旧等待
 
@@ -150,6 +169,10 @@ export class Messenger extends EventEmitter {
       }
       step()
     })
+  }
+
+  private queueKey(peerId: string, msgId: string): string {
+    return `${peerId}|${msgId}`
   }
 
   private handle(env: Envelope, rinfo: RemoteInfo): void {

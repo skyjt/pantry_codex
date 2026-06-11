@@ -132,6 +132,10 @@ export const useChatStore = defineStore('chat', {
       await window.pantry.resendMessage(msgId)
     },
 
+    async recall(msgId: string): Promise<boolean> {
+      return window.pantry.recallMessage(msgId)
+    },
+
     /** 发文件（选择器或拖拽）；对方离线时主进程返回 null（决议 #4） */
     async sendFilePaths(paths: string[]): Promise<boolean> {
       const conv = this.activeConv
