@@ -28,7 +28,12 @@ export const IpcChannels = {
   imgOfferPath: 'img:offer-path',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
-  msgContext: 'msg:context'
+  msgContext: 'msg:context',
+  settingsSaveApp: 'settings:save-app',
+  netAddPeer: 'net:add-peer',
+  netScan: 'net:scan',
+  peersSetRemark: 'peers:set-remark',
+  uiOpenSettings: 'ui:open-settings'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -55,6 +60,8 @@ export interface AppInfo {
 export interface PeerView {
   nodeId: string
   nick: string
+  /** 本地备注名（F-DISC-9），展示时优先于 nick */
+  remark: string
   company: string
   dept: string
   team: string
@@ -165,6 +172,17 @@ export interface SettingsView {
   fileDir: string
   /** 系统默认下载目录（向导第三步展示用） */
   defaultFileDir: string
+  notifications: boolean
+  manualPeers: string[]
+  scanRanges: string[]
+  udpPort: number
+  tcpPort: number
+}
+
+export interface AppSettingsPatch {
+  notifications?: boolean
+  manualPeers?: string[]
+  scanRanges?: string[]
 }
 
 export interface ProfileSubmit {
@@ -217,6 +235,16 @@ export interface PantryApi {
   search(query: string): Promise<SearchResult>
   /** 搜索跳转：取目标 seq 前后窗口（按时间升序），用于会话内定位 */
   getMessageContext(convId: string, seq: number): Promise<MessageView[]>
+  /** 应用级设置（通知/手动节点/扫描网段） */
+  saveAppSettings(patch: AppSettingsPatch): Promise<SettingsView>
+  /** 手动添加节点（"ip" 或 "ip:port"）：持久化 + 立即探测 */
+  addManualPeer(addr: string): Promise<boolean>
+  /** 扫描一个 CIDR 网段；返回探测地址数，非法网段返回 -1 */
+  scanRange(cidr: string): Promise<number>
+  /** 设置联系人本地备注（空串=清除） */
+  setPeerRemark(nodeId: string, remark: string): Promise<void>
+  /** 打开设置窗口 */
+  openSettings(): Promise<void>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void

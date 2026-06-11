@@ -26,7 +26,9 @@ const peer = computed(() => {
   if (!conv) return null
   return peersStore.peers.find((p) => p.nodeId === conv.peerId) ?? null
 })
-const peerName = computed(() => peer.value?.nick ?? '未知节点')
+const peerName = computed(() =>
+  peer.value ? peer.value.remark || peer.value.nick : '未知节点'
+)
 const peerOnline = computed(() => peer.value?.online ?? false)
 
 const draftBytes = computed(() => new TextEncoder().encode(draft.value.trim()).length)

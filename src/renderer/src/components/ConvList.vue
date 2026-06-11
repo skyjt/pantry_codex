@@ -7,11 +7,7 @@ import { listTime } from '../utils/time'
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
 
-const nickOf = computed(() => {
-  const map = new Map<string, string>()
-  for (const peer of peersStore.peers) map.set(peer.nodeId, peer.nick)
-  return (peerId: string): string => map.get(peerId) ?? '未知节点'
-})
+const nickOf = computed(() => peersStore.nameOf) // 备注优先（F-DISC-9）
 
 function avatarText(peerId: string): string {
   return nickOf.value(peerId).slice(0, 1) || '?'

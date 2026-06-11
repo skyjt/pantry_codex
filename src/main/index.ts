@@ -14,8 +14,10 @@ import {
   type SettingsView
 } from '../shared/ipc'
 import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
-import { loadAppState, saveProfile, type AppState } from './store/app-state'
+import { loadAppState, saveAppSettings, saveProfile, type AppState } from './store/app-state'
 import { setupTray } from './windows/tray'
+import { openSettingsWindow } from './windows/settings-window'
+import { parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
 import { FilesService } from './services/files'
 import { SearchService } from './services/search'
@@ -63,6 +65,7 @@ if (!gotLock) {
   const netState: NetState = { ok: false, udpPort, error: '' }
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
+  const remarks = new Map<string, string>()
   let db: AppDatabase | null = null
   let peersRepo: PeersRepo | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
@@ -86,6 +89,7 @@ if (!gotLock) {
     return {
       nodeId: record.profile.nodeId,
       nick: record.profile.nick,
+      remark: remarks.get(record.profile.nodeId) ?? '',
       company: record.profile.company,
       dept: record.profile.dept,
       team: record.profile.team,
@@ -105,9 +109,17 @@ if (!gotLock) {
   async function startNet(): Promise<void> {
     const state = appState
     if (!state) return
+    // 手动节点 = 环境变量（联调用）∪ 设置持久化（F-DISC-2 第一板斧）
+    const allManual: ManualPeer[] = [
+      ...manualPeers,
+      ...state.config.manualPeers.map((item) => {
+        const [host, port] = item.split(':')
+        return { host, port: Number(port) || udpPort }
+      })
+    ]
     const udp = new UdpChannel({ port: udpPort })
     registry = new PeerRegistry(state.nodeId)
-    discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers })
+    discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers: allManual })
 
     // 存储层降级链：文件库 → 内存库（功能照常、不持久）→ 全不可用则只剩发现功能
     try {
@@ -123,6 +135,7 @@ if (!gotLock) {
     if (db) {
       peersRepo = new PeersRepo(db)
       registry.seed(peersRepo.loadAll()) // 历史联系人以离线态回灌（F-DISC-7）
+      for (const [id, remark] of peersRepo.loadRemarks()) remarks.set(id, remark)
 
       const messenger = new Messenger({
         udp,
@@ -178,7 +191,7 @@ if (!gotLock) {
         console.error('[files] TCP 端口监听失败，文件发送可用但无法被拉取：', err)
       }
 
-      search = new SearchService(db, registry)
+      search = new SearchService(db, registry, (id) => remarks.get(id) ?? '')
       msgRepoRef = new MsgRepo(db)
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
       pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
@@ -330,7 +343,12 @@ if (!gotLock) {
       team: c?.team ?? '',
       setupDone: c?.setupDone ?? true,
       fileDir: c?.fileDir ?? '',
-      defaultFileDir: join(app.getPath('downloads'), '茶话间')
+      defaultFileDir: join(app.getPath('downloads'), '茶话间'),
+      notifications: c?.notifications !== false,
+      manualPeers: c?.manualPeers ?? [],
+      scanRanges: c?.scanRanges ?? [],
+      udpPort,
+      tcpPort
     }
   }
 
@@ -446,6 +464,66 @@ if (!gotLock) {
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
     return (await files?.offerPaths(peerId, [path], true)) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.settingsSaveApp, (_event, patch: unknown): SettingsView => {
+    if (appState && typeof patch === 'object' && patch !== null) {
+      const p = patch as Record<string, unknown>
+      const clean: Parameters<typeof saveAppSettings>[1] = {}
+      if (typeof p.notifications === 'boolean') clean.notifications = p.notifications
+      if (Array.isArray(p.manualPeers)) {
+        clean.manualPeers = p.manualPeers
+          .filter((s): s is string => typeof s === 'string')
+          .slice(0, 100)
+      }
+      if (Array.isArray(p.scanRanges)) {
+        clean.scanRanges = p.scanRanges
+          .filter((s): s is string => typeof s === 'string')
+          .slice(0, 20)
+      }
+      saveAppSettings(appState, clean)
+    }
+    return settingsView()
+  })
+
+  const ADDR_RE = /^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?$/
+
+  ipcMain.handle(IpcChannels.netAddPeer, (_event, addr: unknown): boolean => {
+    if (typeof addr !== 'string' || !appState) return false
+    const m = ADDR_RE.exec(addr.trim())
+    if (!m) return false
+    const host = m[1]
+    const port = m[2] ? Number(m[2]) : udpPort
+    if (port < 1 || port > 65535) return false
+    const normalized = m[2] ? `${host}:${port}` : host
+    if (!appState.config.manualPeers.includes(normalized)) {
+      saveAppSettings(appState, {
+        manualPeers: [...appState.config.manualPeers, normalized].slice(0, 100)
+      })
+    }
+    discovery?.probe(host, port) // 立即探测，秒回 alive 即上列表
+    return true
+  })
+
+  ipcMain.handle(IpcChannels.netScan, (_event, cidr: unknown): number => {
+    if (typeof cidr !== 'string' || !discovery) return -1
+    const hosts = parseCidr(cidr)
+    if (!hosts) return -1
+    return discovery.scanHosts(hosts, udpPort)
+  })
+
+  ipcMain.handle(IpcChannels.peersSetRemark, (_event, nodeId: unknown, remark: unknown) => {
+    if (typeof nodeId !== 'string' || nodeId.length === 0 || nodeId.length > 64) return
+    if (typeof remark !== 'string' || remark.length > 32) return
+    const trimmed = remark.trim()
+    peersRepo?.setRemark(nodeId, trimmed)
+    if (trimmed) remarks.set(nodeId, trimmed)
+    else remarks.delete(nodeId)
+    mainWindow?.webContents.send(IpcEvents.peersUpdated, peerViews())
+  })
+
+  ipcMain.handle(IpcChannels.uiOpenSettings, () => {
+    openSettingsWindow(mainWindow)
   })
 
   ipcMain.handle(IpcChannels.searchQuery, (_event, query: unknown) => {

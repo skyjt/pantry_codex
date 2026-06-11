@@ -33,6 +33,8 @@ function toPlatform(value: string): Platform {
 export class PeersRepo {
   private readonly upsertStmt: DatabaseT.Statement
   private readonly selectAllStmt: DatabaseT.Statement
+  private readonly remarkStmt: DatabaseT.Statement
+  private readonly remarksAllStmt: DatabaseT.Statement
   private readonly upsertManyTx: (records: PeerRecord[]) => void
 
   constructor(db: DatabaseT.Database) {
@@ -53,6 +55,15 @@ export class PeersRepo {
     `) // remark 与 first_seen 不被覆盖：备注是本地资产，首次见面时间只写一次
 
     this.selectAllStmt = db.prepare('SELECT * FROM peers ORDER BY last_seen DESC')
+    // 备注是本地资产（F-DISC-9）：节点未入库时也允许先建占位行
+    this.remarkStmt = db.prepare(`
+      INSERT INTO peers (node_id, nick, remark, first_seen, last_seen)
+      VALUES (?, '', ?, 0, 0)
+      ON CONFLICT(node_id) DO UPDATE SET remark = excluded.remark
+    `)
+    this.remarksAllStmt = db.prepare(
+      "SELECT node_id, remark FROM peers WHERE remark IS NOT NULL AND remark != ''"
+    )
 
     this.upsertManyTx = db.transaction((records: PeerRecord[]) => {
       for (const record of records) this.upsertOne(record)
@@ -83,6 +94,15 @@ export class PeersRepo {
 
   upsertMany(records: PeerRecord[]): void {
     if (records.length > 0) this.upsertManyTx(records)
+  }
+
+  setRemark(nodeId: string, remark: string): void {
+    this.remarkStmt.run(nodeId, remark)
+  }
+
+  loadRemarks(): Map<string, string> {
+    const rows = this.remarksAllStmt.all() as Array<{ node_id: string; remark: string }>
+    return new Map(rows.map((r) => [r.node_id, r.remark]))
   }
 
   /** 全量载入为离线记录（在线态由网络层实时判定，不持久化） */

@@ -26,6 +26,10 @@ export interface ConfigFile {
   fileDir: string
   /** 新消息系统通知开关 */
   notifications: boolean
+  /** 手动添加的节点（"ip" 或 "ip:port"），启动时逐个探测（F-DISC-2 第一板斧） */
+  manualPeers: string[]
+  /** 网段扫描 CIDR 列表（F-DISC-2 第二板斧） */
+  scanRanges: string[]
 }
 
 function readJson<T>(path: string): T | null {
@@ -85,6 +89,17 @@ export function saveProfile(state: AppState, patch: ProfilePatch): void {
   profile.profileRev = config.profileRev
 }
 
+/** 保存应用级设置（通知开关 / 手动节点 / 扫描网段），与资料保存互不影响 */
+export function saveAppSettings(
+  state: AppState,
+  patch: Partial<Pick<ConfigFile, 'notifications' | 'manualPeers' | 'scanRanges'>>
+): void {
+  if (patch.notifications !== undefined) state.config.notifications = patch.notifications
+  if (patch.manualPeers !== undefined) state.config.manualPeers = patch.manualPeers
+  if (patch.scanRanges !== undefined) state.config.scanRanges = patch.scanRanges
+  atomicWriteJson(state.configPath, state.config)
+}
+
 export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFAULT_TCP_PORT): AppState {
   const identityPath = join(dataDir, 'identity.json')
   const configPath = join(dataDir, 'config.json')
@@ -112,7 +127,9 @@ export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFA
       profileRev: 1,
       setupDone: false,
       fileDir: '',
-      notifications: true
+      notifications: true,
+      manualPeers: [],
+      scanRanges: []
     }
     atomicWriteJson(configPath, config)
   }
@@ -120,6 +137,12 @@ export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFA
   config.setupDone = config.setupDone === true
   config.fileDir = typeof config.fileDir === 'string' ? config.fileDir : ''
   config.notifications = config.notifications !== false
+  config.manualPeers = Array.isArray(config.manualPeers)
+    ? config.manualPeers.filter((s): s is string => typeof s === 'string')
+    : []
+  config.scanRanges = Array.isArray(config.scanRanges)
+    ? config.scanRanges.filter((s): s is string => typeof s === 'string')
+    : []
 
   const profile: Profile = {
     nodeId: identity.nodeId,

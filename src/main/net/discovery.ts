@@ -172,6 +172,15 @@ export class Discovery {
     return true
   }
 
+  /** 网段定向扫描（F-DISC-2 第二板斧）：错峰单播 entry，≤125 地址/秒；返回扫描地址数 */
+  scanHosts(hosts: string[], port: number): number {
+    hosts.forEach((host, i) => {
+      const timer = setTimeout(() => this.probe(host, port), i * 8)
+      timer.unref?.()
+    })
+    return hosts.length
+  }
+
   private envEntry(): Envelope<ProfilePayload> {
     return makeEnvelope<ProfilePayload>(MSG_TYPES.entry, this.selfId, { profile: this.profile })
   }

@@ -3,6 +3,7 @@ import {
   IpcChannels,
   IpcEvents,
   type AppInfo,
+  type AppSettingsPatch,
   type ConversationView,
   type MessageView,
   type MsgStatusEvent,
@@ -66,6 +67,14 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.searchQuery, query),
   getMessageContext: (convId: string, seq: number): Promise<MessageView[]> =>
     ipcRenderer.invoke(IpcChannels.msgContext, convId, seq),
+  saveAppSettings: (patch: AppSettingsPatch): Promise<SettingsView> =>
+    ipcRenderer.invoke(IpcChannels.settingsSaveApp, patch),
+  addManualPeer: (addr: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.netAddPeer, addr),
+  scanRange: (cidr: string): Promise<number> => ipcRenderer.invoke(IpcChannels.netScan, cidr),
+  setPeerRemark: (nodeId: string, remark: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.peersSetRemark, nodeId, remark),
+  openSettings: (): Promise<void> => ipcRenderer.invoke(IpcChannels.uiOpenSettings),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),

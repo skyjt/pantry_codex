@@ -13,7 +13,8 @@ export class SearchService {
 
   constructor(
     db: DatabaseT.Database,
-    private readonly registry: PeerRegistry
+    private readonly registry: PeerRegistry,
+    private readonly remarkOf: (nodeId: string) => string = () => ''
   ) {
     this.msgGroupStmt = db.prepare(`
       SELECT m.conv_id AS convId, COUNT(*) AS n, MAX(m.seq) AS latestSeq
@@ -45,14 +46,15 @@ export class SearchService {
       .list()
       .filter((r) => {
         const p = r.profile
-        return [p.nick, p.company, p.dept, p.team, p.host, r.ip].some((s) =>
-          s.toLowerCase().includes(needle)
+        return [p.nick, this.remarkOf(p.nodeId), p.company, p.dept, p.team, p.host, r.ip].some(
+          (s) => s.toLowerCase().includes(needle)
         )
       })
       .slice(0, 20)
       .map((r) => ({
         nodeId: r.profile.nodeId,
         nick: r.profile.nick,
+        remark: this.remarkOf(r.profile.nodeId),
         company: r.profile.company,
         dept: r.profile.dept,
         team: r.profile.team,

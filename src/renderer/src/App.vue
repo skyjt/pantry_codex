@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { AppInfo, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
@@ -8,11 +8,32 @@ import ConvList from './components/ConvList.vue'
 import ChatPane from './components/ChatPane.vue'
 import SetupWizard from './components/SetupWizard.vue'
 import SearchPanel from './components/SearchPanel.vue'
+import ProfileCard from './components/ProfileCard.vue'
+import type { PeerView } from '../../shared/ipc'
 
 type Tab = 'chat' | 'contacts'
 
 const tab = ref<Tab>('chat')
 const searchQuery = ref('')
+const selectedPeerId = ref<string | null>(null)
+
+const selectedPeer = computed<PeerView | null>(() =>
+  selectedPeerId.value ? (peersStore.byId(selectedPeerId.value) ?? null) : null
+)
+
+function onSelectPeer(peer: PeerView): void {
+  selectedPeerId.value = peer.nodeId
+}
+
+async function chatWith(nodeId: string): Promise<void> {
+  await chatStore.openPeer(nodeId)
+  selectedPeerId.value = null
+  tab.value = 'chat'
+}
+
+function openSettings(): void {
+  void window.pantry.openSettings()
+}
 const info = ref<AppInfo | null>(null)
 const settings = ref<SettingsView | null>(null)
 const showWizard = ref(false)
@@ -53,7 +74,7 @@ onMounted(async () => {
         👥
       </button>
       <div class="spacer"></div>
-      <button class="rail-btn" title="设置（开发中）">⚙</button>
+      <button class="rail-btn" title="设置" @click="openSettings">⚙</button>
     </nav>
 
     <aside class="list">
@@ -67,11 +88,16 @@ onMounted(async () => {
         @navigate="((searchQuery = ''), (tab = 'chat'))"
       />
       <ConvList v-else-if="tab === 'chat'" />
-      <PeerList v-else @opened="tab = 'chat'" />
+      <PeerList v-else @select="onSelectPeer" />
     </aside>
 
     <main class="content">
-      <ChatPane v-if="chatStore.activeConv" />
+      <ProfileCard
+        v-if="tab === 'contacts' && selectedPeer"
+        :peer="selectedPeer"
+        @chat="chatWith"
+      />
+      <ChatPane v-else-if="chatStore.activeConv" />
       <div v-else class="empty">
         <div class="logo">茶话间</div>
         <p v-if="info" class="meta">

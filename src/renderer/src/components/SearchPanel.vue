@@ -38,11 +38,7 @@ const empty = computed(
     result.value.files.length === 0
 )
 
-const nickOf = computed(() => {
-  const map = new Map<string, string>()
-  for (const peer of peersStore.peers) map.set(peer.nodeId, peer.nick)
-  return (peerId: string): string => map.get(peerId) ?? '未知节点'
-})
+const nickOf = computed(() => peersStore.nameOf) // 备注优先（F-DISC-9）
 
 async function openPeer(nodeId: string): Promise<void> {
   await chatStore.openPeer(nodeId)
