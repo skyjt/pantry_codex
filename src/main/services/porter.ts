@@ -72,6 +72,8 @@ interface GroupDump {
   rev: number
   updatedBy: string
   updatedTs: number
+  creatorIp?: string
+  adminSecretHash?: string
 }
 
 interface StickerDump {
@@ -233,7 +235,8 @@ export class PorterService {
     const rows = this.db
       .prepare(
         `SELECT group_id AS groupId, name, members, rev, updated_by AS updatedBy,
-                updated_ts AS updatedTs
+                updated_ts AS updatedTs, creator_ip AS creatorIp,
+                admin_secret_hash AS adminSecretHash
          FROM groups ORDER BY updated_ts ASC`
       )
       .all() as Array<Omit<GroupDump, 'members'> & { members: string }>
@@ -314,8 +317,10 @@ export class PorterService {
     const updatedBy = group.updatedBy === exportedBy ? this.selfId : group.updatedBy
     this.db
       .prepare(
-        `INSERT INTO groups (group_id, name, members, rev, updated_by, updated_ts)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO groups (
+           group_id, name, members, rev, updated_by, updated_ts, creator_ip, admin_secret_hash
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(group_id) DO UPDATE SET
            name = CASE
              WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
@@ -327,7 +332,13 @@ export class PorterService {
            updated_by = CASE
              WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
              THEN excluded.updated_by ELSE groups.updated_by END,
-           updated_ts = MAX(groups.updated_ts, excluded.updated_ts)`
+           updated_ts = MAX(groups.updated_ts, excluded.updated_ts),
+           creator_ip = CASE
+             WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
+             THEN excluded.creator_ip ELSE groups.creator_ip END,
+           admin_secret_hash = CASE
+             WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
+             THEN excluded.admin_secret_hash ELSE groups.admin_secret_hash END`
       )
       .run(
         group.groupId,
@@ -335,7 +346,9 @@ export class PorterService {
         JSON.stringify([...new Set(members)].filter((id) => id.length > 0).slice(0, 50)),
         Number.isInteger(group.rev) ? group.rev : 1,
         updatedBy,
-        Number.isInteger(group.updatedTs) ? group.updatedTs : Date.now()
+        Number.isInteger(group.updatedTs) ? group.updatedTs : Date.now(),
+        typeof group.creatorIp === 'string' ? group.creatorIp.slice(0, 45) : '',
+        typeof group.adminSecretHash === 'string' ? group.adminSecretHash.slice(0, 64) : ''
       )
   }
 

@@ -99,8 +99,12 @@ const api: PantryApi = {
   setPeerRemark: (nodeId: string, remark: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.peersSetRemark, nodeId, remark),
   openSettings: (): Promise<void> => ipcRenderer.invoke(IpcChannels.uiOpenSettings),
-  createGroup: (name: string, memberIds: string[]): Promise<GroupView | null> =>
-    ipcRenderer.invoke(IpcChannels.groupCreate, name, memberIds),
+  createGroup: (
+    name: string,
+    memberIds: string[],
+    adminPassword?: string
+  ): Promise<GroupView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupCreate, name, memberIds, adminPassword),
   updateGroup: (groupId: string, patch: GroupPatch): Promise<GroupView | null> =>
     ipcRenderer.invoke(IpcChannels.groupUpdate, groupId, patch),
   leaveGroup: (groupId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.groupLeave, groupId),

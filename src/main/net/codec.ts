@@ -133,6 +133,18 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       if (!isInt(meta.rev) || meta.rev < 1) return false
       if (!isStr(meta.updatedBy, LIMITS.from)) return false
       if (!isInt(meta.updatedTs) || meta.updatedTs <= 0) return false
+      if (meta.creatorIp !== undefined && !isStrAllowEmpty(meta.creatorIp, LIMITS.ip)) return false
+      if (
+        meta.adminSecretHash !== undefined &&
+        !(
+          meta.adminSecretHash === '' ||
+          (typeof meta.adminSecretHash === 'string' &&
+            meta.adminSecretHash.length === LIMITS.groupAdminHash &&
+            /^[a-f0-9]+$/.test(meta.adminSecretHash))
+        )
+      ) {
+        return false
+      }
       return true
     }
     case MSG_TYPES.ack: {

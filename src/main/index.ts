@@ -13,7 +13,7 @@ import {
   shell,
   type Tray
 } from 'electron'
-import { release } from 'node:os'
+import { networkInterfaces, release } from 'node:os'
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
@@ -126,6 +126,24 @@ if (!gotLock) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  }
+
+  function mainWindowTitle(): string {
+    const nick = appState?.config.setupDone ? appState.config.nick.trim() : ''
+    return nick ? `${nick}-🍵Pantry` : '茶话间'
+  }
+
+  function updateMainWindowTitle(): void {
+    mainWindow?.setTitle(mainWindowTitle())
+  }
+
+  function currentLocalIpv4(): string {
+    for (const list of Object.values(networkInterfaces())) {
+      for (const addr of list ?? []) {
+        if (addr.family === 'IPv4' && !addr.internal) return addr.address
+      }
+    }
+    return '127.0.0.1'
   }
 
   function toggleMainWindow(): void {
@@ -329,7 +347,8 @@ if (!gotLock) {
         messenger,
         convRepo: new ConvRepo(db),
         msgRepo: new MsgRepo(db),
-        groupRepo: new GroupRepo(db)
+        groupRepo: new GroupRepo(db),
+        getSelfIp: currentLocalIpv4
       })
       groups.on('message', onMessage)
       groups.on('convs', onConvs)
@@ -466,7 +485,7 @@ if (!gotLock) {
       minWidth: 960,
       minHeight: 640,
       show: false,
-      title: '茶话间',
+      title: mainWindowTitle(),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         contextIsolation: true,
@@ -673,6 +692,7 @@ if (!gotLock) {
         )
       }
       discovery?.announceProfile() // 资料变更即时广播（F-DISC-7 的发送侧）
+      updateMainWindowTitle()
       broadcastSettings()
     }
     return settingsView()
@@ -895,19 +915,30 @@ if (!gotLock) {
     openSettingsWindow(mainWindow)
   })
 
-  ipcMain.handle(IpcChannels.groupCreate, (_event, name: unknown, memberIds: unknown) => {
-    if (typeof name !== 'string' || name.length > 32) return null
-    if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 64) return null
-    if (!memberIds.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) return null
-    return groups?.createGroup(name, memberIds as string[]) ?? null
-  })
+  ipcMain.handle(
+    IpcChannels.groupCreate,
+    (_event, name: unknown, memberIds: unknown, adminPassword: unknown) => {
+      if (typeof name !== 'string' || name.length > 32) return null
+      if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 64) {
+        return null
+      }
+      if (!memberIds.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) {
+        return null
+      }
+      const secret = typeof adminPassword === 'string' && adminPassword.length <= 64 ? adminPassword : ''
+      return groups?.createGroup(name, memberIds as string[], secret) ?? null
+    }
+  )
 
   ipcMain.handle(IpcChannels.groupUpdate, (_event, groupId: unknown, patch: unknown) => {
     if (typeof groupId !== 'string' || groupId.length > 64) return null
     if (typeof patch !== 'object' || patch === null) return null
     const p = patch as Record<string, unknown>
-    const clean: { name?: string; add?: string[]; remove?: string[] } = {}
+    const clean: { name?: string; add?: string[]; remove?: string[]; adminPassword?: string } = {}
     if (typeof p.name === 'string' && p.name.length <= 32) clean.name = p.name
+    if (typeof p.adminPassword === 'string' && p.adminPassword.length <= 64) {
+      clean.adminPassword = p.adminPassword
+    }
     const ids = (v: unknown): string[] | undefined =>
       Array.isArray(v) && v.every((m) => typeof m === 'string' && m.length <= 64)
         ? (v as string[]).slice(0, 64)

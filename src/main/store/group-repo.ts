@@ -10,6 +10,8 @@ interface GroupRow {
   rev: number
   updated_by: string
   updated_ts: number
+  creator_ip?: string
+  admin_secret_hash?: string
 }
 
 function rowToMeta(row: GroupRow): GroupMeta {
@@ -26,7 +28,19 @@ function rowToMeta(row: GroupRow): GroupMeta {
     members,
     rev: row.rev,
     updatedBy: row.updated_by,
-    updatedTs: row.updated_ts
+    updatedTs: row.updated_ts,
+    creatorIp: row.creator_ip ?? '',
+    adminSecretHash: row.admin_secret_hash ?? ''
+  }
+}
+
+function normalizeMeta(meta: GroupMeta): GroupMeta {
+  return {
+    ...meta,
+    name: meta.name.slice(0, 64),
+    members: [...new Set(meta.members)].filter((id) => id.length > 0),
+    creatorIp: meta.creatorIp ?? '',
+    adminSecretHash: meta.adminSecretHash ?? ''
   }
 }
 
@@ -37,18 +51,24 @@ export class GroupRepo {
 
   constructor(db: DatabaseT.Database) {
     this.upsertStmt = db.prepare(`
-      INSERT INTO groups (group_id, name, members, rev, updated_by, updated_ts)
-      VALUES (@groupId, @name, @members, @rev, @updatedBy, @updatedTs)
+      INSERT INTO groups (
+        group_id, name, members, rev, updated_by, updated_ts, creator_ip, admin_secret_hash
+      )
+      VALUES (
+        @groupId, @name, @members, @rev, @updatedBy, @updatedTs, @creatorIp, @adminSecretHash
+      )
       ON CONFLICT(group_id) DO UPDATE SET
         name = excluded.name, members = excluded.members, rev = excluded.rev,
-        updated_by = excluded.updated_by, updated_ts = excluded.updated_ts
+        updated_by = excluded.updated_by, updated_ts = excluded.updated_ts,
+        creator_ip = excluded.creator_ip, admin_secret_hash = excluded.admin_secret_hash
     `)
     this.getStmt = db.prepare('SELECT * FROM groups WHERE group_id = ?')
     this.listStmt = db.prepare('SELECT * FROM groups ORDER BY updated_ts DESC')
   }
 
   save(meta: GroupMeta): void {
-    this.upsertStmt.run({ ...meta, members: JSON.stringify(meta.members) })
+    const normalized = normalizeMeta(meta)
+    this.upsertStmt.run({ ...normalized, members: JSON.stringify(normalized.members) })
   }
 
   get(groupId: string): GroupMeta | undefined {

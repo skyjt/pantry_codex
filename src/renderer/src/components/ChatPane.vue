@@ -10,6 +10,7 @@ import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import ForwardDialog from './ForwardDialog.vue'
+import PantryIcon from './PantryIcon.vue'
 import type { MessageView, SettingsView } from '../../../shared/ipc'
 import { RECALL_WINDOW_MS, TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
 
@@ -384,7 +385,7 @@ async function onDrop(event: DragEvent): Promise<void> {
       }}</span>
       <span class="head-spacer"></span>
       <button v-if="isGroup" class="head-btn" title="成员" @click="showMembers = !showMembers">
-        👥
+        <PantryIcon name="users" :size="17" />
       </button>
     </header>
 
@@ -423,15 +424,16 @@ async function onDrop(event: DragEvent): Promise<void> {
             </template>
           </div>
           <span v-if="msg.isMine" class="status">
-            <span v-if="msg.status === 'sending'" class="spin" title="发送中">◌</span>
-            <span v-else-if="msg.status === 'sent'" class="ok" title="已送达">✓</span>
+            <PantryIcon v-if="msg.status === 'sending'" class="spin" name="loader" :size="13" />
+            <PantryIcon v-else-if="msg.status === 'sent'" class="ok" name="check" :size="13" />
             <span
               v-else-if="msg.status === 'queued'"
               class="queued"
               title="对方上线后自动送达"
               @click="chatStore.resend(msg.id)"
-              >🕐</span
             >
+              <PantryIcon name="clock" :size="13" />
+            </span>
             <span v-else class="fail" title="发送失败，点击重发" @click="chatStore.resend(msg.id)"
               >!</span
             >
@@ -451,7 +453,7 @@ async function onDrop(event: DragEvent): Promise<void> {
     </div>
 
     <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
-      ↓ 回到最新
+      <PantryIcon name="chevron-down" :size="14" />回到最新
     </button>
 
     <div
@@ -477,16 +479,18 @@ async function onDrop(event: DragEvent): Promise<void> {
           @close="showEmoji = false"
         />
         <button class="tool" title="表情" :disabled="!canSend" @click="showEmoji = !showEmoji">
-          😊
+          <PantryIcon name="smile" :size="18" />
         </button>
-        <button class="tool" title="截图（Ctrl/Cmd+Alt+A）" @click="window_startCapture">✂</button>
+        <button class="tool" title="截图（Ctrl/Cmd+Alt+A）" @click="window_startCapture">
+          <PantryIcon name="scissors" :size="18" />
+        </button>
         <button
           class="tool"
           title="发送图片"
           :disabled="isGroup || !peerOnline"
           @click="sendImage"
         >
-          🖼
+          <PantryIcon name="image" :size="18" />
         </button>
         <button
           class="tool"
@@ -494,7 +498,7 @@ async function onDrop(event: DragEvent): Promise<void> {
           :disabled="isGroup || !peerOnline"
           @click="sendFiles(false)"
         >
-          📁
+          <PantryIcon name="file" :size="18" />
         </button>
         <button
           class="tool"
@@ -502,7 +506,7 @@ async function onDrop(event: DragEvent): Promise<void> {
           :disabled="isGroup || !peerOnline"
           @click="sendFiles(true)"
         >
-          🗂
+          <PantryIcon name="folder" :size="18" />
         </button>
         <span v-if="isGroup" class="tool-hint">群内文件/图片将在后续版本支持</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
@@ -623,14 +627,21 @@ async function onDrop(event: DragEvent): Promise<void> {
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .tool {
   border: none;
   background: transparent;
-  font-size: 16px;
+  color: var(--text-2);
   cursor: pointer;
-  padding: 2px 6px;
+  width: 30px;
+  height: 28px;
+  padding: 0;
   border-radius: 4px;
+  display: grid;
+  place-items: center;
 }
 .tool:hover:not(:disabled) {
   background: var(--line);
@@ -689,10 +700,14 @@ async function onDrop(event: DragEvent): Promise<void> {
 .head-btn {
   border: none;
   background: transparent;
-  font-size: 15px;
+  color: var(--text-2);
   cursor: pointer;
-  padding: 4px 6px;
+  width: 30px;
+  height: 28px;
+  padding: 0;
   border-radius: 4px;
+  display: grid;
+  place-items: center;
 }
 .head-btn:hover {
   background: var(--line);
@@ -750,6 +765,10 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--text-3);
   flex-shrink: 0;
   margin-bottom: 4px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
 }
 .status .ok {
   color: var(--online);
@@ -762,6 +781,8 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .status .queued {
   cursor: pointer;
+  display: grid;
+  place-items: center;
 }
 .msg-menu {
   position: fixed;

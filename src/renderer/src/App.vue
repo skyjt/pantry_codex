@@ -11,6 +11,7 @@ import SearchPanel from './components/SearchPanel.vue'
 import ProfileCard from './components/ProfileCard.vue'
 import GroupCreator from './components/GroupCreator.vue'
 import MassSender from './components/MassSender.vue'
+import PantryIcon from './components/PantryIcon.vue'
 import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
 import { applyAppearance } from './utils/appearance'
@@ -49,6 +50,11 @@ const peersStore = usePeersStore()
 const chatStore = useChatStore()
 let stopSettings: (() => void) | null = null
 
+function applyWindowTitle(next: SettingsView | null): void {
+  const nick = next?.setupDone ? next.nick.trim() : ''
+  document.title = nick ? `${nick}-🍵Pantry` : '茶话间'
+}
+
 onMounted(async () => {
   void peersStore.init()
   void chatStore.init()
@@ -56,10 +62,12 @@ onMounted(async () => {
   info.value = await window.pantry.getAppInfo()
   settings.value = await window.pantry.getSettings()
   applyAppearance(settings.value)
+  applyWindowTitle(settings.value)
   showWizard.value = settings.value !== null && !settings.value.setupDone
   stopSettings = window.pantry.onSettingsUpdated((next) => {
     settings.value = next
     applyAppearance(next)
+    applyWindowTitle(next)
   })
 })
 
@@ -79,7 +87,7 @@ onUnmounted(() => {
         title="聊天"
         @click="tab = 'chat'"
       >
-        💬
+        <PantryIcon name="chat" :size="19" />
         <span v-if="chatStore.totalUnread > 0" class="rail-badge">{{
           chatStore.totalUnread > 99 ? '99+' : chatStore.totalUnread
         }}</span>
@@ -90,18 +98,29 @@ onUnmounted(() => {
         title="通讯录"
         @click="tab = 'contacts'"
       >
-        👥
+        <PantryIcon name="contacts" :size="19" />
       </button>
       <div class="spacer"></div>
-      <button class="rail-btn" title="设置" @click="openSettings">⚙</button>
+      <button class="rail-btn" title="设置" @click="openSettings">
+        <PantryIcon name="settings" :size="19" />
+      </button>
     </nav>
 
     <aside class="list">
       <div class="search-box">
-        <input v-model="searchQuery" class="search" placeholder="搜索" />
-        <button v-if="searchQuery" class="clear" title="清空" @click="searchQuery = ''">✕</button>
-        <button class="new-group" title="群发消息" @click="showMassSender = true">↗</button>
-        <button class="new-group" title="发起讨论组" @click="showGroupCreator = true">＋</button>
+        <div class="search-field">
+          <PantryIcon class="search-mark" name="search" :size="15" />
+          <input v-model="searchQuery" class="search" placeholder="搜索" />
+          <button v-if="searchQuery" class="clear" title="清空" @click="searchQuery = ''">
+            <PantryIcon name="x" :size="13" />
+          </button>
+        </div>
+        <button class="new-group" title="群发消息" @click="showMassSender = true">
+          <PantryIcon name="send-many" :size="16" />
+        </button>
+        <button class="new-group" title="发起讨论组" @click="showGroupCreator = true">
+          <PantryIcon name="plus" :size="17" />
+        </button>
       </div>
       <GroupCreator v-if="showGroupCreator" @close="showGroupCreator = false" />
       <MassSender v-if="showMassSender" @close="showMassSender = false" />
@@ -168,9 +187,11 @@ onUnmounted(() => {
   border: none;
   border-radius: 8px;
   background: transparent;
-  font-size: 18px;
+  color: rgba(255, 255, 255, 0.92);
   cursor: pointer;
   opacity: 0.7;
+  display: grid;
+  place-items: center;
 }
 .rail-btn.active,
 .rail-btn:hover {
@@ -205,12 +226,24 @@ onUnmounted(() => {
 }
 .search-box {
   padding: 12px 12px 8px;
-  position: relative;
   display: flex;
   gap: 6px;
   align-items: center;
 }
-.search-box .search {
+.search-field {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.search-mark {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.search-field .search {
   flex: 1;
 }
 .new-group {
@@ -220,9 +253,10 @@ onUnmounted(() => {
   border-radius: 4px;
   background: var(--line);
   color: var(--text-2);
-  font-size: 15px;
   cursor: pointer;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
 }
 .new-group:hover {
   background: var(--primary);
@@ -230,13 +264,18 @@ onUnmounted(() => {
 }
 .clear {
   position: absolute;
-  right: 82px;
-  top: 17px;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
   border: none;
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-  font-size: 11px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: grid;
+  place-items: center;
 }
 .search {
   width: 100%;
@@ -244,7 +283,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 4px;
   background: var(--line);
-  padding: 0 8px;
+  padding: 0 26px 0 28px;
   font-size: 13px;
   outline: none;
 }

@@ -5,6 +5,7 @@ import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { listTime } from '../utils/time'
+import PantryIcon from './PantryIcon.vue'
 
 // 全局搜索结果面板（ui-design §6）：联系人 / 聊天记录（按会话聚合）/ 文件，
 // 防抖 200ms；点击聊天记录跳转会话并定位高亮。
@@ -91,7 +92,7 @@ async function openHit(convId: string, seq: number, msgId: string): Promise<void
           class="item"
           @click="openHit(f.convId, f.seq, f.msgId)"
         >
-          <span class="t">📄 {{ f.name }}</span>
+          <span class="t file-title"><PantryIcon name="file" :size="14" />{{ f.name }}</span>
           <span class="s"
             >来自与 {{ convName(f.convId, f.peerId) }} 的聊天
             <i class="time">{{ listTime(f.ts) }}</i></span
@@ -136,6 +137,11 @@ async function openHit(convId: string, seq: number, msgId: string): Promise<void
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.file-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 .off {
   font-style: normal;

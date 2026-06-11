@@ -2,9 +2,10 @@
 import { computed, onMounted } from 'vue'
 import type { MessageView } from '../../../shared/ipc'
 import { fmtBytes, useTransfersStore } from '../stores/transfers'
+import PantryIcon from './PantryIcon.vue'
 
 // 文件消息卡片（ui-design §5）：等待对方接收 → 传输中（进度+速率+取消）
-// → ✓ 已完成（打开所在文件夹）→ ✗ 已取消 / 已拒收 / 失败
+// → 已完成（打开所在文件夹）→ 已取消 / 已拒收 / 失败
 
 const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
@@ -30,7 +31,7 @@ const statusText = computed(() => {
     case 'accepted':
       return `${fmtBytes(t.bytesDone)} / ${fmtBytes(t.totalSize)} · ${fmtBytes(speed.value)}/s`
     case 'done':
-      return '✓ 已完成'
+      return '已完成'
     case 'declined':
       return t.direction === 'out' ? '对方已拒收' : '已拒收'
     case 'canceled':
@@ -47,7 +48,9 @@ onMounted(() => {
 
 <template>
   <div v-if="ref_" class="card" :class="transfer?.status">
-    <div class="icon">{{ ref_.dir ? '📁' : '📄' }}</div>
+    <div class="icon">
+      <PantryIcon :name="ref_.dir ? 'folder' : 'file'" :size="28" />
+    </div>
     <div class="info">
       <div class="name" :title="ref_.name">{{ ref_.name }}</div>
       <div class="meta">
@@ -100,8 +103,12 @@ onMounted(() => {
   gap: 10px;
 }
 .icon {
-  font-size: 28px;
+  color: var(--primary);
   flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
 }
 .info {
   flex: 1;

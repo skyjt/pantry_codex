@@ -4,6 +4,7 @@ import type { ForwardTarget, MessageView } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
 import { useGroupsStore } from '../stores/groups'
 import { useChatStore } from '../stores/chat'
+import PantryIcon from './PantryIcon.vue'
 
 const props = defineProps<{ msg: MessageView }>()
 const emit = defineEmits<{ close: [] }>()
@@ -75,7 +76,7 @@ async function forward(): Promise<void> {
             :checked="picked.has(`group:${g.groupId}`)"
             @change="toggle(`group:${g.groupId}`)"
           />
-          <span class="group-dot">#</span>
+          <span class="group-dot"><PantryIcon name="users" :size="13" /></span>
           <span class="nm">{{ g.name }}</span>
         </label>
         <p v-if="peersStore.peers.length === 0 && (!allowGroup || groups.length === 0)" class="empty">

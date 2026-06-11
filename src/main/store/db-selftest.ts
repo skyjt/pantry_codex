@@ -51,7 +51,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 6, '迁移版本应为 6')
+  assert.equal(db.pragma('user_version', { simple: true }), 7, '迁移版本应为 7')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -266,7 +266,9 @@ try {
     members: ['node-self', 'node-bob'],
     rev: 1,
     updatedBy: 'node-self',
-    updatedTs: 1000
+    updatedTs: 1000,
+    creatorIp: '10.0.0.8',
+    adminSecretHash: 'a'.repeat(64)
   }
   groupRepo.save(meta)
   assert.equal(
@@ -346,6 +348,8 @@ try {
     assert.equal(existsSync(importedSticker.path), true, '恢复后的表情媒体文件应存在')
     const importedGroup = new GroupRepo(db2).get('g-1')
     assert.equal(importedGroup?.name, '新名')
+    assert.equal(importedGroup?.creatorIp, '10.0.0.8')
+    assert.equal(importedGroup?.adminSecretHash, 'a'.repeat(64))
   } finally {
     db2.close()
   }

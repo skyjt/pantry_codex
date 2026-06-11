@@ -6,6 +6,7 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { listTime } from '../utils/time'
 import { avatarText as renderAvatarText } from '../utils/avatar'
+import PantryIcon from './PantryIcon.vue'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
@@ -19,7 +20,6 @@ function convName(conv: ConversationView): string {
 }
 
 function convAvatarText(conv: ConversationView): string {
-  if (conv.type === 'group') return '#'
   const peer = peersStore.byId(conv.peerId)
   return renderAvatarText(peer?.avatar ?? -1, nickOf.value(conv.peerId))
 }
@@ -61,9 +61,10 @@ async function removeConv(): Promise<void> {
         @click="chatStore.openConv(conv.id)"
         @contextmenu.prevent.stop="openMenu($event, conv)"
       >
-        <span class="conv-avatar" :class="{ grp: conv.type === 'group' }">{{
-          convAvatarText(conv)
-        }}</span>
+        <span class="conv-avatar" :class="{ grp: conv.type === 'group' }">
+          <PantryIcon v-if="conv.type === 'group'" name="users" :size="18" />
+          <template v-else>{{ convAvatarText(conv) }}</template>
+        </span>
         <span class="conv-main">
           <span class="row1">
             <span class="conv-name">

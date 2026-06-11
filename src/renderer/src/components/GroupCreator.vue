@@ -11,6 +11,7 @@ const emit = defineEmits<{ close: [] }>()
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
 const name = ref('')
+const adminPassword = ref('')
 const picked = ref(new Set<string>(props.preselect ?? []))
 
 const canCreate = computed(() => picked.value.size >= 1)
@@ -31,7 +32,8 @@ async function create(): Promise<void> {
     .join('、')
   const group = await window.pantry.createGroup(
     name.value.trim() || `${fallback} 的讨论组`,
-    memberIds
+    memberIds,
+    adminPassword.value.trim()
   )
   if (group) {
     await chatStore.openConv(`group:${group.groupId}`)
@@ -45,6 +47,13 @@ async function create(): Promise<void> {
     <div class="dialog">
       <h3>发起讨论组</h3>
       <input v-model="name" class="name" maxlength="32" placeholder="组名（留空自动生成）" />
+      <input
+        v-model="adminPassword"
+        class="name"
+        maxlength="64"
+        type="password"
+        placeholder="管理密码（选填；留空仅创建 IP 可管理）"
+      />
       <div class="pick-list">
         <label v-for="p in peersStore.peers" :key="p.nodeId" class="pick">
           <input type="checkbox" :checked="picked.has(p.nodeId)" @change="toggle(p.nodeId)" />

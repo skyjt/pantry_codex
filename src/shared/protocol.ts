@@ -62,7 +62,10 @@ export const LIMITS = {
   capItem: 16,
   type: 32,
   id: 64,
-  from: 64
+  from: 64,
+  ip: 45,
+  groupAdminPassword: 64,
+  groupAdminHash: 64
 }
 
 export type Platform = 'win' | 'mac' | 'linux'
@@ -167,6 +170,10 @@ export interface GroupMeta {
   rev: number
   updatedBy: string
   updatedTs: number
+  /** 建群时记录的创建端 IPv4；无管理密码时仅该来源 IP 可管理群 */
+  creatorIp: string
+  /** 管理密码摘要；空串表示无密码，密码明文不入库、不入协议 */
+  adminSecretHash: string
 }
 
 export type GroupPayload =

@@ -1,7 +1,9 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import type { RemoteInfo } from 'node:dgram'
 import { EventEmitter } from 'node:events'
 import {
   GROUP_MAX_MEMBERS,
+  LIMITS,
   MSG_TYPES,
   TEXT_TCP_LIMIT,
   type Envelope,
@@ -27,13 +29,17 @@ export interface GroupsDeps {
   convRepo: ConvRepo
   msgRepo: MsgRepo
   groupRepo: GroupRepo
+  /** 当前本机用于“创建 IP 管理”的 IPv4；测试可注入 */
+  getSelfIp?: () => string
 }
+
+type GroupPatch = { name?: string; add?: string[]; remove?: string[]; adminPassword?: string }
 
 export class GroupsService extends EventEmitter {
   constructor(private readonly deps: GroupsDeps) {
     super()
-    deps.messenger.on('incoming', (env: Envelope) => {
-      if (env.type === MSG_TYPES.group) this.onGroupCtl(env)
+    deps.messenger.on('incoming', (env: Envelope, rinfo?: RemoteInfo) => {
+      if (env.type === MSG_TYPES.group) this.onGroupCtl(env, rinfo)
       else if (env.type === MSG_TYPES.msg) this.onIncomingMsg(env)
     })
   }
@@ -46,7 +52,10 @@ export class GroupsService extends EventEmitter {
       name: meta.name,
       members: meta.members,
       rev: meta.rev,
-      amMember: meta.members.includes(this.deps.selfId)
+      amMember: meta.members.includes(this.deps.selfId),
+      creatorIp: meta.creatorIp,
+      hasAdminPassword: meta.adminSecretHash.length > 0,
+      canManage: this.canManageWithoutPassword(meta)
     }
   }
 
@@ -61,16 +70,20 @@ export class GroupsService extends EventEmitter {
 
   // ---------- 建群 / 改群 / 退群 ----------
 
-  createGroup(name: string, memberIds: string[]): GroupView | null {
+  createGroup(name: string, memberIds: string[], adminPassword = ''): GroupView | null {
     const members = [...new Set([this.deps.selfId, ...memberIds])].slice(0, GROUP_MAX_MEMBERS)
     if (members.length < 2) return null
+    const groupId = randomUUID()
+    const secret = normalizeAdminPassword(adminPassword)
     const meta: GroupMeta = {
-      groupId: randomUUID(),
+      groupId,
       name: name.trim().slice(0, 32) || '讨论组',
       members,
       rev: 1,
       updatedBy: this.deps.selfId,
-      updatedTs: Date.now()
+      updatedTs: Date.now(),
+      creatorIp: this.selfIp(),
+      adminSecretHash: secret ? groupAdminSecretHash(groupId, secret) : ''
     }
     this.deps.groupRepo.save(meta)
     this.deps.convRepo.ensureGroup(meta.groupId)
@@ -80,13 +93,11 @@ export class GroupsService extends EventEmitter {
     return this.toView(meta)
   }
 
-  /** 任何成员可改名/增删人（需求 F-MSG-4：建群者无特权） */
-  updateGroup(
-    groupId: string,
-    patch: { name?: string; add?: string[]; remove?: string[] }
-  ): GroupView | null {
+  /** 改名/增删人按决议 #27 校验：管理密码或创建 IP。 */
+  updateGroup(groupId: string, patch: GroupPatch): GroupView | null {
     const meta = this.deps.groupRepo.get(groupId)
     if (!meta || !meta.members.includes(this.deps.selfId)) return null
+    if (!this.canManage(meta, patch.adminPassword)) return null
 
     const oldMembers = meta.members
     let members = [...meta.members]
@@ -112,7 +123,21 @@ export class GroupsService extends EventEmitter {
   }
 
   leaveGroup(groupId: string): void {
-    this.updateGroup(groupId, { remove: [this.deps.selfId] })
+    const meta = this.deps.groupRepo.get(groupId)
+    if (!meta || !meta.members.includes(this.deps.selfId)) return
+    const members = meta.members.filter((id) => id !== this.deps.selfId)
+    if (members.length === meta.members.length) return
+    const next: GroupMeta = {
+      ...meta,
+      members,
+      rev: meta.rev + 1,
+      updatedBy: this.deps.selfId,
+      updatedTs: Date.now()
+    }
+    this.deps.groupRepo.save(next)
+    this.broadcastInfo(next, meta.members)
+    this.emitConvs()
+    this.emit('group', this.toView(next))
   }
 
   // ---------- 群消息 ----------
@@ -201,14 +226,17 @@ export class GroupsService extends EventEmitter {
     }
   }
 
-  private onGroupCtl(env: Envelope): void {
+  private onGroupCtl(env: Envelope, rinfo?: RemoteInfo): void {
     const payload = env.payload as GroupPayload
     if (payload.op === 'info') {
-      const applied = this.deps.groupRepo.applyRemote(payload.group)
+      const incoming = normalizeGroupMeta(payload.group)
+      const local = this.deps.groupRepo.get(incoming.groupId)
+      if (!this.canApplyRemoteInfo(local, incoming, rinfo?.address)) return
+      const applied = this.deps.groupRepo.applyRemote(incoming)
       if (applied) {
-        this.deps.convRepo.ensureGroup(payload.group.groupId)
+        this.deps.convRepo.ensureGroup(incoming.groupId)
         this.emitConvs()
-        this.emit('group', this.toView(payload.group))
+        this.emit('group', this.toView(incoming))
       }
       return
     }
@@ -241,4 +269,63 @@ export class GroupsService extends EventEmitter {
   private emitConvs(): void {
     this.emit('convs', this.deps.convRepo.list().map(convRowToView))
   }
+
+  private selfIp(): string {
+    return this.deps.getSelfIp?.() ?? '127.0.0.1'
+  }
+
+  private canManageWithoutPassword(meta: GroupMeta): boolean {
+    if (!meta.members.includes(this.deps.selfId)) return false
+    if (meta.adminSecretHash) return false
+    return !meta.creatorIp || meta.creatorIp === this.selfIp()
+  }
+
+  private canManage(meta: GroupMeta, adminPassword?: string): boolean {
+    if (!meta.members.includes(this.deps.selfId)) return false
+    if (!meta.adminSecretHash) return !meta.creatorIp || meta.creatorIp === this.selfIp()
+    const secret = normalizeAdminPassword(adminPassword ?? '')
+    return secret.length > 0 && groupAdminSecretHash(meta.groupId, secret) === meta.adminSecretHash
+  }
+
+  private canApplyRemoteInfo(
+    local: GroupMeta | undefined,
+    incoming: GroupMeta,
+    sourceIp: string | undefined
+  ): boolean {
+    if (!local) return true
+    if (isSelfLeave(local, incoming)) return true
+    if (local.adminSecretHash) return incoming.adminSecretHash === local.adminSecretHash
+    if (!local.creatorIp) return true // 兼容 v7 前创建的旧组
+    return sourceIp === local.creatorIp
+  }
+}
+
+function normalizeAdminPassword(raw: string): string {
+  return raw.trim().slice(0, LIMITS.groupAdminPassword)
+}
+
+function groupAdminSecretHash(groupId: string, password: string): string {
+  return createHash('sha256').update(`${groupId}\n${password}`).digest('hex')
+}
+
+function normalizeGroupMeta(meta: GroupMeta): GroupMeta {
+  const raw = meta as GroupMeta & { creatorIp?: unknown; adminSecretHash?: unknown }
+  return {
+    ...meta,
+    creatorIp: typeof raw.creatorIp === 'string' ? raw.creatorIp : '',
+    adminSecretHash: typeof raw.adminSecretHash === 'string' ? raw.adminSecretHash : ''
+  }
+}
+
+function isSelfLeave(local: GroupMeta, incoming: GroupMeta): boolean {
+  const removed = local.members.filter((id) => !incoming.members.includes(id))
+  const added = incoming.members.filter((id) => !local.members.includes(id))
+  return (
+    removed.length === 1 &&
+    removed[0] === incoming.updatedBy &&
+    added.length === 0 &&
+    incoming.name === local.name &&
+    incoming.creatorIp === local.creatorIp &&
+    incoming.adminSecretHash === local.adminSecretHash
+  )
 }

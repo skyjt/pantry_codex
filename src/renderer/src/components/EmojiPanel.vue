@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useStickersStore } from '../stores/stickers'
+import PantryIcon from './PantryIcon.vue'
 
 // 表情面板双页签（ui-design §5）：emoji / 我的表情包。
 // Win7 的 twemoji 图片替换方案（tech-design §7）留待 Win7 VM 冒烟时落地。
@@ -30,8 +31,12 @@ const EMOJIS: string[] = [
 <template>
   <div class="panel" @mouseleave="emit('close')">
     <div class="tabs">
-      <button :class="{ on: tab === 'emoji' }" @click="tab = 'emoji'">😊 表情</button>
-      <button :class="{ on: tab === 'sticker' }" @click="tab = 'sticker'">🖼 表情包</button>
+      <button :class="{ on: tab === 'emoji' }" @click="tab = 'emoji'">
+        <PantryIcon name="smile" :size="15" />表情
+      </button>
+      <button :class="{ on: tab === 'sticker' }" @click="tab = 'sticker'">
+        <PantryIcon name="sticker" :size="15" />表情包
+      </button>
     </div>
 
     <div v-if="tab === 'emoji'" class="grid emoji-grid">
@@ -50,8 +55,12 @@ const EMOJIS: string[] = [
       >
         <img :src="`pantry-sticker://${s.id}`" alt="表情" />
         <span class="stk-actions" @click.stop>
-          <button :disabled="index === 0" @click="stickers.move(s.id, -1)">↑</button>
-          <button :disabled="index === stickers.list.length - 1" @click="stickers.move(s.id, 1)">↓</button>
+          <button :disabled="index === 0" @click="stickers.move(s.id, -1)">
+            <PantryIcon name="chevron-up" :size="12" />
+          </button>
+          <button :disabled="index === stickers.list.length - 1" @click="stickers.move(s.id, 1)">
+            <PantryIcon name="chevron-down" :size="12" />
+          </button>
         </span>
       </div>
       <p v-if="stickers.list.length === 0" class="empty">
@@ -86,6 +95,10 @@ const EMOJIS: string[] = [
   padding: 8px 0;
   cursor: pointer;
   color: var(--text-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 .tabs button.on {
   color: var(--primary);
@@ -155,8 +168,10 @@ const EMOJIS: string[] = [
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 11px;
   cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
 }
 .stk-actions button:disabled {
   opacity: 0.35;

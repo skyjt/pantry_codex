@@ -11,6 +11,7 @@ import type {
 import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT } from '../../shared/protocol'
 import { applyAppearance } from './utils/appearance'
 import { BUILTIN_AVATARS, avatarText } from './utils/avatar'
+import PantryIcon from './components/PantryIcon.vue'
 
 // 设置独立小窗（ui-design §8）：P1 起按 8 组完整承载本地设置。
 
@@ -511,7 +512,10 @@ async function removeRange(cidr: string): Promise<void> {
         </div>
         <ul class="chips">
           <li v-for="p in settings?.manualPeers ?? []" :key="p">
-            {{ p }} <button class="x" @click="removePeer(p)">✕</button>
+            {{ p }}
+            <button class="x icon-only" title="移除" @click="removePeer(p)">
+              <PantryIcon name="x" :size="13" />
+            </button>
           </li>
         </ul>
 
@@ -523,8 +527,12 @@ async function removeRange(cidr: string): Promise<void> {
         <ul class="chips">
           <li v-for="r in settings?.scanRanges ?? []" :key="r">
             {{ r }}
-            <button class="x" title="再次扫描" @click="rescan(r)">↻</button>
-            <button class="x" @click="removeRange(r)">✕</button>
+            <button class="x icon-only" title="再次扫描" @click="rescan(r)">
+              <PantryIcon name="refresh" :size="13" />
+            </button>
+            <button class="x icon-only" title="移除" @click="removeRange(r)">
+              <PantryIcon name="x" :size="13" />
+            </button>
           </li>
         </ul>
         <p class="tip">{{ scanTip }}</p>
@@ -784,6 +792,13 @@ h3 {
   color: var(--text-3);
   cursor: pointer;
   font-size: 11px;
+}
+.x.icon-only {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
 }
 .x:disabled {
   opacity: 0.4;

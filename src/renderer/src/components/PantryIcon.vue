@@ -1,0 +1,139 @@
+<script setup lang="ts">
+withDefaults(
+  defineProps<{
+    name: string
+    size?: number
+  }>(),
+  { size: 18 }
+)
+</script>
+
+<template>
+  <svg
+    class="pantry-icon"
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+  >
+    <g v-if="name === 'chat'">
+      <path d="M5 6.5h14v8.8H9.4L5 18.2V6.5Z" />
+      <path d="M8.5 10h7" />
+      <path d="M8.5 13h4.8" />
+    </g>
+    <g v-else-if="name === 'contacts' || name === 'users'">
+      <path d="M8.2 11.2a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M3.5 19.1c.6-3.1 2.2-4.7 4.7-4.7s4.1 1.6 4.7 4.7" />
+      <path d="M15.6 10.8a2.5 2.5 0 1 0 0-5" />
+      <path d="M14.6 14.6c2.7.3 4.6 1.7 5.1 4.5" />
+    </g>
+    <g v-else-if="name === 'settings'">
+      <path d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" />
+      <path d="M12 3.6v2.1" />
+      <path d="M12 18.3v2.1" />
+      <path d="m5.9 5.9 1.5 1.5" />
+      <path d="m16.6 16.6 1.5 1.5" />
+      <path d="M3.6 12h2.1" />
+      <path d="M18.3 12h2.1" />
+      <path d="m5.9 18.1 1.5-1.5" />
+      <path d="m16.6 7.4 1.5-1.5" />
+    </g>
+    <g v-else-if="name === 'search'">
+      <circle cx="10.5" cy="10.5" r="5.2" />
+      <path d="m14.4 14.4 4.1 4.1" />
+    </g>
+    <g v-else-if="name === 'x'">
+      <path d="m7 7 10 10" />
+      <path d="m17 7-10 10" />
+    </g>
+    <g v-else-if="name === 'plus'">
+      <path d="M12 5.5v13" />
+      <path d="M5.5 12h13" />
+    </g>
+    <g v-else-if="name === 'send-many'">
+      <path d="M4.5 17.5 19 5.5l-4.2 13-3.4-5.1-5.8-1.3Z" />
+      <path d="m11.4 13.4 3.6-3.6" />
+    </g>
+    <g v-else-if="name === 'smile'">
+      <circle cx="12" cy="12" r="7.2" />
+      <path d="M8.8 10h.1" />
+      <path d="M15.1 10h.1" />
+      <path d="M8.8 14.1c1.8 1.7 4.6 1.7 6.4 0" />
+    </g>
+    <g v-else-if="name === 'sticker'">
+      <path d="M6 5h12v8.4L13.4 18H6V5Z" />
+      <path d="M13.4 18v-4.6H18" />
+      <path d="M9 9.2h.1" />
+      <path d="M14.8 9.2h.1" />
+      <path d="M9.3 12.5c1.5 1.1 3.9 1.1 5.4 0" />
+    </g>
+    <g v-else-if="name === 'scissors'">
+      <circle cx="6.6" cy="7.2" r="2.1" />
+      <circle cx="6.6" cy="16.8" r="2.1" />
+      <path d="M8.5 8.2 18 17" />
+      <path d="M8.5 15.8 18 7" />
+    </g>
+    <g v-else-if="name === 'image'">
+      <rect x="4.5" y="5.5" width="15" height="13" rx="2" />
+      <path d="m6.8 16 4-4 3 3 2-2 3 3" />
+      <circle cx="15.8" cy="9.2" r="1" />
+    </g>
+    <g v-else-if="name === 'file' || name === 'document'">
+      <path d="M7 4.5h6.5L17 8v11.5H7V4.5Z" />
+      <path d="M13.5 4.5V8H17" />
+      <path d="M9.4 12h5.2" />
+      <path d="M9.4 15h4" />
+    </g>
+    <g v-else-if="name === 'folder'">
+      <path d="M4.5 8h6l1.5 2h7.5v8.5h-15V8Z" />
+      <path d="M4.5 8V6.5h5.1l1.4 1.5" />
+    </g>
+    <g v-else-if="name === 'folder-tree'">
+      <path d="M4.5 8h6l1.5 2h7.5v7.8h-15V8Z" />
+      <path d="M8 12h8" />
+      <path d="M8 15h5" />
+    </g>
+    <g v-else-if="name === 'check'">
+      <path d="m5.5 12.4 4.2 4.1 8.8-9" />
+    </g>
+    <g v-else-if="name === 'clock'">
+      <circle cx="12" cy="12" r="7.4" />
+      <path d="M12 7.8v4.6l3 1.8" />
+    </g>
+    <g v-else-if="name === 'loader'">
+      <path d="M12 4.6a7.4 7.4 0 0 1 7.4 7.4" />
+      <path d="M12 19.4a7.4 7.4 0 0 1-7.4-7.4" />
+    </g>
+    <g v-else-if="name === 'edit'">
+      <path d="M5.5 17.8 6.4 14l8-8 3.2 3.2-8 8-4.1.6Z" />
+      <path d="m12.9 7.5 3.2 3.2" />
+    </g>
+    <g v-else-if="name === 'refresh'">
+      <path d="M17.8 9.4A6.3 6.3 0 0 0 6.2 8" />
+      <path d="M17.8 5.8v3.6h-3.6" />
+      <path d="M6.2 14.6A6.3 6.3 0 0 0 17.8 16" />
+      <path d="M6.2 18.2v-3.6h3.6" />
+    </g>
+    <g v-else-if="name === 'chevron-up'">
+      <path d="m7 14 5-5 5 5" />
+    </g>
+    <g v-else-if="name === 'chevron-down'">
+      <path d="m7 10 5 5 5-5" />
+    </g>
+    <g v-else>
+      <circle cx="12" cy="12" r="7" />
+    </g>
+  </svg>
+</template>
+
+<style scoped>
+.pantry-icon {
+  display: block;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+</style>

@@ -201,12 +201,18 @@ export interface GroupView {
   members: string[]
   rev: number
   amMember: boolean
+  creatorIp: string
+  hasAdminPassword: boolean
+  /** 当前本机是否可不输入密码直接管理（无密码组的创建 IP） */
+  canManage: boolean
 }
 
 export interface GroupPatch {
   name?: string
   add?: string[]
   remove?: string[]
+  /** 有管理密码的组执行改名/增删成员时传入；不持久化 */
+  adminPassword?: string
 }
 
 /** 全局搜索（ui-design §6）：联系人 / 聊天记录（按会话聚合）/ 文件 */
@@ -363,9 +369,9 @@ export interface PantryApi {
   setPeerRemark(nodeId: string, remark: string): Promise<void>
   /** 打开设置窗口 */
   openSettings(): Promise<void>
-  /** 建讨论组（自动含自己，≥2 人）；返回 null 表示参数不足 */
-  createGroup(name: string, memberIds: string[]): Promise<GroupView | null>
-  /** 改名/增删成员（任何成员可操作） */
+  /** 建讨论组（自动含自己，≥2 人）；adminPassword 可空；返回 null 表示参数不足 */
+  createGroup(name: string, memberIds: string[], adminPassword?: string): Promise<GroupView | null>
+  /** 改名/增删成员；按创建 IP 或管理密码校验 */
   updateGroup(groupId: string, patch: GroupPatch): Promise<GroupView | null>
   leaveGroup(groupId: string): Promise<void>
   getGroup(groupId: string): Promise<GroupView | null>
