@@ -14,6 +14,8 @@ import { QueueRepo } from './queue-repo'
 import { DedupRepo } from './dedup-repo'
 import { TransferRepo } from './transfer-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
+import { SearchService } from '../services/search'
+import { PeerRegistry } from '../net/peer-registry'
 import type { PeerRecord } from '../net/peer-registry'
 
 function makePeer(name: string, rev = 1): PeerRecord {
@@ -215,7 +217,31 @@ try {
   assert.equal(transferRepo.resetActive(), 1, '残留进行中传输启动置失败')
   assert.equal(transferRepo.get('t-1')?.status, 'failed')
 
-  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/中文FTS 全部通过')
+  // 9. 全局搜索：聊天记录聚合 + 文件命中 + 上下文窗口
+  const registry = new PeerRegistry('node-self')
+  registry.seed([makePeer('alice')])
+  const searchSvc = new SearchService(db, registry)
+  msgRepo.insert({
+    id: 'm-f1',
+    convId,
+    senderId: 'node-bob',
+    isMine: false,
+    kind: 'file',
+    content: '[文件] 需求文档v3.docx',
+    ts: 4000,
+    status: 'sent'
+  })
+  const sr = searchSvc.query('文档')
+  assert.ok(sr.messageGroups.length >= 1, '聊天记录应有聚合命中')
+  assert.equal(sr.messageGroups[0].convId, 'conv-1', '命中应来自含「文档」的会话')
+  assert.ok(sr.files.some((f) => f.name === '需求文档v3.docx'), '文件名应命中')
+  assert.equal(searchSvc.query('alice').peers.length, 1, '联系人按昵称命中')
+  assert.equal(searchSvc.query('   ').messageGroups.length, 0, '空查询返回空')
+
+  const ctx = msgRepo.around(convId, 2, 25)
+  assert.ok(ctx.some((m) => m.id === 'm-2'), '上下文窗口应包含目标')
+
+  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/中文FTS 全部通过')
 } finally {
   db.close()
   rmSync(dir, { recursive: true, force: true })

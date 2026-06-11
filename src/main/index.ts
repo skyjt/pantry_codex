@@ -18,10 +18,11 @@ import { loadAppState, saveProfile, type AppState } from './store/app-state'
 import { setupTray } from './windows/tray'
 import { TransferRepo } from './store/transfer-repo'
 import { FilesService } from './services/files'
+import { SearchService } from './services/search'
 import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
 import { ConvRepo } from './store/conv-repo'
-import { MsgRepo } from './store/msg-repo'
+import { MsgRepo, msgRowToView } from './store/msg-repo'
 import { QueueRepo } from './store/queue-repo'
 import { DedupRepo } from './store/dedup-repo'
 import { UdpChannel } from './net/udp'
@@ -67,6 +68,8 @@ if (!gotLock) {
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let chat: ChatService | null = null
   let files: FilesService | null = null
+  let search: SearchService | null = null
+  let msgRepoRef: MsgRepo | null = null
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   let appState: AppState | null = null
   let tray: Tray | null = null
@@ -174,6 +177,9 @@ if (!gotLock) {
       } catch (err) {
         console.error('[files] TCP 端口监听失败，文件发送可用但无法被拉取：', err)
       }
+
+      search = new SearchService(db, registry)
+      msgRepoRef = new MsgRepo(db)
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
       pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
       pruneTimer.unref?.()
@@ -440,6 +446,19 @@ if (!gotLock) {
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
     return (await files?.offerPaths(peerId, [path], true)) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.searchQuery, (_event, query: unknown) => {
+    if (typeof query !== 'string' || query.length > 64 || !search) {
+      return { peers: [], messageGroups: [], files: [] }
+    }
+    return search.query(query)
+  })
+
+  ipcMain.handle(IpcChannels.msgContext, (_event, convId: unknown, seq: unknown) => {
+    if (typeof convId !== 'string' || convId.length > 128 || !msgRepoRef) return []
+    if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) return []
+    return msgRepoRef.around(convId, seq, 25).map(msgRowToView)
   })
 
   ipcMain.handle(IpcChannels.imgSaveAs, async (_event, transferId: unknown): Promise<boolean> => {

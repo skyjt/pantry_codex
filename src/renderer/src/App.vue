@@ -7,10 +7,12 @@ import PeerList from './components/PeerList.vue'
 import ConvList from './components/ConvList.vue'
 import ChatPane from './components/ChatPane.vue'
 import SetupWizard from './components/SetupWizard.vue'
+import SearchPanel from './components/SearchPanel.vue'
 
 type Tab = 'chat' | 'contacts'
 
 const tab = ref<Tab>('chat')
+const searchQuery = ref('')
 const info = ref<AppInfo | null>(null)
 const settings = ref<SettingsView | null>(null)
 const showWizard = ref(false)
@@ -55,8 +57,16 @@ onMounted(async () => {
     </nav>
 
     <aside class="list">
-      <div class="search-box"><input class="search" placeholder="搜索" disabled /></div>
-      <ConvList v-if="tab === 'chat'" />
+      <div class="search-box">
+        <input v-model="searchQuery" class="search" placeholder="搜索" />
+        <button v-if="searchQuery" class="clear" title="清空" @click="searchQuery = ''">✕</button>
+      </div>
+      <SearchPanel
+        v-if="searchQuery.trim()"
+        :query="searchQuery.trim()"
+        @navigate="((searchQuery = ''), (tab = 'chat'))"
+      />
+      <ConvList v-else-if="tab === 'chat'" />
       <PeerList v-else @opened="tab = 'chat'" />
     </aside>
 
@@ -145,6 +155,17 @@ onMounted(async () => {
 }
 .search-box {
   padding: 12px 12px 8px;
+  position: relative;
+}
+.clear {
+  position: absolute;
+  right: 18px;
+  top: 17px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 11px;
 }
 .search {
   width: 100%;

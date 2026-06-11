@@ -10,6 +10,7 @@ import {
   type PantryApi,
   type PeerView,
   type ProfileSubmit,
+  type SearchResult,
   type SettingsView,
   type TransferView
 } from '../shared/ipc'
@@ -61,6 +62,10 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.imgOfferPath, peerNodeId, path),
   saveImageAs: (transferId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.imgSaveAs, transferId),
+  search: (query: string): Promise<SearchResult> =>
+    ipcRenderer.invoke(IpcChannels.searchQuery, query),
+  getMessageContext: (convId: string, seq: number): Promise<MessageView[]> =>
+    ipcRenderer.invoke(IpcChannels.msgContext, convId, seq),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),

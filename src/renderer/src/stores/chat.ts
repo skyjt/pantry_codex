@@ -8,6 +8,10 @@ export const useChatStore = defineStore('chat', {
     activeConvId: null as string | null,
     /** convId → 已加载消息（按 seq 升序） */
     messages: {} as Record<string, MessageView[]>,
+    /** 搜索跳转后的高亮目标（短暂） */
+    highlightId: null as string | null,
+    /** 正在查看历史窗口（非最新页）——显示"回到最新"按钮 */
+    viewingHistory: false,
     initialized: false
   }),
   getters: {
@@ -51,9 +55,30 @@ export const useChatStore = defineStore('chat', {
       const conv = await window.pantry.openConversation(peerNodeId)
       if (!conv) return
       this.activeConvId = conv.id
+      this.viewingHistory = false
       if (!this.messages[conv.id]) {
         this.messages[conv.id] = await window.pantry.pageMessages(conv.id, null, 50)
       }
+    },
+
+    /** 搜索结果跳转：载入目标前后窗口并短暂高亮（ui-design §6） */
+    async jumpToMessage(peerId: string, seq: number, msgId: string): Promise<void> {
+      const conv = await window.pantry.openConversation(peerId)
+      if (!conv) return
+      this.activeConvId = conv.id
+      this.messages[conv.id] = await window.pantry.getMessageContext(conv.id, seq)
+      this.viewingHistory = true
+      this.highlightId = msgId || null
+      setTimeout(() => {
+        if (this.highlightId === msgId) this.highlightId = null
+      }, 2600)
+    },
+
+    async backToLatest(): Promise<void> {
+      const convId = this.activeConvId
+      if (!convId) return
+      this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
+      this.viewingHistory = false
     },
 
     async loadEarlier(): Promise<number> {

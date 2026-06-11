@@ -58,6 +58,7 @@ export class MsgRepo {
   private readonly nextSeqStmt: DatabaseT.Statement
   private readonly pageStmt: DatabaseT.Statement
   private readonly pageFirstStmt: DatabaseT.Statement
+  private readonly aroundStmt: DatabaseT.Statement
   private readonly statusStmt: DatabaseT.Statement
   private readonly getStmt: DatabaseT.Statement
   private readonly resetSendingStmt: DatabaseT.Statement
@@ -74,6 +75,9 @@ export class MsgRepo {
     )
     this.pageFirstStmt = db.prepare(
       'SELECT * FROM messages WHERE conv_id = ? ORDER BY seq DESC LIMIT ?'
+    )
+    this.aroundStmt = db.prepare(
+      'SELECT * FROM messages WHERE conv_id = ? AND seq BETWEEN ? AND ? ORDER BY seq ASC'
     )
     this.statusStmt = db.prepare('UPDATE messages SET status = ? WHERE id = ?')
     this.getStmt = db.prepare('SELECT * FROM messages WHERE id = ?')
@@ -102,6 +106,12 @@ export class MsgRepo {
     const tokens = toFtsTokens(msg.content)
     if (tokens) this.insertFtsStmt.run(msg.id, tokens)
     return true
+  }
+
+  /** 搜索跳转用：取目标 seq 前后各 radius 条（含自身），按 seq 升序 */
+  around(convId: string, seq: number, radius: number): MsgRow[] {
+    const rows = this.aroundStmt.all(convId, seq - radius, seq + radius) as MsgRow[]
+    return rows
   }
 
   /** 倒序游标分页：beforeSeq 为 null 取最新一页；返回按 seq 升序（直接渲染） */

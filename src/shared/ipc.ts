@@ -26,7 +26,9 @@ export const IpcChannels = {
   transferGet: 'transfer:get',
   imgSendBytes: 'img:send-bytes',
   imgOfferPath: 'img:offer-path',
-  imgSaveAs: 'img:save-as'
+  imgSaveAs: 'img:save-as',
+  searchQuery: 'search:query',
+  msgContext: 'msg:context'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -126,6 +128,32 @@ export interface MsgStatusEvent {
   status: MessageView['status']
 }
 
+/** 全局搜索（ui-design §6）：联系人 / 聊天记录（按会话聚合）/ 文件 */
+export interface MessageGroupHit {
+  convId: string
+  peerId: string
+  count: number
+  snippet: string
+  latestSeq: number
+  latestMsgId: string
+  ts: number
+}
+
+export interface FileHit {
+  msgId: string
+  convId: string
+  peerId: string
+  name: string
+  ts: number
+  seq: number
+}
+
+export interface SearchResult {
+  peers: PeerView[]
+  messageGroups: MessageGroupHit[]
+  files: FileHit[]
+}
+
 /** 我的资料 + 首启向导状态（F-SYS-6） */
 export interface SettingsView {
   nick: string
@@ -185,6 +213,10 @@ export interface PantryApi {
   offerImagePath(peerNodeId: string, path: string): Promise<MessageView | null>
   /** 大图查看器"另存为" */
   saveImageAs(transferId: string): Promise<boolean>
+  /** 全局搜索（防抖在渲染层做） */
+  search(query: string): Promise<SearchResult>
+  /** 搜索跳转：取目标 seq 前后窗口（按时间升序），用于会话内定位 */
+  getMessageContext(convId: string, seq: number): Promise<MessageView[]>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void

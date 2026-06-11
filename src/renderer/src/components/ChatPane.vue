@@ -6,6 +6,7 @@ import { useTransfersStore } from '../stores/transfers'
 import { separatorTime } from '../utils/time'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
+import EmojiPanel from './EmojiPanel.vue'
 import type { MessageView } from '../../../shared/ipc'
 
 const peersStore = usePeersStore()
@@ -15,7 +16,10 @@ transfersStore.init()
 
 const draft = ref('')
 const dragging = ref(false)
+const showEmoji = ref(false)
+const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
+const inputEl = ref<HTMLTextAreaElement | null>(null)
 
 const peer = computed(() => {
   const conv = chatStore.activeConv
@@ -42,12 +46,56 @@ function scrollToBottom(): void {
 }
 
 watch(() => chatStore.activeConvId, scrollToBottom)
+// 只在"末尾追加"时贴底（向上加载历史是前插，不该滚动）
 watch(
-  () => chatStore.activeMessages.length,
-  (len, oldLen) => {
-    if (len > (oldLen ?? 0)) scrollToBottom()
+  () => {
+    const list = chatStore.activeMessages
+    return list.length > 0 ? list[list.length - 1].id : ''
+  },
+  (id, oldId) => {
+    if (id && id !== oldId) scrollToBottom()
   }
 )
+// 搜索跳转高亮：滚动到目标消息居中
+watch(
+  () => chatStore.highlightId,
+  (id) => {
+    if (!id) return
+    void nextTick(() => {
+      document.getElementById(`msg-${id}`)?.scrollIntoView({ block: 'center' })
+    })
+  },
+  { immediate: true }
+)
+
+/** 滚到顶部附近 → 向上加载更早历史，并保持视口位置不跳（F-MSG-5） */
+async function onScroll(): Promise<void> {
+  const el = scrollArea.value
+  if (!el || el.scrollTop > 40 || loadingEarlier.value) return
+  loadingEarlier.value = true
+  const prevHeight = el.scrollHeight
+  const loaded = await chatStore.loadEarlier()
+  if (loaded > 0) {
+    await nextTick()
+    el.scrollTop = el.scrollHeight - prevHeight + el.scrollTop
+  }
+  loadingEarlier.value = false
+}
+
+function insertEmoji(emoji: string): void {
+  const ta = inputEl.value
+  if (!ta) {
+    draft.value += emoji
+    return
+  }
+  const start = ta.selectionStart ?? draft.value.length
+  const end = ta.selectionEnd ?? start
+  draft.value = draft.value.slice(0, start) + emoji + draft.value.slice(end)
+  void nextTick(() => {
+    ta.focus()
+    ta.selectionStart = ta.selectionEnd = start + emoji.length
+  })
+}
 
 async function send(): Promise<void> {
   const text = draft.value.trim()
@@ -142,10 +190,15 @@ async function onDrop(event: DragEvent): Promise<void> {
       <span class="state" :class="{ on: peerOnline }">{{ peerOnline ? '● 在线' : '离线' }}</span>
     </header>
 
-    <div ref="scrollArea" class="msgs">
+    <div ref="scrollArea" class="msgs" @scroll="onScroll">
+      <div v-if="loadingEarlier" class="sep">加载更早的消息…</div>
       <template v-for="(msg, i) in chatStore.activeMessages" :key="msg.id">
         <div v-if="needSeparator(msg, i)" class="sep">{{ separatorTime(msg.ts) }}</div>
-        <div class="row" :class="msg.isMine ? 'mine' : 'peer'">
+        <div
+          :id="`msg-${msg.id}`"
+          class="row"
+          :class="[msg.isMine ? 'mine' : 'peer', { highlight: msg.id === chatStore.highlightId }]"
+        >
           <FileCard v-if="msg.kind === 'file'" :msg="msg" />
           <ImageBubble v-else-if="msg.kind === 'image'" :msg="msg" />
           <div v-else class="bubble">
@@ -172,8 +225,14 @@ async function onDrop(event: DragEvent): Promise<void> {
       </template>
     </div>
 
+    <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
+      ↓ 回到最新
+    </button>
+
     <footer class="input-area">
       <div class="toolbar">
+        <EmojiPanel v-if="showEmoji" @select="insertEmoji" @close="showEmoji = false" />
+        <button class="tool" title="表情" @click="showEmoji = !showEmoji">😊</button>
         <button class="tool" title="发送图片" :disabled="!peerOnline" @click="sendImage">🖼</button>
         <button class="tool" title="发送文件" :disabled="!peerOnline" @click="sendFiles(false)">
           📁
@@ -184,6 +243,7 @@ async function onDrop(event: DragEvent): Promise<void> {
         <span v-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
       </div>
       <textarea
+        ref="inputEl"
         v-model="draft"
         class="input"
         placeholder="输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送"
@@ -225,6 +285,34 @@ async function onDrop(event: DragEvent): Promise<void> {
   align-items: center;
   gap: 4px;
   padding-bottom: 4px;
+  position: relative;
+}
+.row.highlight {
+  animation: hl 2.4s ease;
+  border-radius: 8px;
+}
+@keyframes hl {
+  0%,
+  60% {
+    background: rgba(61, 139, 107, 0.16);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.back-latest {
+  position: absolute;
+  right: 20px;
+  bottom: 150px;
+  border: 1px solid var(--line);
+  background: var(--bg-window);
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--primary);
+  padding: 5px 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 6;
 }
 .tool {
   border: none;
