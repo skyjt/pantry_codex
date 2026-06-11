@@ -34,6 +34,10 @@ const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
+const MSG_MENU_WIDTH = 112
+const MSG_MENU_ITEM_HEIGHT = 32
+const MSG_MENU_PADDING = 10
+const MENU_MARGIN = 8
 interface TextPart {
   text: string
   url: string
@@ -282,9 +286,36 @@ function canForwardMessage(msg: MessageView): boolean {
   return msg.status !== 'recalled' && msg.kind !== 'system'
 }
 
+function messageMenuItemCount(msg: MessageView): number {
+  return (
+    Number(canCopyMessage(msg)) +
+    Number(canForwardMessage(msg)) +
+    Number(canRecallMessage(msg))
+  )
+}
+
+function clampMenuPosition(
+  event: MouseEvent,
+  width: number,
+  height: number
+): { x: number; y: number } {
+  const maxX = Math.max(MENU_MARGIN, window.innerWidth - width - MENU_MARGIN)
+  const maxY = Math.max(MENU_MARGIN, window.innerHeight - height - MENU_MARGIN)
+  return {
+    x: Math.max(MENU_MARGIN, Math.min(event.clientX, maxX)),
+    y: Math.max(MENU_MARGIN, Math.min(event.clientY, maxY))
+  }
+}
+
 function openMessageMenu(event: MouseEvent, msg: MessageView): void {
-  if (!canCopyMessage(msg) && !canRecallMessage(msg) && !canForwardMessage(msg)) return
-  msgMenu.value = { x: event.clientX, y: event.clientY, msg }
+  const itemCount = messageMenuItemCount(msg)
+  if (itemCount === 0) return
+  const pos = clampMenuPosition(
+    event,
+    MSG_MENU_WIDTH,
+    itemCount * MSG_MENU_ITEM_HEIGHT + MSG_MENU_PADDING
+  )
+  msgMenu.value = { ...pos, msg }
 }
 
 async function copySelectedMessage(): Promise<void> {
@@ -406,11 +437,24 @@ async function onDrop(event: DragEvent): Promise<void> {
           :id="`msg-${msg.id}`"
           class="row"
           :class="[msg.isMine ? 'mine' : 'peer', { highlight: msg.id === chatStore.highlightId }]"
-          @contextmenu.prevent="openMessageMenu($event, msg)"
         >
-          <FileCard v-if="msg.kind === 'file'" :msg="msg" />
-          <ImageBubble v-else-if="msg.kind === 'image' || msg.kind === 'sticker'" :msg="msg" />
-          <div v-else class="bubble">
+          <FileCard
+            v-if="msg.kind === 'file'"
+            :msg="msg"
+            class="message-surface"
+            @contextmenu.prevent.stop="openMessageMenu($event, msg)"
+          />
+          <ImageBubble
+            v-else-if="msg.kind === 'image' || msg.kind === 'sticker'"
+            :msg="msg"
+            class="message-surface"
+            @forward="forwardMsg = msg"
+          />
+          <div
+            v-else
+            class="bubble message-surface"
+            @contextmenu.prevent.stop="openMessageMenu($event, msg)"
+          >
             <template v-for="(part, partIndex) in textParts(msg.text)" :key="partIndex">
               <button
                 v-if="part.url"
@@ -478,36 +522,60 @@ async function onDrop(event: DragEvent): Promise<void> {
           @sticker="sendStickerById"
           @close="showEmoji = false"
         />
-        <button class="tool" title="表情" :disabled="!canSend" @click="showEmoji = !showEmoji">
-          <PantryIcon name="smile" :size="18" />
-        </button>
-        <button class="tool" title="截图（Ctrl/Cmd+Alt+A）" @click="window_startCapture">
-          <PantryIcon name="scissors" :size="18" />
-        </button>
-        <button
-          class="tool"
-          title="发送图片"
-          :disabled="isGroup || !peerOnline"
-          @click="sendImage"
-        >
-          <PantryIcon name="image" :size="18" />
-        </button>
-        <button
-          class="tool"
-          title="发送文件"
-          :disabled="isGroup || !peerOnline"
-          @click="sendFiles(false)"
-        >
-          <PantryIcon name="file" :size="18" />
-        </button>
-        <button
-          class="tool"
-          title="发送文件夹"
-          :disabled="isGroup || !peerOnline"
-          @click="sendFiles(true)"
-        >
-          <PantryIcon name="folder" :size="18" />
-        </button>
+        <span class="tool-wrap" data-tip="表情">
+          <button
+            class="tool"
+            type="button"
+            aria-label="表情"
+            :disabled="!canSend"
+            @click="showEmoji = !showEmoji"
+          >
+            <PantryIcon name="smile" :size="18" />
+          </button>
+        </span>
+        <span class="tool-wrap" data-tip="截图">
+          <button
+            class="tool"
+            type="button"
+            aria-label="截图（Ctrl/Cmd+Alt+A）"
+            @click="window_startCapture"
+          >
+            <PantryIcon name="scissors" :size="18" />
+          </button>
+        </span>
+        <span class="tool-wrap" data-tip="发送图片">
+          <button
+            class="tool"
+            type="button"
+            aria-label="发送图片"
+            :disabled="isGroup || !peerOnline"
+            @click="sendImage"
+          >
+            <PantryIcon name="image" :size="18" />
+          </button>
+        </span>
+        <span class="tool-wrap" data-tip="发送文件">
+          <button
+            class="tool"
+            type="button"
+            aria-label="发送文件"
+            :disabled="isGroup || !peerOnline"
+            @click="sendFiles(false)"
+          >
+            <PantryIcon name="file" :size="18" />
+          </button>
+        </span>
+        <span class="tool-wrap" data-tip="发送文件夹">
+          <button
+            class="tool"
+            type="button"
+            aria-label="发送文件夹"
+            :disabled="isGroup || !peerOnline"
+            @click="sendFiles(true)"
+          >
+            <PantryIcon name="folder" :size="18" />
+          </button>
+        </span>
         <span v-if="isGroup" class="tool-hint">群内文件/图片将在后续版本支持</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
       </div>
@@ -643,6 +711,51 @@ async function onDrop(event: DragEvent): Promise<void> {
   display: grid;
   place-items: center;
 }
+.tool-wrap {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+.tool-wrap::before,
+.tool-wrap::after {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 7px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+  z-index: 30;
+}
+.tool-wrap::before {
+  content: '';
+  bottom: calc(100% + 3px);
+  border: 4px solid transparent;
+  border-top-color: rgba(35, 35, 35, 0.94);
+}
+.tool-wrap::after {
+  content: attr(data-tip);
+  min-width: max-content;
+  max-width: 120px;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: rgba(35, 35, 35, 0.94);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+}
+.tool-wrap:hover::before,
+.tool-wrap:hover::after,
+.tool-wrap:focus-within::before,
+.tool-wrap:focus-within::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 0.45s;
+}
 .tool:hover:not(:disabled) {
   background: var(--line);
 }
@@ -732,6 +845,9 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .row.mine {
   flex-direction: row-reverse;
+}
+.message-surface {
+  flex-shrink: 0;
 }
 .bubble {
   max-width: 64%;
