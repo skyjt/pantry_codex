@@ -72,6 +72,22 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     recv_ts INTEGER NOT NULL
   );
   CREATE INDEX idx_dedup_ts ON dedup(recv_ts);
+  `,
+
+  // v2：文件传输记录（v0.2）
+  `
+  CREATE TABLE transfers (
+    transfer_id TEXT PRIMARY KEY,
+    msg_id      TEXT NOT NULL,
+    peer_id     TEXT NOT NULL,
+    direction   TEXT NOT NULL,              -- 'in' | 'out'
+    files       TEXT NOT NULL DEFAULT '{}', -- 服务层 JSON：{name, savedPath?}
+    status      TEXT NOT NULL,              -- offering|accepted|done|declined|canceled|failed
+    bytes_done  INTEGER NOT NULL DEFAULT 0,
+    total       INTEGER NOT NULL DEFAULT 0,
+    ts          INTEGER NOT NULL
+  );
+  CREATE INDEX idx_transfers_status ON transfers(status);
   `
 ]
 

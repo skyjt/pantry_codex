@@ -16,7 +16,14 @@ export const IpcChannels = {
   msgResend: 'msg:resend',
   settingsGet: 'settings:get',
   settingsSaveProfile: 'settings:save-profile',
-  settingsPickDir: 'settings:pick-dir'
+  settingsPickDir: 'settings:pick-dir',
+  filePick: 'file:pick',
+  fileOffer: 'file:offer',
+  fileAccept: 'file:accept',
+  fileDecline: 'file:decline',
+  fileCancel: 'file:cancel',
+  fileReveal: 'file:reveal',
+  transferGet: 'transfer:get'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -26,6 +33,7 @@ export const IpcEvents = {
   msgNew: 'msg:new',
   msgStatus: 'msg:status',
   convsUpdated: 'convs:updated',
+  transferUpdated: 'transfer:updated',
   /** 点击系统通知/托盘 → 主窗定位到会话 */
   openConv: 'ui:open-conv'
 } as const
@@ -72,16 +80,41 @@ export interface ConversationView {
   preview: string
 }
 
+/** 文件消息引用（messages.file_ref 的 JSON 结构） */
+export interface FileRefView {
+  transferId: string
+  name: string
+  size: number
+  count: number
+  dir: boolean
+}
+
 export interface MessageView {
   id: string
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text'
+  kind: 'text' | 'file'
   text: string
+  fileRef?: FileRefView
   ts: number
   seq: number
   status: 'sending' | 'sent' | 'queued' | 'failed'
+}
+
+/** 传输状态视图（文件卡片的数据源） */
+export interface TransferView {
+  transferId: string
+  msgId: string
+  convId: string
+  direction: 'in' | 'out'
+  status: 'offering' | 'accepted' | 'done' | 'declined' | 'canceled' | 'failed'
+  bytesDone: number
+  totalSize: number
+  fileCount: number
+  name: string
+  /** 完成后：接收侧的落盘根路径（用于"打开所在文件夹"） */
+  savedPath: string
 }
 
 export interface MsgStatusEvent {
@@ -132,11 +165,23 @@ export interface PantryApi {
   saveProfile(submit: ProfileSubmit): Promise<SettingsView>
   /** 弹系统目录选择框；取消返回 null */
   pickDirectory(): Promise<string | null>
+  /** 弹文件/文件夹选择框（发送用）；取消返回 null */
+  pickFiles(directory: boolean): Promise<string[] | null>
+  /** 发起文件传输（对方离线直接失败，不入队——决议 #4）；返回本地文件消息 */
+  offerFiles(peerNodeId: string, paths: string[]): Promise<MessageView | null>
+  /** 接收（saveAs=true 先弹目录选择）；返回是否开始 */
+  acceptTransfer(transferId: string, saveAs: boolean): Promise<boolean>
+  declineTransfer(transferId: string): Promise<void>
+  cancelTransfer(transferId: string): Promise<void>
+  /** 完成后在文件管理器中显示 */
+  revealTransfer(transferId: string): Promise<void>
+  getTransfer(transferId: string): Promise<TransferView | null>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void
   onMsgStatus(listener: (event: MsgStatusEvent) => void): () => void
   onConvsUpdated(listener: (convs: ConversationView[]) => void): () => void
+  onTransferUpdated(listener: (transfer: TransferView) => void): () => void
   /** 点通知/托盘后主进程要求打开某会话 */
   onOpenConv(listener: (convId: string) => void): () => void
 }

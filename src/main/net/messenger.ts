@@ -79,6 +79,13 @@ export class Messenger extends EventEmitter {
     return 'queued'
   }
 
+  /** 可靠发送但不入队（文件控制报文用——对方离线时直接失败，决议 #4） */
+  async sendReliable(peerId: string, env: Envelope): Promise<boolean> {
+    const acked = await this.sendAwaitAck(peerId, env)
+    if (!acked) this.registry.markOffline(peerId)
+    return acked
+  }
+
   /** 对端上线后按原顺序补发；中途再失败即停（保持顺序，等下次上线） */
   async flushQueue(peerId: string): Promise<void> {
     if (this.flushing.has(peerId)) return
@@ -151,14 +158,14 @@ export class Messenger extends EventEmitter {
       return
     }
 
-    if (env.type === MSG_TYPES.msg) {
-      // 无条件回 ACK（含重复消息）：让对端停止重传
+    // 可靠类型（msg / file-ctl）：无条件回 ACK（含重复），让对端停止重传
+    if (env.type === MSG_TYPES.msg || env.type === MSG_TYPES.fileCtl) {
       const ack = makeEnvelope<AckPayload>(MSG_TYPES.ack, this.selfId, { ackFor: env.id })
       this.udp.send(ack, rinfo.address, rinfo.port)
 
-      if (this.dedup.has(env.id)) return // 补发/重传造成的重复，只应答不重复入库
+      if (this.dedup.has(env.id)) return // 补发/重传造成的重复，只应答不重复处理
       this.dedup.add(env.id, Date.now())
-      this.registry.touch(env.from, rinfo.address, rinfo.port) // 能发消息=在线
+      this.registry.touch(env.from, rinfo.address, rinfo.port) // 能发报文=在线
       this.emit('incoming', env, rinfo)
     }
   }

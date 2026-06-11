@@ -2,13 +2,18 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
+import { useTransfersStore } from '../stores/transfers'
 import { separatorTime } from '../utils/time'
+import FileCard from './FileCard.vue'
 import type { MessageView } from '../../../shared/ipc'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
+const transfersStore = useTransfersStore()
+transfersStore.init()
 
 const draft = ref('')
+const dragging = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 
 const peer = computed(() => {
@@ -61,14 +66,39 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 function statusHint(msg: MessageView): string {
+  if (msg.kind === 'file') return '' // 文件卡片自带状态行
   if (msg.status === 'queued') return '对方上线后自动送达'
   if (msg.status === 'failed') return '发送失败，点击重发'
   return ''
 }
+
+async function sendFiles(directory: boolean): Promise<void> {
+  if (!peerOnline.value) return
+  const paths = await window.pantry.pickFiles(directory)
+  if (paths) await chatStore.sendFilePaths(paths)
+}
+
+function onDragOver(event: DragEvent): void {
+  event.preventDefault()
+  if (peerOnline.value) dragging.value = true
+}
+
+async function onDrop(event: DragEvent): Promise<void> {
+  event.preventDefault()
+  dragging.value = false
+  if (!peerOnline.value || !event.dataTransfer) return
+  const paths: string[] = []
+  for (const file of Array.from(event.dataTransfer.files)) {
+    const p = (file as File & { path?: string }).path
+    if (p) paths.push(p)
+  }
+  if (paths.length > 0) await chatStore.sendFilePaths(paths)
+}
 </script>
 
 <template>
-  <div class="chat">
+  <div class="chat" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
+    <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <span class="title">{{ peerName }}</span>
       <span class="state" :class="{ on: peerOnline }">{{ peerOnline ? '● 在线' : '离线' }}</span>
@@ -78,7 +108,8 @@ function statusHint(msg: MessageView): string {
       <template v-for="(msg, i) in chatStore.activeMessages" :key="msg.id">
         <div v-if="needSeparator(msg, i)" class="sep">{{ separatorTime(msg.ts) }}</div>
         <div class="row" :class="msg.isMine ? 'mine' : 'peer'">
-          <div class="bubble">
+          <FileCard v-if="msg.kind === 'file'" :msg="msg" />
+          <div v-else class="bubble">
             <span class="text">{{ msg.text }}</span>
           </div>
           <span v-if="msg.isMine" class="status">
@@ -103,6 +134,15 @@ function statusHint(msg: MessageView): string {
     </div>
 
     <footer class="input-area">
+      <div class="toolbar">
+        <button class="tool" title="发送文件" :disabled="!peerOnline" @click="sendFiles(false)">
+          📁
+        </button>
+        <button class="tool" title="发送文件夹" :disabled="!peerOnline" @click="sendFiles(true)">
+          🗂
+        </button>
+        <span v-if="!peerOnline" class="tool-hint">对方离线，无法发送文件</span>
+      </div>
       <textarea
         v-model="draft"
         class="input"
@@ -125,6 +165,44 @@ function statusHint(msg: MessageView): string {
   flex-direction: column;
   height: 100%;
   background: var(--bg-chat);
+  position: relative;
+}
+.drop-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(61, 139, 107, 0.12);
+  border: 2px dashed var(--primary);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  color: var(--primary);
+  z-index: 5;
+  pointer-events: none;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+.tool {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.tool:hover:not(:disabled) {
+  background: var(--line);
+}
+.tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.tool-hint {
+  font-size: 11px;
+  color: var(--text-3);
 }
 .head {
   height: 52px;

@@ -109,6 +109,71 @@ export interface AckPayload {
   ackFor: string
 }
 
+// ---------- 文件传输（§8） ----------
+
+/** offer 单包最多携带的文件条目（保证 ≤ UDP_MAX_PAYLOAD，超出拆多条同 transferId） */
+export const OFFER_FILES_PER_PACKET = 6
+/** offer 分包组装超时 */
+export const OFFER_ASSEMBLE_TIMEOUT = 10_000
+/** 单次传输文件数上限（防恶意 offer 撑爆内存） */
+export const MAX_FILES_PER_TRANSFER = 2000
+
+export interface FileMeta {
+  fileId: string
+  /** 相对路径（文件夹传输保留结构）；接收侧必须经 sanitize 落盘 */
+  path: string
+  size: number
+  isDir?: boolean
+}
+
+export interface FileCtlOffer {
+  op: 'offer'
+  transferId: string
+  /** 分包序号/总数（1-based） */
+  seq: number
+  total: number
+  files: FileMeta[]
+  totalSize: number
+  fileCount: number
+  /** 展示名：单文件=文件名，文件夹=目录名，多文件=首文件名 */
+  rootName: string
+}
+
+export interface FileCtlSimple {
+  op: 'accept' | 'decline' | 'cancel'
+  transferId: string
+}
+
+export type FileCtlPayload = FileCtlOffer | FileCtlSimple
+
+/** TCP 控制帧（4 字节大端长度前缀 + UTF-8 JSON；pull-ok 后紧跟 len 字节裸流） */
+export interface PullFrame {
+  type: 'pull'
+  from: string
+  transferId: string
+  fileId: string
+  offset: number
+}
+export interface PullOkFrame {
+  type: 'pull-ok'
+  fileId: string
+  len: number
+}
+export interface DoneFrame {
+  type: 'done'
+  fileId: string
+  sha256: string
+}
+export interface FinishFrame {
+  type: 'finish'
+  transferId: string
+}
+export interface ErrFrame {
+  type: 'err'
+  reason: string
+}
+export type TcpFrame = PullFrame | PullOkFrame | DoneFrame | FinishFrame | ErrFrame
+
 export const MSG_TYPES = {
   entry: 'entry',
   alive: 'alive',

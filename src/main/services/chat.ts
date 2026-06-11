@@ -10,7 +10,7 @@ import type { ConversationView, MessageView, MsgStatusEvent } from '../../shared
 import { makeEnvelope } from '../net/codec'
 import type { Messenger } from '../net/messenger'
 import { ConvRepo, type ConvRow } from '../store/conv-repo'
-import { MsgRepo, type MsgRow } from '../store/msg-repo'
+import { MsgRepo, msgRowToView } from '../store/msg-repo'
 
 // 聊天用例编排（tech-design §3）：发消息 = 写库 → 网络 → 状态回推。
 // 事件出口：'message'（新消息入库）、'status'（发送状态变化）、'convs'（会话列表变化）。
@@ -38,19 +38,7 @@ function toConvView(row: ConvRow): ConversationView {
   }
 }
 
-function toMsgView(row: MsgRow): MessageView {
-  return {
-    id: row.id,
-    convId: row.conv_id,
-    senderId: row.sender_id,
-    isMine: row.is_mine !== 0,
-    kind: 'text',
-    text: row.content,
-    ts: row.ts,
-    seq: row.seq,
-    status: row.status as MessageView['status']
-  }
-}
+const toMsgView = msgRowToView
 
 export class ChatService extends EventEmitter {
   constructor(private readonly deps: ChatDeps) {
@@ -151,6 +139,7 @@ export class ChatService extends EventEmitter {
   }
 
   private onIncoming(env: Envelope): void {
+    if (env.type !== MSG_TYPES.msg) return // file-ctl 等其他可靠类型由对应服务处理
     const payload = env.payload as MsgPayload
     if (payload.kind !== 'text') return
     const convId = this.deps.convRepo.ensureSingle(env.from)

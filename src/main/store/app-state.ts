@@ -85,7 +85,7 @@ export function saveProfile(state: AppState, patch: ProfilePatch): void {
   profile.profileRev = config.profileRev
 }
 
-export function loadAppState(dataDir: string, appVersion: string): AppState {
+export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFAULT_TCP_PORT): AppState {
   const identityPath = join(dataDir, 'identity.json')
   const configPath = join(dataDir, 'config.json')
 
@@ -131,7 +131,7 @@ export function loadAppState(dataDir: string, appVersion: string): AppState {
     profileRev: config.profileRev,
     host: hostname(),
     platform: detectPlatform(),
-    tcpPort: DEFAULT_TCP_PORT,
+    tcpPort,
     ver: appVersion,
     caps: []
   }

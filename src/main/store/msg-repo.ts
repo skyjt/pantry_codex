@@ -1,4 +1,5 @@
 import type DatabaseT from 'better-sqlite3'
+import type { FileRefView, MessageView } from '../../shared/ipc'
 import { toFtsTokens } from './fts'
 
 export interface MsgRow {
@@ -19,10 +20,36 @@ export interface NewMessage {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text'
+  kind: 'text' | 'file'
   content: string
+  /** 文件消息：FileRefView 的 JSON */
+  fileRef?: string
   ts: number
   status: 'sending' | 'sent' | 'queued' | 'failed'
+}
+
+/** 行 → 渲染层视图（chat 与 files 服务共用） */
+export function msgRowToView(row: MsgRow): MessageView {
+  let fileRef: FileRefView | undefined
+  if (row.file_ref) {
+    try {
+      fileRef = JSON.parse(row.file_ref) as FileRefView
+    } catch {
+      fileRef = undefined
+    }
+  }
+  return {
+    id: row.id,
+    convId: row.conv_id,
+    senderId: row.sender_id,
+    isMine: row.is_mine !== 0,
+    kind: row.kind === 'file' ? 'file' : 'text',
+    text: row.content,
+    fileRef,
+    ts: row.ts,
+    seq: row.seq,
+    status: row.status as MessageView['status']
+  }
 }
 
 export class MsgRepo {
@@ -37,8 +64,8 @@ export class MsgRepo {
 
   constructor(db: DatabaseT.Database) {
     this.insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO messages (id, conv_id, sender_id, is_mine, kind, content, ts, seq, status)
-      VALUES (@id, @convId, @senderId, @isMine, @kind, @content, @ts, @seq, @status)
+      INSERT OR IGNORE INTO messages (id, conv_id, sender_id, is_mine, kind, content, file_ref, ts, seq, status)
+      VALUES (@id, @convId, @senderId, @isMine, @kind, @content, @fileRef, @ts, @seq, @status)
     `)
     this.insertFtsStmt = db.prepare('INSERT INTO messages_fts (msg_id, text) VALUES (?, ?)')
     this.nextSeqStmt = db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM messages')
@@ -66,6 +93,7 @@ export class MsgRepo {
       isMine: msg.isMine ? 1 : 0,
       kind: msg.kind,
       content: msg.content,
+      fileRef: msg.fileRef ?? null,
       ts: msg.ts,
       seq,
       status: msg.status

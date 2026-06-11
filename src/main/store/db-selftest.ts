@@ -12,6 +12,7 @@ import { ConvRepo } from './conv-repo'
 import { MsgRepo } from './msg-repo'
 import { QueueRepo } from './queue-repo'
 import { DedupRepo } from './dedup-repo'
+import { TransferRepo } from './transfer-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
 import type { PeerRecord } from '../net/peer-registry'
 
@@ -45,7 +46,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 1, '迁移版本应为 1')
+  assert.equal(db.pragma('user_version', { simple: true }), 2, '迁移版本应为 2')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -192,7 +193,29 @@ try {
   assert.equal(msgRepo.resetStaleSending(), 1)
   assert.equal(msgRepo.get('m-3')?.status, 'failed')
 
-  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/中文FTS 全部通过')
+  // 8. 传输记录
+  const transferRepo = new TransferRepo(db)
+  transferRepo.insert({
+    transferId: 't-1',
+    msgId: 'm-1',
+    peerId: 'node-bob',
+    direction: 'in',
+    files: '{"name":"设计稿.zip"}',
+    status: 'offering',
+    total: 1024,
+    ts: Date.now()
+  })
+  transferRepo.updateStatus('t-1', 'accepted')
+  transferRepo.updateProgress('t-1', 512)
+  transferRepo.updateFiles('t-1', '{"name":"设计稿.zip","savedPath":"/tmp/x"}')
+  const t = transferRepo.get('t-1')
+  assert.equal(t?.status, 'accepted')
+  assert.equal(t?.bytes_done, 512)
+  assert.ok(t?.files.includes('savedPath'))
+  assert.equal(transferRepo.resetActive(), 1, '残留进行中传输启动置失败')
+  assert.equal(transferRepo.get('t-1')?.status, 'failed')
+
+  console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/中文FTS 全部通过')
 } finally {
   db.close()
   rmSync(dir, { recursive: true, force: true })

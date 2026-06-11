@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, type Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type Tray } from 'electron'
 import { release } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -11,9 +11,11 @@ import {
   type ProfileSubmit,
   type SettingsView
 } from '../shared/ipc'
-import { DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
+import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
 import { loadAppState, saveProfile, type AppState } from './store/app-state'
 import { setupTray } from './windows/tray'
+import { TransferRepo } from './store/transfer-repo'
+import { FilesService } from './services/files'
 import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
 import { ConvRepo } from './store/conv-repo'
@@ -45,6 +47,7 @@ if (!gotLock) {
 
   // ---- 网络栈（端口可被环境变量覆盖，便于联调；正式配置入设置页后接管） ----
   const udpPort = Number(process.env['PANTRY_UDP_PORT']) || DEFAULT_UDP_PORT
+  const tcpPort = Number(process.env['PANTRY_TCP_PORT']) || DEFAULT_TCP_PORT
   const manualPeers: ManualPeer[] = (process.env['PANTRY_PEERS'] ?? '')
     .split(',')
     .map((item) => item.trim())
@@ -61,6 +64,7 @@ if (!gotLock) {
   let peersRepo: PeersRepo | null = null
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let chat: ChatService | null = null
+  let files: FilesService | null = null
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   let appState: AppState | null = null
   let tray: Tray | null = null
@@ -131,16 +135,42 @@ if (!gotLock) {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
         }
       })
-      chat.on('message', (msg: MessageView) => {
+      const onMessage = (msg: MessageView): void => {
         mainWindow?.webContents.send(IpcEvents.msgNew, msg)
         notifyIncoming(msg)
-      })
-      chat.on('status', (ev) => mainWindow?.webContents.send(IpcEvents.msgStatus, ev))
-      chat.on('convs', (convs: Array<{ unread: number }>) => {
+      }
+      const onStatus = (ev: unknown): void => {
+        mainWindow?.webContents.send(IpcEvents.msgStatus, ev)
+      }
+      const onConvs = (convs: Array<{ unread: number }>): void => {
         mainWindow?.webContents.send(IpcEvents.convsUpdated, convs)
         const total = convs.reduce((sum, c) => sum + c.unread, 0)
         if (process.platform === 'darwin') app.dock?.setBadge(total > 0 ? String(total) : '')
+      }
+      chat.on('message', onMessage)
+      chat.on('status', onStatus)
+      chat.on('convs', onConvs)
+
+      files = new FilesService({
+        selfId: state.nodeId,
+        messenger,
+        registry,
+        convRepo: new ConvRepo(db),
+        msgRepo: new MsgRepo(db),
+        transferRepo: new TransferRepo(db),
+        tcpPort,
+        getSaveDir: () =>
+          appState?.config.fileDir || join(app.getPath('downloads'), '茶话间')
       })
+      files.on('message', onMessage)
+      files.on('status', onStatus)
+      files.on('convs', onConvs)
+      files.on('transfer', (view) => mainWindow?.webContents.send(IpcEvents.transferUpdated, view))
+      try {
+        await files.start() // TCP 数据端口
+      } catch (err) {
+        console.error('[files] TCP 端口监听失败，文件发送可用但无法被拉取：', err)
+      }
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
       pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
       pruneTimer.unref?.()
@@ -335,6 +365,55 @@ if (!gotLock) {
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 
+  ipcMain.handle(IpcChannels.filePick, async (_event, directory: unknown): Promise<string[] | null> => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: directory === true ? '选择要发送的文件夹' : '选择要发送的文件',
+      properties: directory === true ? ['openDirectory'] : ['openFile', 'multiSelections']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths
+  })
+
+  ipcMain.handle(IpcChannels.fileOffer, async (_event, peerId: unknown, paths: unknown) => {
+    if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return null
+    if (!paths.every((p) => typeof p === 'string' && p.length > 0 && p.length < 2048)) return null
+    return (await files?.offerPaths(peerId, paths as string[])) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.fileAccept, async (_event, transferId: unknown, saveAs: unknown) => {
+    if (typeof transferId !== 'string' || transferId.length > 64 || !files) return false
+    let dir: string | undefined
+    if (saveAs === true && mainWindow) {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '保存到…',
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || result.filePaths.length === 0) return false
+      dir = result.filePaths[0]
+    }
+    return files.accept(transferId, dir)
+  })
+
+  ipcMain.handle(IpcChannels.fileDecline, async (_event, transferId: unknown) => {
+    if (typeof transferId === 'string' && transferId.length <= 64) await files?.decline(transferId)
+  })
+
+  ipcMain.handle(IpcChannels.fileCancel, async (_event, transferId: unknown) => {
+    if (typeof transferId === 'string' && transferId.length <= 64) await files?.cancel(transferId)
+  })
+
+  ipcMain.handle(IpcChannels.fileReveal, (_event, transferId: unknown) => {
+    if (typeof transferId !== 'string' || transferId.length > 64) return
+    const view = files?.transferView(transferId)
+    if (view?.savedPath) shell.showItemInFolder(view.savedPath)
+  })
+
+  ipcMain.handle(IpcChannels.transferGet, (_event, transferId: unknown) => {
+    if (typeof transferId !== 'string' || transferId.length > 64) return null
+    return files?.transferView(transferId) ?? null
+  })
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -343,7 +422,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    appState = loadAppState(app.getPath('userData'), app.getVersion())
+    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort)
     createMainWindow()
     tray = setupTray({
       showWindow: showMainWindow,
@@ -371,6 +450,7 @@ if (!gotLock) {
     discovery = null
     if (pruneTimer) clearInterval(pruneTimer)
     if (persistTimer) clearTimeout(persistTimer)
+    void files?.stop()
     try {
       if (registry && peersRepo) peersRepo.upsertMany(registry.list()) // 离场前最后一次落库
       db?.close()

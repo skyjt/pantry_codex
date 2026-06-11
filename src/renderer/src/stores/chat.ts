@@ -78,6 +78,17 @@ export const useChatStore = defineStore('chat', {
 
     async resend(msgId: string): Promise<void> {
       await window.pantry.resendMessage(msgId)
+    },
+
+    /** 发文件（选择器或拖拽）；对方离线时主进程返回 null（决议 #4） */
+    async sendFilePaths(paths: string[]): Promise<boolean> {
+      const conv = this.activeConv
+      if (!conv) return false
+      const view = await window.pantry.offerFiles(conv.peerId, paths)
+      if (!view) return false
+      const list = (this.messages[conv.id] ??= [])
+      if (!list.some((m) => m.id === view.id)) list.push(view)
+      return true
     }
   }
 })

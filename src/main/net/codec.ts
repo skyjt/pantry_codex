@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import {
   LIMITS,
+  MAX_FILES_PER_TRANSFER,
   MSG_TYPES,
+  OFFER_FILES_PER_PACKET,
   PROTOCOL_VERSION,
   TEXT_UDP_LIMIT,
   UDP_MAX_INBOUND,
   type AckPayload,
   type Envelope,
+  type FileCtlOffer,
+  type FileCtlPayload,
   type MsgPayload,
   type PresencePayload,
   type Profile,
@@ -92,10 +96,36 @@ function validatePayload(type: string, payload: unknown): boolean {
       const a = payload as Partial<AckPayload>
       return isStr(a.ackFor, LIMITS.id)
     }
+    case MSG_TYPES.fileCtl: {
+      if (!isRecord(payload)) return false
+      const f = payload as Partial<FileCtlPayload>
+      if (!isStr(f.transferId, LIMITS.id)) return false
+      if (f.op === 'accept' || f.op === 'decline' || f.op === 'cancel') return true
+      if (f.op !== 'offer') return false
+      const o = f as Partial<FileCtlOffer>
+      if (!isInt(o.seq) || !isInt(o.total) || o.seq! < 1 || o.total! < 1 || o.seq! > o.total!)
+        return false
+      if (o.total! > Math.ceil(MAX_FILES_PER_TRANSFER / OFFER_FILES_PER_PACKET)) return false
+      if (!isInt(o.totalSize) || o.totalSize! < 0) return false
+      if (!isInt(o.fileCount) || o.fileCount! < 1 || o.fileCount! > MAX_FILES_PER_TRANSFER)
+        return false
+      if (!isStr(o.rootName, 255)) return false
+      if (!Array.isArray(o.files) || o.files.length === 0 || o.files.length > OFFER_FILES_PER_PACKET)
+        return false
+      return o.files.every(
+        (m) =>
+          isRecord(m) &&
+          isStr(m.fileId, LIMITS.id) &&
+          isStr(m.path, 512) &&
+          isInt(m.size) &&
+          m.size >= 0 &&
+          (m.isDir === undefined || typeof m.isDir === 'boolean')
+      )
+    }
     case MSG_TYPES.exit:
       return isRecord(payload)
     default:
-      // 其余已知类型（peers/file-ctl/group）随对应功能落地时补校验
+      // 其余已知类型（peers/group）随对应功能落地时补校验
       return isRecord(payload)
   }
 }

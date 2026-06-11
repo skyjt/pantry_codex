@@ -10,7 +10,8 @@ import {
   type PantryApi,
   type PeerView,
   type ProfileSubmit,
-  type SettingsView
+  type SettingsView,
+  type TransferView
 } from '../shared/ipc'
 
 function subscribe<T>(channel: string, listener: (data: T) => void): () => void {
@@ -40,10 +41,25 @@ const api: PantryApi = {
   saveProfile: (submit: ProfileSubmit): Promise<SettingsView> =>
     ipcRenderer.invoke(IpcChannels.settingsSaveProfile, submit),
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.settingsPickDir),
+  pickFiles: (directory: boolean): Promise<string[] | null> =>
+    ipcRenderer.invoke(IpcChannels.filePick, directory),
+  offerFiles: (peerNodeId: string, paths: string[]): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.fileOffer, peerNodeId, paths),
+  acceptTransfer: (transferId: string, saveAs: boolean): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.fileAccept, transferId, saveAs),
+  declineTransfer: (transferId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.fileDecline, transferId),
+  cancelTransfer: (transferId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.fileCancel, transferId),
+  revealTransfer: (transferId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.fileReveal, transferId),
+  getTransfer: (transferId: string): Promise<TransferView | null> =>
+    ipcRenderer.invoke(IpcChannels.transferGet, transferId),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
   onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener),
+  onTransferUpdated: (listener) => subscribe<TransferView>(IpcEvents.transferUpdated, listener),
   onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener)
 }
 
