@@ -43,7 +43,7 @@ npm run build     # 三端产物
 npm run smoke     # 启动 1.5s 干净退出（PANTRY_SMOKE 钩子，CI 同款）
 ```
 
-- 本机双实例联调：`PANTRY_USER_DATA=/tmp/pantry-dev2 PANTRY_UDP_PORT=27878 PANTRY_PEERS=127.0.0.1:17878 npm run dev`
+- 本机三客户端联调：分别在三个终端跑 `npm run dev:client1`、`npm run dev:client2`、`npm run dev:client3`；三个实例使用 `/tmp/pantry-dev1..3` 和 `17878/27878/37878` UDP 端口、`17879/27879/37879` TCP 端口。
 - 决策落档：新决议追加到 requirements §9（编号已到 #24，续 #25+）+ 涉及文档的变更记录；协议改动必须 protocol.md 先行。
 - 与用户协作：**全程中文**；用户技术方向不在网络/协议——技术细节直接定但落档、**不要追问底层**；产品可感知取舍（功能形态/默认参数）用 2-4 个带推荐的选项问他。
 
