@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import type { SearchResult } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
+import { useGroupsStore } from '../stores/groups'
 import { listTime } from '../utils/time'
 
 // 全局搜索结果面板（ui-design §6）：联系人 / 聊天记录（按会话聚合）/ 文件，
@@ -38,15 +39,21 @@ const empty = computed(
     result.value.files.length === 0
 )
 
+const groupsStore = useGroupsStore()
 const nickOf = computed(() => peersStore.nameOf) // 备注优先（F-DISC-9）
+
+/** 会话显示名：群会话用群名，单聊用联系人名 */
+function convName(convId: string, peerId: string): string {
+  return convId.startsWith('group:') ? groupsStore.nameOf(peerId) : nickOf.value(peerId)
+}
 
 async function openPeer(nodeId: string): Promise<void> {
   await chatStore.openPeer(nodeId)
   emit('navigate')
 }
 
-async function openGroup(peerId: string, seq: number, msgId: string): Promise<void> {
-  await chatStore.jumpToMessage(peerId, seq, msgId)
+async function openHit(convId: string, seq: number, msgId: string): Promise<void> {
+  await chatStore.jumpToMessage(convId, seq, msgId)
   emit('navigate')
 }
 </script>
@@ -69,9 +76,9 @@ async function openGroup(peerId: string, seq: number, msgId: string): Promise<vo
           v-for="g in result.messageGroups"
           :key="g.convId"
           class="item"
-          @click="openGroup(g.peerId, g.latestSeq, g.latestMsgId)"
+          @click="openHit(g.convId, g.latestSeq, g.latestMsgId)"
         >
-          <span class="t">与 {{ nickOf(g.peerId) }} 的聊天 · {{ g.count }} 条相关</span>
+          <span class="t">与 {{ convName(g.convId, g.peerId) }} 的聊天 · {{ g.count }} 条相关</span>
           <span class="s">{{ g.snippet }} <i class="time">{{ listTime(g.ts) }}</i></span>
         </div>
       </template>
@@ -82,10 +89,13 @@ async function openGroup(peerId: string, seq: number, msgId: string): Promise<vo
           v-for="f in result.files"
           :key="f.msgId"
           class="item"
-          @click="openGroup(f.peerId, f.seq, f.msgId)"
+          @click="openHit(f.convId, f.seq, f.msgId)"
         >
           <span class="t">📄 {{ f.name }}</span>
-          <span class="s">来自与 {{ nickOf(f.peerId) }} 的聊天 <i class="time">{{ listTime(f.ts) }}</i></span>
+          <span class="s"
+            >来自与 {{ convName(f.convId, f.peerId) }} 的聊天
+            <i class="time">{{ listTime(f.ts) }}</i></span
+          >
         </div>
       </template>
     </div>

@@ -33,7 +33,13 @@ export const IpcChannels = {
   netAddPeer: 'net:add-peer',
   netScan: 'net:scan',
   peersSetRemark: 'peers:set-remark',
-  uiOpenSettings: 'ui:open-settings'
+  uiOpenSettings: 'ui:open-settings',
+  groupCreate: 'group:create',
+  groupUpdate: 'group:update',
+  groupLeave: 'group:leave',
+  groupGet: 'group:get',
+  groupList: 'group:list',
+  groupSend: 'group:send'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -44,6 +50,7 @@ export const IpcEvents = {
   msgStatus: 'msg:status',
   convsUpdated: 'convs:updated',
   transferUpdated: 'transfer:updated',
+  groupUpdated: 'group:updated',
   /** 点击系统通知/托盘 → 主窗定位到会话 */
   openConv: 'ui:open-conv'
 } as const
@@ -54,6 +61,8 @@ export interface AppInfo {
   chrome: string
   node: string
   platform: string
+  /** 本机节点 ID（群成员面板等需区分"我"） */
+  nodeId: string
 }
 
 /** 通讯录条目（renderer 视图模型，由主进程的 PeerRecord 投影而来） */
@@ -80,10 +89,10 @@ export interface NetState {
   error: string
 }
 
-/** 会话视图（单聊；讨论组 v0.3 扩展） */
+/** 会话视图：单聊（peerId=节点）或讨论组（peerId=groupId） */
 export interface ConversationView {
   id: string
-  type: 'single'
+  type: 'single' | 'group'
   peerId: string
   lastTs: number
   unread: number
@@ -133,6 +142,21 @@ export interface MsgStatusEvent {
   id: string
   convId: string
   status: MessageView['status']
+}
+
+/** 讨论组视图（F-MSG-4）：amMember=false 表示已退出/被移出（历史保留、禁发） */
+export interface GroupView {
+  groupId: string
+  name: string
+  members: string[]
+  rev: number
+  amMember: boolean
+}
+
+export interface GroupPatch {
+  name?: string
+  add?: string[]
+  remove?: string[]
 }
 
 /** 全局搜索（ui-design §6）：联系人 / 聊天记录（按会话聚合）/ 文件 */
@@ -245,12 +269,21 @@ export interface PantryApi {
   setPeerRemark(nodeId: string, remark: string): Promise<void>
   /** 打开设置窗口 */
   openSettings(): Promise<void>
+  /** 建讨论组（自动含自己，≥2 人）；返回 null 表示参数不足 */
+  createGroup(name: string, memberIds: string[]): Promise<GroupView | null>
+  /** 改名/增删成员（任何成员可操作） */
+  updateGroup(groupId: string, patch: GroupPatch): Promise<GroupView | null>
+  leaveGroup(groupId: string): Promise<void>
+  getGroup(groupId: string): Promise<GroupView | null>
+  listGroups(): Promise<GroupView[]>
+  sendGroupText(groupId: string, text: string): Promise<MessageView | null>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void
   onMsgStatus(listener: (event: MsgStatusEvent) => void): () => void
   onConvsUpdated(listener: (convs: ConversationView[]) => void): () => void
   onTransferUpdated(listener: (transfer: TransferView) => void): () => void
+  onGroupUpdated(listener: (group: GroupView) => void): () => void
   /** 点通知/托盘后主进程要求打开某会话 */
   onOpenConv(listener: (convId: string) => void): () => void
 }

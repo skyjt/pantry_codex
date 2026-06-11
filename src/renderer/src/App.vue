@@ -9,6 +9,8 @@ import ChatPane from './components/ChatPane.vue'
 import SetupWizard from './components/SetupWizard.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import ProfileCard from './components/ProfileCard.vue'
+import GroupCreator from './components/GroupCreator.vue'
+import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
 
 type Tab = 'chat' | 'contacts'
@@ -16,6 +18,8 @@ type Tab = 'chat' | 'contacts'
 const tab = ref<Tab>('chat')
 const searchQuery = ref('')
 const selectedPeerId = ref<string | null>(null)
+const showGroupCreator = ref(false)
+const groupsStore = useGroupsStore()
 
 const selectedPeer = computed<PeerView | null>(() =>
   selectedPeerId.value ? (peersStore.byId(selectedPeerId.value) ?? null) : null
@@ -43,6 +47,7 @@ const chatStore = useChatStore()
 onMounted(async () => {
   void peersStore.init()
   void chatStore.init()
+  void groupsStore.init()
   info.value = await window.pantry.getAppInfo()
   settings.value = await window.pantry.getSettings()
   showWizard.value = settings.value !== null && !settings.value.setupDone
@@ -81,7 +86,9 @@ onMounted(async () => {
       <div class="search-box">
         <input v-model="searchQuery" class="search" placeholder="搜索" />
         <button v-if="searchQuery" class="clear" title="清空" @click="searchQuery = ''">✕</button>
+        <button class="new-group" title="发起讨论组" @click="showGroupCreator = true">＋</button>
       </div>
+      <GroupCreator v-if="showGroupCreator" @close="showGroupCreator = false" />
       <SearchPanel
         v-if="searchQuery.trim()"
         :query="searchQuery.trim()"
@@ -182,6 +189,27 @@ onMounted(async () => {
 .search-box {
   padding: 12px 12px 8px;
   position: relative;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.search-box .search {
+  flex: 1;
+}
+.new-group {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: var(--line);
+  color: var(--text-2);
+  font-size: 15px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.new-group:hover {
+  background: var(--primary);
+  color: #fff;
 }
 .clear {
   position: absolute;

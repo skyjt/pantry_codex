@@ -1,16 +1,23 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { ConversationView } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
+import { useGroupsStore } from '../stores/groups'
 import { listTime } from '../utils/time'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
+const groupsStore = useGroupsStore()
 
 const nickOf = computed(() => peersStore.nameOf) // 备注优先（F-DISC-9）
 
-function avatarText(peerId: string): string {
-  return nickOf.value(peerId).slice(0, 1) || '?'
+function convName(conv: ConversationView): string {
+  return conv.type === 'group' ? groupsStore.nameOf(conv.peerId) : nickOf.value(conv.peerId)
+}
+
+function avatarText(conv: ConversationView): string {
+  return conv.type === 'group' ? '#' : nickOf.value(conv.peerId).slice(0, 1) || '?'
 }
 </script>
 
@@ -25,12 +32,14 @@ function avatarText(peerId: string): string {
         :key="conv.id"
         class="conv"
         :class="{ active: conv.id === chatStore.activeConvId }"
-        @click="chatStore.openPeer(conv.peerId)"
+        @click="chatStore.openConv(conv.id)"
       >
-        <span class="conv-avatar">{{ avatarText(conv.peerId) }}</span>
+        <span class="conv-avatar" :class="{ grp: conv.type === 'group' }">{{
+          avatarText(conv)
+        }}</span>
         <span class="conv-main">
           <span class="row1">
-            <span class="conv-name">{{ nickOf(conv.peerId) }}</span>
+            <span class="conv-name">{{ convName(conv) }}</span>
             <span class="conv-time">{{ listTime(conv.lastTs) }}</span>
           </span>
           <span class="row2">
@@ -87,6 +96,9 @@ function avatarText(peerId: string): string {
   place-items: center;
   font-size: 15px;
   flex-shrink: 0;
+}
+.conv-avatar.grp {
+  background: #6b8e9e; /* 群会话用区分色 */
 }
 .conv-main {
   flex: 1;

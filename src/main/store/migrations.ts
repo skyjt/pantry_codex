@@ -88,6 +88,35 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     ts          INTEGER NOT NULL
   );
   CREATE INDEX idx_transfers_status ON transfers(status);
+  `,
+
+  // v3：补发队列改复合主键（群消息同一 msgId 给多个收件人各排一条，§7.4）
+  `
+  CREATE TABLE send_queue_v2 (
+    msg_id   TEXT NOT NULL,
+    peer_id  TEXT NOT NULL,
+    envelope TEXT NOT NULL,
+    created  INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (msg_id, peer_id)
+  );
+  INSERT INTO send_queue_v2 (msg_id, peer_id, envelope, created, attempts)
+    SELECT msg_id, peer_id, envelope, created, attempts FROM send_queue;
+  DROP TABLE send_queue;
+  ALTER TABLE send_queue_v2 RENAME TO send_queue;
+  CREATE INDEX idx_queue_peer ON send_queue(peer_id, created);
+  `,
+
+  // v4：讨论组元数据（§7.4）
+  `
+  CREATE TABLE groups (
+    group_id   TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    members    TEXT NOT NULL DEFAULT '[]',  -- JSON: nodeId[]
+    rev        INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_ts INTEGER NOT NULL DEFAULT 0
+  );
   `
 ]
 

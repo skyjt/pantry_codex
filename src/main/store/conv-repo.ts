@@ -1,4 +1,5 @@
 import type DatabaseT from 'better-sqlite3'
+import type { ConversationView } from '../../shared/ipc'
 
 export interface ConvRow {
   id: string
@@ -17,8 +18,27 @@ export function singleConvId(peerId: string): string {
   return `single:${peerId}`
 }
 
+export function groupConvId(groupId: string): string {
+  return `group:${groupId}`
+}
+
+/** 行 → 渲染层视图（chat / files / groups 服务共用） */
+export function convRowToView(row: ConvRow): ConversationView {
+  return {
+    id: row.id,
+    type: row.type === 'group' ? 'group' : 'single',
+    peerId: row.peer_or_group_id,
+    lastTs: row.last_ts,
+    unread: row.unread,
+    pinned: row.pinned !== 0,
+    muted: row.muted !== 0,
+    preview: row.preview ?? ''
+  }
+}
+
 export class ConvRepo {
   private readonly ensureStmt: DatabaseT.Statement
+  private readonly ensureGroupStmt: DatabaseT.Statement
   private readonly bumpStmt: DatabaseT.Statement
   private readonly incUnreadStmt: DatabaseT.Statement
   private readonly markReadStmt: DatabaseT.Statement
@@ -29,6 +49,10 @@ export class ConvRepo {
     this.ensureStmt = db.prepare(`
       INSERT OR IGNORE INTO conversations (id, type, peer_or_group_id, last_ts)
       VALUES (?, 'single', ?, 0)
+    `)
+    this.ensureGroupStmt = db.prepare(`
+      INSERT OR IGNORE INTO conversations (id, type, peer_or_group_id, last_ts)
+      VALUES (?, 'group', ?, 0)
     `)
     this.bumpStmt = db.prepare('UPDATE conversations SET last_ts = MAX(last_ts, ?) WHERE id = ?')
     this.incUnreadStmt = db.prepare('UPDATE conversations SET unread = unread + 1 WHERE id = ?')
@@ -54,6 +78,12 @@ export class ConvRepo {
   ensureSingle(peerId: string): string {
     const id = singleConvId(peerId)
     this.ensureStmt.run(id, peerId)
+    return id
+  }
+
+  ensureGroup(groupId: string): string {
+    const id = groupConvId(groupId)
+    this.ensureGroupStmt.run(id, groupId)
     return id
   }
 

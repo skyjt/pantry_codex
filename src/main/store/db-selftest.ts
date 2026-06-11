@@ -13,6 +13,7 @@ import { MsgRepo } from './msg-repo'
 import { QueueRepo } from './queue-repo'
 import { DedupRepo } from './dedup-repo'
 import { TransferRepo } from './transfer-repo'
+import { GroupRepo } from './group-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
 import { SearchService } from '../services/search'
 import { PeerRegistry } from '../net/peer-registry'
@@ -48,7 +49,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 2, '迁移版本应为 2')
+  assert.equal(db.pragma('user_version', { simple: true }), 4, '迁移版本应为 4')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -165,13 +166,20 @@ try {
   const queueRepo = new QueueRepo(db)
   queueRepo.enqueue('q-1', 'node-bob', '{"x":1}', Date.now() - 8 * 24 * 3_600_000) // 已过期
   queueRepo.enqueue('q-2', 'node-bob', '{"x":2}', Date.now())
-  assert.deepEqual(queueRepo.prune(7 * 24 * 3_600_000, 200), ['q-1'], '过期条目被裁剪')
+  queueRepo.enqueue('q-2', 'node-carol', '{"x":2}', Date.now()) // 群消息：同 msgId 不同收件人
+  assert.deepEqual(
+    queueRepo.prune(7 * 24 * 3_600_000, 200),
+    [{ msgId: 'q-1', peerId: 'node-bob' }],
+    '过期条目被裁剪'
+  )
   assert.deepEqual(
     queueRepo.listByPeer('node-bob').map((i) => i.msgId),
     ['q-2']
   )
-  queueRepo.remove('q-2')
+  queueRepo.remove('q-2', 'node-bob')
   assert.equal(queueRepo.listByPeer('node-bob').length, 0)
+  assert.equal(queueRepo.listByPeer('node-carol').length, 1, '复合键：另一收件人不受影响')
+  queueRepo.remove('q-2', 'node-carol')
 
   const dedupRepo = new DedupRepo(db)
   dedupRepo.add('d-1', Date.now() - 25 * 3_600_000)
@@ -240,6 +248,31 @@ try {
 
   const ctx = msgRepo.around(convId, 2, 25)
   assert.ok(ctx.some((m) => m.id === 'm-2'), '上下文窗口应包含目标')
+
+  // 10. 群元数据 LWW 与群会话
+  const groupRepo = new GroupRepo(db)
+  const meta = {
+    groupId: 'g-1',
+    name: '项目组',
+    members: ['node-self', 'node-bob'],
+    rev: 1,
+    updatedBy: 'node-self',
+    updatedTs: 1000
+  }
+  groupRepo.save(meta)
+  assert.equal(
+    groupRepo.applyRemote({ ...meta, name: '过期改名', updatedTs: 999 }),
+    false,
+    'LWW：同 rev 更旧的 updatedTs 拒绝'
+  )
+  assert.equal(
+    groupRepo.applyRemote({ ...meta, rev: 2, name: '新名', updatedTs: 1001 }),
+    true,
+    'LWW：更高 rev 采纳'
+  )
+  assert.equal(groupRepo.get('g-1')?.name, '新名')
+  assert.equal(convRepo.ensureGroup('g-1'), 'group:g-1')
+  assert.equal(convRepo.get('group:g-1')?.type, 'group')
 
   console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/中文FTS 全部通过')
 } finally {

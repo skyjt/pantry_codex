@@ -9,7 +9,7 @@ import {
 import type { ConversationView, MessageView, MsgStatusEvent } from '../../shared/ipc'
 import { makeEnvelope } from '../net/codec'
 import type { Messenger } from '../net/messenger'
-import { ConvRepo, type ConvRow } from '../store/conv-repo'
+import { ConvRepo, convRowToView, type ConvRow } from '../store/conv-repo'
 import { MsgRepo, msgRowToView } from '../store/msg-repo'
 
 // 聊天用例编排（tech-design §3）：发消息 = 写库 → 网络 → 状态回推。
@@ -25,19 +25,7 @@ export interface ChatDeps {
   probe?: (peerId: string) => void
 }
 
-function toConvView(row: ConvRow): ConversationView {
-  return {
-    id: row.id,
-    type: 'single',
-    peerId: row.peer_or_group_id,
-    lastTs: row.last_ts,
-    unread: row.unread,
-    pinned: row.pinned !== 0,
-    muted: row.muted !== 0,
-    preview: row.preview ?? ''
-  }
-}
-
+const toConvView = convRowToView
 const toMsgView = msgRowToView
 
 export class ChatService extends EventEmitter {
@@ -131,10 +119,11 @@ export class ChatService extends EventEmitter {
     return true
   }
 
-  /** 周期清理：被裁剪出队的消息标记为失败 */
+  /** 周期清理：被裁剪出队的单聊消息标记为失败（群消息按成员排队，单成员裁剪不改全局状态） */
   prune(): void {
-    for (const msgId of this.deps.messenger.prune()) {
-      this.applyStatus(msgId, 'failed')
+    for (const { msgId } of this.deps.messenger.prune()) {
+      const row = this.deps.msgRepo.get(msgId)
+      if (row && row.conv_id.startsWith('single:')) this.applyStatus(msgId, 'failed')
     }
   }
 
