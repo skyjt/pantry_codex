@@ -68,7 +68,7 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 ## 4. 下一步：P1 交付收尾
 
 1. **本地五连验证**：`npm test` → `npm run test:db` → `npm run typecheck` → `npm run build` → `npm run smoke`，任何失败先修复再交付。
-2. **目标平台打包测试**：按用户要求，本地确认基本无误后交给 Windows 7 x64 VM / Debian 10 做真实打包与运行冒烟；macOS 当前架构包可本机验证。
+2. **目标平台打包测试**：按用户要求，本地确认基本无误后交给 Windows 7 x64 VM / Debian 10 做真实打包与运行冒烟；macOS 当前架构包可本机验证。流程见 [packaging-test.md](packaging-test.md)。
 3. **v1.0 打磨项**：GitHub Actions（linux 必须 debian:10 容器编译 native）、macOS universal 包专项、Win7 VM 专项（twemoji 图片渲染、软渲染验证、SHA-2 KB 提示文案）、LICENSE 定稿（暂定 MIT，需用户确认）。
 
 ## 5. 已知遗留 / TODO（非阻塞）

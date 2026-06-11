@@ -139,6 +139,8 @@ npm run dist:linux   # deb + AppImage（x64；请在 Debian 10 环境测试）
 npm run dist:mac     # dmg + zip（当前 macOS 架构；正式 universal 包后续专项）
 ```
 
+目标平台打包与冒烟的详细流程见 [docs/packaging-test.md](docs/packaging-test.md)。
+
 本机双实例联调（验证发现/消息链路，不需要两台机器）：
 
 ```bash
