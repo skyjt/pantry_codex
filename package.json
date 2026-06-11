@@ -8,7 +8,12 @@
   "engines": {
     "node": ">=18"
   },
+  "dependencies": {
+    "better-sqlite3": "9.6.0"
+  },
   "scripts": {
+    "postinstall": "node node_modules/@electron/rebuild/lib/cli.js -o better-sqlite3",
+    "rebuild:electron": "node node_modules/@electron/rebuild/lib/cli.js -f -o better-sqlite3",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
@@ -16,9 +21,12 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
+    "test:db": "esbuild src/main/store/db-selftest.ts --bundle --platform=node --target=node16 --external:better-sqlite3 --outfile=out/db-selftest.cjs --log-level=warning && cross-env ELECTRON_RUN_AS_NODE=1 electron out/db-selftest.cjs",
     "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron ."
   },
   "devDependencies": {
+    "@electron/rebuild": "3.6.0",
+    "@types/better-sqlite3": "7.6.11",
     "@types/node": "16.18.119",
     "@vitejs/plugin-vue": "5.2.1",
     "cross-env": "7.0.3",

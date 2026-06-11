@@ -125,14 +125,18 @@ electron_mirror=https://npmmirror.com/mirrors/electron/
 electron_builder_binaries_mirror=https://npmmirror.com/mirrors/electron-builder-binaries/
 ```
 
-计划提供的脚本：
+常用脚本：
 
 ```bash
 npm run dev          # 本地开发（热重载）
 npm run build        # 编译 main / preload / renderer
-npm run dist:win     # NSIS 安装包 + 便携版（x64）
-npm run dist:linux   # deb + AppImage（x64 / arm64）
-npm run dist:mac     # dmg + zip（universal）
+npm test             # vitest：协议编解码 + 发现层回环集成 + 纯函数
+npm run test:db      # 数据库自测（在 Electron 内置 Node 真实 ABI 上执行）
+npm run typecheck    # node16 / chrome108 两套类型基线
+npm run smoke        # 构建 + 启动冒烟（1.5s 干净退出）
+npm run dist:win     # NSIS 安装包 + 便携版（x64）—— 规划中
+npm run dist:linux   # deb + AppImage（x64 / arm64）—— 规划中
+npm run dist:mac     # dmg + zip（universal）—— 规划中
 ```
 
 本机双实例联调（验证发现/消息链路，不需要两台机器）：

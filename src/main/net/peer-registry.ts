@@ -20,6 +20,18 @@ export class PeerRegistry extends EventEmitter {
     super()
   }
 
+  /** 启动时把持久化的历史联系人以离线态种回（F-DISC-7）；不覆盖已有记录 */
+  seed(records: PeerRecord[]): void {
+    let changed = false
+    for (const record of records) {
+      const id = record.profile.nodeId
+      if (id === this.selfNodeId || this.peers.has(id)) continue
+      this.peers.set(id, { ...record, online: false })
+      changed = true
+    }
+    if (changed) this.emit('updated')
+  }
+
   /** 收到对端任意报文时调用；带 profile 的报文（entry/alive/profile）会更新资料 */
   touch(nodeId: string, ip: string, udpPort: number, profile?: Profile): PeerRecord | null {
     if (nodeId === this.selfNodeId) return null

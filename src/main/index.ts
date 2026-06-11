@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path'
 import { IpcChannels, IpcEvents, type AppInfo, type NetState, type PeerView } from '../shared/ipc'
 import { DEFAULT_UDP_PORT } from '../shared/protocol'
 import { loadAppState } from './store/app-state'
+import { openDatabase, type AppDatabase } from './store/db'
+import { PeersRepo } from './store/peers-repo'
 import { UdpChannel } from './net/udp'
 import { PeerRegistry } from './net/peer-registry'
 import { Discovery, type ManualPeer } from './net/discovery'
@@ -39,6 +41,9 @@ if (!gotLock) {
   const netState: NetState = { ok: false, udpPort, error: '' }
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
+  let db: AppDatabase | null = null
+  let peersRepo: PeersRepo | null = null
+  let persistTimer: ReturnType<typeof setTimeout> | null = null
 
   function toPeerView(record: PeerRecord): PeerView {
     return {
@@ -66,6 +71,15 @@ if (!gotLock) {
     registry = new PeerRegistry(state.nodeId)
     discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers })
 
+    // 存储层：打开失败不致命（磁盘满/权限问题时退化为内存模式，重启后丢历史联系人）
+    try {
+      db = openDatabase(join(app.getPath('userData'), 'data', 'db', 'chat.db'))
+      peersRepo = new PeersRepo(db)
+      registry.seed(peersRepo.loadAll()) // 历史联系人以离线态回灌（F-DISC-7）
+    } catch (err) {
+      console.error('[store] 数据库打开失败，本次会话为内存模式：', err)
+    }
+
     // 注册表变化 → 节流 200ms 推给渲染层（tech-design §4 事件推送约定）
     let pushTimer: ReturnType<typeof setTimeout> | null = null
     registry.on('updated', () => {
@@ -74,6 +88,13 @@ if (!gotLock) {
         pushTimer = null
         mainWindow?.webContents.send(IpcEvents.peersUpdated, peerViews())
       }, 200)
+      // 落库节流 1s：≤1000 行整表 upsert 在事务内毫秒级
+      if (!persistTimer) {
+        persistTimer = setTimeout(() => {
+          persistTimer = null
+          if (registry && peersRepo) peersRepo.upsertMany(registry.list())
+        }, 1000)
+      }
     })
 
     try {
@@ -161,6 +182,14 @@ if (!gotLock) {
   app.on('before-quit', () => {
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时
     discovery = null
+    if (persistTimer) clearTimeout(persistTimer)
+    try {
+      if (registry && peersRepo) peersRepo.upsertMany(registry.list()) // 离场前最后一次落库
+      db?.close()
+    } catch (err) {
+      console.error('[store] 退出落库失败：', err)
+    }
+    db = null
   })
 
   // v0.1 尚未实现托盘常驻：关窗即退出；托盘落地后改为隐藏到托盘
