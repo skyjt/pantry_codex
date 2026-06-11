@@ -19,7 +19,9 @@ import { setupTray } from './windows/tray'
 import { openSettingsWindow } from './windows/settings-window'
 import { parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
+import { GroupRepo } from './store/group-repo'
 import { FilesService } from './services/files'
+import { GroupsService } from './services/groups'
 import { SearchService } from './services/search'
 import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
@@ -71,6 +73,7 @@ if (!gotLock) {
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let chat: ChatService | null = null
   let files: FilesService | null = null
+  let groups: GroupsService | null = null
   let search: SearchService | null = null
   let msgRepoRef: MsgRepo | null = null
   let pruneTimer: ReturnType<typeof setInterval> | null = null
@@ -191,6 +194,17 @@ if (!gotLock) {
         console.error('[files] TCP 端口监听失败，文件发送可用但无法被拉取：', err)
       }
 
+      groups = new GroupsService({
+        selfId: state.nodeId,
+        messenger,
+        convRepo: new ConvRepo(db),
+        msgRepo: new MsgRepo(db),
+        groupRepo: new GroupRepo(db)
+      })
+      groups.on('message', onMessage)
+      groups.on('convs', onConvs)
+      groups.on('group', (view) => mainWindow?.webContents.send(IpcEvents.groupUpdated, view))
+
       search = new SearchService(db, registry, (id) => remarks.get(id) ?? '')
       msgRepoRef = new MsgRepo(db)
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
@@ -292,7 +306,8 @@ if (!gotLock) {
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
-      platform: process.platform
+      platform: process.platform,
+      nodeId: appState?.nodeId ?? ''
     }
   })
 
@@ -524,6 +539,45 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.uiOpenSettings, () => {
     openSettingsWindow(mainWindow)
+  })
+
+  ipcMain.handle(IpcChannels.groupCreate, (_event, name: unknown, memberIds: unknown) => {
+    if (typeof name !== 'string' || name.length > 32) return null
+    if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 64) return null
+    if (!memberIds.every((m) => typeof m === 'string' && m.length > 0 && m.length <= 64)) return null
+    return groups?.createGroup(name, memberIds as string[]) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.groupUpdate, (_event, groupId: unknown, patch: unknown) => {
+    if (typeof groupId !== 'string' || groupId.length > 64) return null
+    if (typeof patch !== 'object' || patch === null) return null
+    const p = patch as Record<string, unknown>
+    const clean: { name?: string; add?: string[]; remove?: string[] } = {}
+    if (typeof p.name === 'string' && p.name.length <= 32) clean.name = p.name
+    const ids = (v: unknown): string[] | undefined =>
+      Array.isArray(v) && v.every((m) => typeof m === 'string' && m.length <= 64)
+        ? (v as string[]).slice(0, 64)
+        : undefined
+    clean.add = ids(p.add)
+    clean.remove = ids(p.remove)
+    return groups?.updateGroup(groupId, clean) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.groupLeave, (_event, groupId: unknown) => {
+    if (typeof groupId === 'string' && groupId.length <= 64) groups?.leaveGroup(groupId)
+  })
+
+  ipcMain.handle(IpcChannels.groupGet, (_event, groupId: unknown) => {
+    if (typeof groupId !== 'string' || groupId.length > 64) return null
+    return groups?.get(groupId) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.groupList, () => groups?.list() ?? [])
+
+  ipcMain.handle(IpcChannels.groupSend, (_event, groupId: unknown, text: unknown) => {
+    if (typeof groupId !== 'string' || groupId.length > 64) return null
+    if (typeof text !== 'string' || text.length === 0 || text.length > 4096) return null
+    return groups?.sendText(groupId, text) ?? null
   })
 
   ipcMain.handle(IpcChannels.searchQuery, (_event, query: unknown) => {

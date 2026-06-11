@@ -21,12 +21,14 @@ class MemQueue implements QueueStore {
       .sort((a, b) => a.created - b.created)
       .map((i) => ({ msgId: i.msgId, envelopeJson: i.envelopeJson }))
   }
-  remove(msgId: string): void {
-    this.items = this.items.filter((i) => i.msgId !== msgId)
+  remove(msgId: string, peerId: string): void {
+    this.items = this.items.filter((i) => !(i.msgId === msgId && i.peerId === peerId))
   }
-  prune(ttlMs: number, maxPerPeer: number): string[] {
+  prune(ttlMs: number, maxPerPeer: number): Array<{ msgId: string; peerId: string }> {
     const cutoff = Date.now() - ttlMs
-    const pruned = this.items.filter((i) => i.created < cutoff).map((i) => i.msgId)
+    const pruned = this.items
+      .filter((i) => i.created < cutoff)
+      .map((i) => ({ msgId: i.msgId, peerId: i.peerId }))
     this.items = this.items.filter((i) => i.created >= cutoff)
     void maxPerPeer
     return pruned
@@ -172,6 +174,37 @@ describe('messenger 回环集成', () => {
     const again = await a.messenger.sendUserMessage(b.profile.nodeId, env)
     expect(again).toBe('sent')
     expect(b.incoming).toHaveLength(1)
+  })
+
+  it('群扇出：同一信封并发发给两个成员，互不串线（等待表复合键）', async () => {
+    nextPort += 4
+    const a = await makeStack('alice', nextPort)
+    const b = await makeStack('bob', nextPort + 1, [{ host: '127.0.0.1', port: a.port }])
+    const c = await makeStack('carol', nextPort + 2, [{ host: '127.0.0.1', port: a.port }])
+    a.discovery.start()
+    b.discovery.start()
+    c.discovery.start()
+    await waitFor(
+      () =>
+        a.registry.get(b.profile.nodeId)?.online === true &&
+        a.registry.get(c.profile.nodeId)?.online === true
+    )
+
+    const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, a.profile.nodeId, {
+      kind: 'group-text',
+      text: '群里好',
+      groupId: 'g-test',
+      groupRev: 1
+    })
+    const [r1, r2] = await Promise.all([
+      a.messenger.sendUserMessage(b.profile.nodeId, env),
+      a.messenger.sendUserMessage(c.profile.nodeId, env)
+    ])
+    expect(r1).toBe('sent')
+    expect(r2).toBe('sent')
+    expect(b.incoming).toHaveLength(1)
+    expect(c.incoming).toHaveLength(1)
+    expect(a.queue.items).toHaveLength(0)
   })
 
   it('离线入队 → 对方上线自动补发（含跨"重启"）', async () => {

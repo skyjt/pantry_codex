@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  GROUP_MAX_MEMBERS,
   LIMITS,
   MAX_FILES_PER_TRANSFER,
   MSG_TYPES,
@@ -11,6 +12,7 @@ import {
   type Envelope,
   type FileCtlOffer,
   type FileCtlPayload,
+  type GroupPayload,
   type MsgPayload,
   type PeersPayload,
   type PresencePayload,
@@ -87,10 +89,34 @@ function validatePayload(type: string, payload: unknown): boolean {
     case MSG_TYPES.msg: {
       if (!isRecord(payload)) return false
       const m = payload as Partial<MsgPayload>
-      if (m.kind !== 'text') return false // v0.1 白名单只放行 text
+      if (m.kind !== 'text' && m.kind !== 'group-text') return false
       if (typeof m.text !== 'string' || m.text.length === 0) return false
       if (Buffer.byteLength(m.text, 'utf8') > TEXT_UDP_LIMIT) return false
       if (m.resend !== undefined && typeof m.resend !== 'boolean') return false
+      if (m.kind === 'group-text') {
+        if (!isStr(m.groupId, LIMITS.id)) return false
+        if (!isInt(m.groupRev) || m.groupRev! < 0) return false
+      }
+      return true
+    }
+    case MSG_TYPES.group: {
+      if (!isRecord(payload)) return false
+      const g = payload as Partial<GroupPayload>
+      if (g.op === 'need') {
+        return isStr((g as { groupId?: unknown }).groupId, LIMITS.id)
+      }
+      if (g.op !== 'info') return false
+      const meta = (g as { group?: unknown }).group
+      if (!isRecord(meta)) return false
+      if (!isStr(meta.groupId, LIMITS.id)) return false
+      if (!isStr(meta.name, 32)) return false
+      if (!Array.isArray(meta.members) || meta.members.length === 0) return false
+      if (meta.members.length > GROUP_MAX_MEMBERS) return false
+      if (!meta.members.every((m2) => typeof m2 === 'string' && m2.length <= LIMITS.from))
+        return false
+      if (!isInt(meta.rev) || meta.rev < 1) return false
+      if (!isStr(meta.updatedBy, LIMITS.from)) return false
+      if (!isInt(meta.updatedTs) || meta.updatedTs <= 0) return false
       return true
     }
     case MSG_TYPES.ack: {
@@ -148,7 +174,6 @@ function validatePayload(type: string, payload: unknown): boolean {
     case MSG_TYPES.exit:
       return isRecord(payload)
     default:
-      // 其余已知类型（group）随对应功能落地时补校验
       return isRecord(payload)
   }
 }

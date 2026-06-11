@@ -12,6 +12,7 @@ export const useChatStore = defineStore('chat', {
     highlightId: null as string | null,
     /** 正在查看历史窗口（非最新页）——显示"回到最新"按钮 */
     viewingHistory: false,
+    selfId: '',
     initialized: false
   }),
   getters: {
@@ -30,6 +31,7 @@ export const useChatStore = defineStore('chat', {
       if (this.initialized) return
       this.initialized = true
       this.convs = await window.pantry.listConversations()
+      this.selfId = (await window.pantry.getAppInfo()).nodeId
 
       window.pantry.onConvsUpdated((convs) => {
         this.convs = convs
@@ -43,10 +45,9 @@ export const useChatStore = defineStore('chat', {
         const target = this.messages[event.convId]?.find((m) => m.id === event.id)
         if (target) target.status = event.status
       })
-      // 点系统通知/托盘 → 直达对应会话（F-SYS-2）
+      // 点系统通知/托盘 → 直达对应会话（F-SYS-2），单聊群聊通用
       window.pantry.onOpenConv((convId) => {
-        const peerId = convId.startsWith('single:') ? convId.slice(7) : null
-        if (peerId) void this.openPeer(peerId)
+        void this.openConv(convId)
       })
     },
 
@@ -61,12 +62,30 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    /** 按会话 id 打开（群会话 / 通知跳转通用） */
+    async openConv(convId: string): Promise<void> {
+      if (convId.startsWith('single:')) {
+        await this.openPeer(convId.slice(7))
+        return
+      }
+      this.activeConvId = convId
+      this.viewingHistory = false
+      if (!this.messages[convId]) {
+        this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
+      }
+      await window.pantry.markRead(convId)
+    },
+
     /** 搜索结果跳转：载入目标前后窗口并短暂高亮（ui-design §6） */
-    async jumpToMessage(peerId: string, seq: number, msgId: string): Promise<void> {
-      const conv = await window.pantry.openConversation(peerId)
-      if (!conv) return
-      this.activeConvId = conv.id
-      this.messages[conv.id] = await window.pantry.getMessageContext(conv.id, seq)
+    async jumpToMessage(convId: string, seq: number, msgId: string): Promise<void> {
+      if (convId.startsWith('single:')) {
+        const conv = await window.pantry.openConversation(convId.slice(7))
+        if (!conv) return
+      } else {
+        await window.pantry.markRead(convId)
+      }
+      this.activeConvId = convId
+      this.messages[convId] = await window.pantry.getMessageContext(convId, seq)
       this.viewingHistory = true
       this.highlightId = msgId || null
       setTimeout(() => {
@@ -94,7 +113,10 @@ export const useChatStore = defineStore('chat', {
     async send(text: string): Promise<boolean> {
       const conv = this.activeConv
       if (!conv) return false
-      const view = await window.pantry.sendText(conv.peerId, text)
+      const view =
+        conv.type === 'group'
+          ? await window.pantry.sendGroupText(conv.peerId, text)
+          : await window.pantry.sendText(conv.peerId, text)
       if (!view) return false
       const list = (this.messages[conv.id] ??= [])
       if (!list.some((m) => m.id === view.id)) list.push(view)

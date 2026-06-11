@@ -5,6 +5,8 @@ import {
   type AppInfo,
   type AppSettingsPatch,
   type ConversationView,
+  type GroupPatch,
+  type GroupView,
   type MessageView,
   type MsgStatusEvent,
   type NetState,
@@ -75,11 +77,22 @@ const api: PantryApi = {
   setPeerRemark: (nodeId: string, remark: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.peersSetRemark, nodeId, remark),
   openSettings: (): Promise<void> => ipcRenderer.invoke(IpcChannels.uiOpenSettings),
+  createGroup: (name: string, memberIds: string[]): Promise<GroupView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupCreate, name, memberIds),
+  updateGroup: (groupId: string, patch: GroupPatch): Promise<GroupView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupUpdate, groupId, patch),
+  leaveGroup: (groupId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.groupLeave, groupId),
+  getGroup: (groupId: string): Promise<GroupView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupGet, groupId),
+  listGroups: (): Promise<GroupView[]> => ipcRenderer.invoke(IpcChannels.groupList),
+  sendGroupText: (groupId: string, text: string): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupSend, groupId, text),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
   onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener),
   onTransferUpdated: (listener) => subscribe<TransferView>(IpcEvents.transferUpdated, listener),
+  onGroupUpdated: (listener) => subscribe<GroupView>(IpcEvents.groupUpdated, listener),
   onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener)
 }
 

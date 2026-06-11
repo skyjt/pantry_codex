@@ -2,34 +2,60 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
+import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { separatorTime } from '../utils/time'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
+import GroupPanel from './GroupPanel.vue'
 import type { MessageView } from '../../../shared/ipc'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
+const groupsStore = useGroupsStore()
 const transfersStore = useTransfersStore()
 transfersStore.init()
 
 const draft = ref('')
 const dragging = ref(false)
 const showEmoji = ref(false)
+const showMembers = ref(false)
 const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 
+const isGroup = computed(() => chatStore.activeConv?.type === 'group')
+const group = computed(() =>
+  isGroup.value && chatStore.activeConv
+    ? (groupsStore.byId[chatStore.activeConv.peerId] ?? null)
+    : null
+)
 const peer = computed(() => {
   const conv = chatStore.activeConv
-  if (!conv) return null
+  if (!conv || conv.type === 'group') return null
   return peersStore.peers.find((p) => p.nodeId === conv.peerId) ?? null
 })
-const peerName = computed(() =>
-  peer.value ? peer.value.remark || peer.value.nick : '未知节点'
-)
+const peerName = computed(() => {
+  if (isGroup.value) return group.value?.name ?? '讨论组'
+  return peer.value ? peer.value.remark || peer.value.nick : '未知节点'
+})
 const peerOnline = computed(() => peer.value?.online ?? false)
+/** 群：成员才可发；单聊：文本随时可发（离线走补发） */
+const canSend = computed(() => (isGroup.value ? (group.value?.amMember ?? false) : true))
+
+watch(
+  () => chatStore.activeConv?.peerId,
+  (id) => {
+    showMembers.value = false
+    if (isGroup.value && id) void groupsStore.ensure(id)
+  },
+  { immediate: true }
+)
+
+function senderName(msg: MessageView): string {
+  return peersStore.nameOf(msg.senderId)
+}
 
 const draftBytes = computed(() => new TextEncoder().encode(draft.value.trim()).length)
 const overLimit = computed(() => draftBytes.value > 800)
@@ -101,7 +127,7 @@ function insertEmoji(emoji: string): void {
 
 async function send(): Promise<void> {
   const text = draft.value.trim()
-  if (!text || overLimit.value) return
+  if (!text || overLimit.value || !canSend.value) return
   draft.value = ''
   await chatStore.send(text)
 }
@@ -189,13 +215,22 @@ async function onDrop(event: DragEvent): Promise<void> {
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <span class="title">{{ peerName }}</span>
-      <span class="state" :class="{ on: peerOnline }">{{ peerOnline ? '● 在线' : '离线' }}</span>
+      <span v-if="isGroup" class="state">{{ group?.members.length ?? 0 }} 人</span>
+      <span v-else class="state" :class="{ on: peerOnline }">{{
+        peerOnline ? '● 在线' : '离线'
+      }}</span>
+      <span class="head-spacer"></span>
+      <button v-if="isGroup" class="head-btn" title="成员" @click="showMembers = !showMembers">
+        👥
+      </button>
     </header>
 
-    <div ref="scrollArea" class="msgs" @scroll="onScroll">
+    <div class="body-wrap">
+      <div ref="scrollArea" class="msgs" @scroll="onScroll">
       <div v-if="loadingEarlier" class="sep">加载更早的消息…</div>
       <template v-for="(msg, i) in chatStore.activeMessages" :key="msg.id">
         <div v-if="needSeparator(msg, i)" class="sep">{{ separatorTime(msg.ts) }}</div>
+        <div v-if="isGroup && !msg.isMine" class="sender">{{ senderName(msg) }}</div>
         <div
           :id="`msg-${msg.id}`"
           class="row"
@@ -225,6 +260,13 @@ async function onDrop(event: DragEvent): Promise<void> {
           {{ statusHint(msg) }}
         </div>
       </template>
+      </div>
+      <GroupPanel
+        v-if="isGroup && showMembers && group"
+        :group="group"
+        :self-id="chatStore.selfId"
+        @close="showMembers = false"
+      />
     </div>
 
     <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
@@ -234,21 +276,46 @@ async function onDrop(event: DragEvent): Promise<void> {
     <footer class="input-area">
       <div class="toolbar">
         <EmojiPanel v-if="showEmoji" @select="insertEmoji" @close="showEmoji = false" />
-        <button class="tool" title="表情" @click="showEmoji = !showEmoji">😊</button>
-        <button class="tool" title="发送图片" :disabled="!peerOnline" @click="sendImage">🖼</button>
-        <button class="tool" title="发送文件" :disabled="!peerOnline" @click="sendFiles(false)">
+        <button class="tool" title="表情" :disabled="!canSend" @click="showEmoji = !showEmoji">
+          😊
+        </button>
+        <button
+          class="tool"
+          title="发送图片"
+          :disabled="isGroup || !peerOnline"
+          @click="sendImage"
+        >
+          🖼
+        </button>
+        <button
+          class="tool"
+          title="发送文件"
+          :disabled="isGroup || !peerOnline"
+          @click="sendFiles(false)"
+        >
           📁
         </button>
-        <button class="tool" title="发送文件夹" :disabled="!peerOnline" @click="sendFiles(true)">
+        <button
+          class="tool"
+          title="发送文件夹"
+          :disabled="isGroup || !peerOnline"
+          @click="sendFiles(true)"
+        >
           🗂
         </button>
-        <span v-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
+        <span v-if="isGroup" class="tool-hint">群内文件/图片将在后续版本支持</span>
+        <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
       </div>
       <textarea
         ref="inputEl"
         v-model="draft"
         class="input"
-        placeholder="输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送"
+        :disabled="!canSend"
+        :placeholder="
+          canSend
+            ? '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
+            : '你已不在该讨论组，无法发言'
+        "
         @keydown="onKeydown"
         @paste="onPaste"
       ></textarea>
@@ -256,7 +323,9 @@ async function onDrop(event: DragEvent): Promise<void> {
         <span v-if="draftBytes > 600" class="counter" :class="{ over: overLimit }">
           {{ draftBytes }} / 800 字节{{ overLimit ? '（超长文本将在 v0.2 随 TCP 通道支持）' : '' }}
         </span>
-        <button class="send" :disabled="!draft.trim() || overLimit" @click="send">发送</button>
+        <button class="send" :disabled="!draft.trim() || overLimit || !canSend" @click="send">
+          发送
+        </button>
       </div>
     </footer>
   </div>
@@ -356,10 +425,34 @@ async function onDrop(event: DragEvent): Promise<void> {
 .state.on {
   color: var(--online);
 }
+.body-wrap {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
 .msgs {
   flex: 1;
   overflow-y: auto;
   padding: 12px 16px;
+}
+.sender {
+  font-size: 11px;
+  color: var(--text-3);
+  margin: 4px 0 0 4px;
+}
+.head-spacer {
+  flex: 1;
+}
+.head-btn {
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.head-btn:hover {
+  background: var(--line);
 }
 .sep {
   text-align: center;

@@ -18,16 +18,18 @@ export class QueueRepo implements QueueStore {
     this.listStmt = db.prepare(
       'SELECT msg_id, envelope FROM send_queue WHERE peer_id = ? ORDER BY created'
     )
-    this.removeStmt = db.prepare('DELETE FROM send_queue WHERE msg_id = ?')
-    this.pruneTtlStmt = db.prepare('DELETE FROM send_queue WHERE created < ? RETURNING msg_id')
+    this.removeStmt = db.prepare('DELETE FROM send_queue WHERE msg_id = ? AND peer_id = ?')
+    this.pruneTtlStmt = db.prepare(
+      'DELETE FROM send_queue WHERE created < ? RETURNING msg_id, peer_id'
+    )
     this.overflowPeersStmt = db.prepare(`
       SELECT peer_id, COUNT(*) AS n FROM send_queue GROUP BY peer_id HAVING n > ?
     `)
     // 超限裁旧留新（最早入队的先裁）
     this.pruneOverflowStmt = db.prepare(`
-      DELETE FROM send_queue WHERE msg_id IN (
-        SELECT msg_id FROM send_queue WHERE peer_id = ? ORDER BY created ASC LIMIT ?
-      ) RETURNING msg_id
+      DELETE FROM send_queue WHERE (msg_id, peer_id) IN (
+        SELECT msg_id, peer_id FROM send_queue WHERE peer_id = ? ORDER BY created ASC LIMIT ?
+      ) RETURNING msg_id, peer_id
     `)
   }
 
@@ -40,20 +42,24 @@ export class QueueRepo implements QueueStore {
     return rows.map((r) => ({ msgId: r.msg_id, envelopeJson: r.envelope }))
   }
 
-  remove(msgId: string): void {
-    this.removeStmt.run(msgId)
+  remove(msgId: string, peerId: string): void {
+    this.removeStmt.run(msgId, peerId)
   }
 
-  prune(ttlMs: number, maxPerPeer: number): string[] {
-    const pruned: string[] = []
-    const expired = this.pruneTtlStmt.all(Date.now() - ttlMs) as Array<{ msg_id: string }>
-    pruned.push(...expired.map((r) => r.msg_id))
+  prune(ttlMs: number, maxPerPeer: number): Array<{ msgId: string; peerId: string }> {
+    const pruned: Array<{ msgId: string; peerId: string }> = []
+    const collect = (rows: Array<{ msg_id: string; peer_id: string }>): void => {
+      pruned.push(...rows.map((r) => ({ msgId: r.msg_id, peerId: r.peer_id })))
+    }
+    collect(this.pruneTtlStmt.all(Date.now() - ttlMs) as Array<{ msg_id: string; peer_id: string }>)
     const overflow = this.overflowPeersStmt.all(maxPerPeer) as Array<{ peer_id: string; n: number }>
     for (const peer of overflow) {
-      const cut = this.pruneOverflowStmt.all(peer.peer_id, peer.n - maxPerPeer) as Array<{
-        msg_id: string
-      }>
-      pruned.push(...cut.map((r) => r.msg_id))
+      collect(
+        this.pruneOverflowStmt.all(peer.peer_id, peer.n - maxPerPeer) as Array<{
+          msg_id: string
+          peer_id: string
+        }>
+      )
     }
     return pruned
   }

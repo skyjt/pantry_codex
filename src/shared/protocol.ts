@@ -120,13 +120,34 @@ export interface PeersPayload {
   peers: PeerSummary[]
 }
 
-/** 用户消息载荷（§7.1）。v0.1 仅 text；image/sticker/group-text 随功能落地扩展 */
+/** 群成员上限（requirements F-MSG-4） */
+export const GROUP_MAX_MEMBERS = 50
+
+/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊（逐成员单播，信封 id 跨成员复用） */
 export interface MsgPayload {
-  kind: 'text'
+  kind: 'text' | 'group-text'
   text: string
+  /** 仅 group-text */
+  groupId?: string
+  /** 仅 group-text：发送方所见群元数据版本，落后方触发 need 同步（§7.4） */
+  groupRev?: number
   /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
   resend?: boolean
 }
+
+/** 群元数据（§7.4）：rev 单调递增，冲突按 (rev, updatedTs) 取大（LWW） */
+export interface GroupMeta {
+  groupId: string
+  name: string
+  members: string[]
+  rev: number
+  updatedBy: string
+  updatedTs: number
+}
+
+export type GroupPayload =
+  | { op: 'info'; group: GroupMeta }
+  | { op: 'need'; groupId: string }
 
 /** ACK 载荷（§7.2） */
 export interface AckPayload {

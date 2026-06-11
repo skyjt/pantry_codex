@@ -25,7 +25,7 @@ import {
   type OutgoingFile
 } from '../net/transfer'
 import { sanitizeRelPath } from '../util/sanitize'
-import type { ConvRepo } from '../store/conv-repo'
+import { convRowToView, type ConvRepo } from '../store/conv-repo'
 import { MsgRepo, msgRowToView } from '../store/msg-repo'
 import type { TransferRepo } from '../store/transfer-repo'
 
@@ -564,16 +564,7 @@ export class FilesService extends EventEmitter {
   }
 
   private emitConvs(): void {
-    this.emit('convs', this.deps.convRepo.list().map((row) => ({
-      id: row.id,
-      type: 'single' as const,
-      peerId: row.peer_or_group_id,
-      lastTs: row.last_ts,
-      unread: row.unread,
-      pinned: row.pinned !== 0,
-      muted: row.muted !== 0,
-      preview: row.preview ?? ''
-    })))
+    this.emit('convs', this.deps.convRepo.list().map(convRowToView))
   }
 }
 
