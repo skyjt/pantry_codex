@@ -6,7 +6,7 @@
 
 产品形态参考：**内网通、飞秋（FeiQ）、IP Messenger（ipmsg）、iptux**。
 
-**项目状态：设计阶段**。当前仓库只有文档与参考资料（`references/` 下已存放 ipmsg、iptux 源码），代码脚手架尚未初始化。
+**项目状态：开发中**。v0.1 里程碑已落地（同网段发现、单聊文本与离线补发、托盘通知、首启向导），进度以 `git log` 为准，里程碑规划见 [docs/tech-design.md](docs/tech-design.md) §12。
 
 ## 核心特性（规划）
 

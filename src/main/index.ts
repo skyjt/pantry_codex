@@ -1,9 +1,19 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, type Tray } from 'electron'
 import { release } from 'node:os'
 import { join, resolve } from 'node:path'
-import { IpcChannels, IpcEvents, type AppInfo, type NetState, type PeerView } from '../shared/ipc'
-import { DEFAULT_UDP_PORT } from '../shared/protocol'
-import { loadAppState } from './store/app-state'
+import {
+  IpcChannels,
+  IpcEvents,
+  type AppInfo,
+  type MessageView,
+  type NetState,
+  type PeerView,
+  type ProfileSubmit,
+  type SettingsView
+} from '../shared/ipc'
+import { DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
+import { loadAppState, saveProfile, type AppState } from './store/app-state'
+import { setupTray } from './windows/tray'
 import { openDatabase, openMemoryDatabase, type AppDatabase } from './store/db'
 import { PeersRepo } from './store/peers-repo'
 import { ConvRepo } from './store/conv-repo'
@@ -52,6 +62,16 @@ if (!gotLock) {
   let persistTimer: ReturnType<typeof setTimeout> | null = null
   let chat: ChatService | null = null
   let pruneTimer: ReturnType<typeof setInterval> | null = null
+  let appState: AppState | null = null
+  let tray: Tray | null = null
+  let isQuitting = false
+
+  function showMainWindow(): void {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
 
   function toPeerView(record: PeerRecord): PeerView {
     return {
@@ -74,7 +94,8 @@ if (!gotLock) {
   }
 
   async function startNet(): Promise<void> {
-    const state = loadAppState(app.getPath('userData'), app.getVersion())
+    const state = appState
+    if (!state) return
     const udp = new UdpChannel({ port: udpPort })
     registry = new PeerRegistry(state.nodeId)
     discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers })
@@ -110,9 +131,16 @@ if (!gotLock) {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
         }
       })
-      chat.on('message', (msg) => mainWindow?.webContents.send(IpcEvents.msgNew, msg))
+      chat.on('message', (msg: MessageView) => {
+        mainWindow?.webContents.send(IpcEvents.msgNew, msg)
+        notifyIncoming(msg)
+      })
       chat.on('status', (ev) => mainWindow?.webContents.send(IpcEvents.msgStatus, ev))
-      chat.on('convs', (convs) => mainWindow?.webContents.send(IpcEvents.convsUpdated, convs))
+      chat.on('convs', (convs: Array<{ unread: number }>) => {
+        mainWindow?.webContents.send(IpcEvents.convsUpdated, convs)
+        const total = convs.reduce((sum, c) => sum + c.unread, 0)
+        if (process.platform === 'darwin') app.dock?.setBadge(total > 0 ? String(total) : '')
+      })
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
       pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
       pruneTimer.unref?.()
@@ -148,6 +176,24 @@ if (!gotLock) {
     mainWindow?.webContents.send(IpcEvents.netState, netState)
   }
 
+  /** 新消息系统通知（F-SYS-2）：窗口聚焦时不打扰（应用内角标已可见）；点击直达会话 */
+  function notifyIncoming(msg: MessageView): void {
+    if (msg.isMine) return
+    if (appState && appState.config.notifications === false) return
+    if (mainWindow && mainWindow.isFocused() && mainWindow.isVisible()) return
+    if (!Notification.isSupported()) return
+
+    const nick = registry?.get(msg.senderId)?.profile.nick ?? '新消息'
+    const body = msg.text.length > 60 ? `${msg.text.slice(0, 60)}…` : msg.text
+    const notification = new Notification({ title: nick, body, silent: true }) // 决议：默认静音
+    notification.on('click', () => {
+      showMainWindow()
+      mainWindow?.webContents.send(IpcEvents.openConv, msg.convId)
+    })
+    notification.show()
+    if (process.platform === 'win32') mainWindow?.flashFrame(true) // 任务栏闪烁提醒
+  }
+
   function createMainWindow(): void {
     mainWindow = new BrowserWindow({
       width: 960,
@@ -169,6 +215,13 @@ if (!gotLock) {
     mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
 
     mainWindow.once('ready-to-show', () => mainWindow?.show())
+    // 关窗 = 进托盘常驻（F-SYS-1）；托盘不可用的桌面环境降级为直接退出
+    mainWindow.on('close', (event) => {
+      if (isQuitting || !tray) return
+      event.preventDefault()
+      mainWindow?.hide()
+    })
+    mainWindow.on('focus', () => mainWindow?.flashFrame(false))
     mainWindow.on('closed', () => {
       mainWindow = null
     })
@@ -229,6 +282,59 @@ if (!gotLock) {
     return chat?.resend(msgId) ?? false
   })
 
+  function settingsView(): SettingsView {
+    const c = appState?.config
+    return {
+      nick: c?.nick ?? '',
+      company: c?.company ?? '',
+      dept: c?.dept ?? '',
+      team: c?.team ?? '',
+      setupDone: c?.setupDone ?? true,
+      fileDir: c?.fileDir ?? '',
+      defaultFileDir: join(app.getPath('downloads'), '茶话间')
+    }
+  }
+
+  function isValidSubmit(x: unknown): x is ProfileSubmit {
+    if (typeof x !== 'object' || x === null) return false
+    const s = x as Record<string, unknown>
+    const str = (v: unknown, max: number, allowEmpty: boolean): boolean =>
+      typeof v === 'string' && v.length <= max && (allowEmpty || v.trim().length > 0)
+    return (
+      str(s.nick, LIMITS.nick, false) &&
+      str(s.company, LIMITS.company, true) &&
+      str(s.dept, LIMITS.dept, true) &&
+      str(s.team, LIMITS.team, true) &&
+      typeof s.fileDir === 'string' &&
+      s.fileDir.length <= 1024
+    )
+  }
+
+  ipcMain.handle(IpcChannels.settingsGet, (): SettingsView => settingsView())
+
+  ipcMain.handle(IpcChannels.settingsSaveProfile, (_event, submit: unknown): SettingsView => {
+    if (appState && isValidSubmit(submit)) {
+      saveProfile(appState, {
+        nick: submit.nick.trim(),
+        company: submit.company.trim(),
+        dept: submit.dept.trim(),
+        team: submit.team.trim(),
+        fileDir: submit.fileDir.trim()
+      })
+      discovery?.announceProfile() // 资料变更即时广播（F-DISC-7 的发送侧）
+    }
+    return settingsView()
+  })
+
+  ipcMain.handle(IpcChannels.settingsPickDir, async (): Promise<string | null> => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择文件保存位置',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -237,16 +343,30 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
+    appState = loadAppState(app.getPath('userData'), app.getVersion())
     createMainWindow()
+    tray = setupTray({
+      showWindow: showMainWindow,
+      quit: () => {
+        isQuitting = true
+        app.quit()
+      }
+    })
     void startNet()
 
     // 冒烟模式：窗口能起、1.5s 后干净退出即算通过（tech-design §10 的 CI 烟测同款）
     if (process.env['PANTRY_SMOKE']) {
-      setTimeout(() => app.quit(), 1500)
+      setTimeout(() => {
+        isQuitting = true
+        app.quit()
+      }, 1500)
     }
   })
 
+  app.on('activate', () => showMainWindow()) // macOS 点 Dock 唤起
+
   app.on('before-quit', () => {
+    isQuitting = true
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时
     discovery = null
     if (pruneTimer) clearInterval(pruneTimer)

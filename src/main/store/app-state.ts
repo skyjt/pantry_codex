@@ -13,13 +13,19 @@ interface IdentityFile {
   createdAt: number
 }
 
-interface ConfigFile {
+export interface ConfigFile {
   nick: string
   company: string
   dept: string
   team: string
   avatar: number
   profileRev: number
+  /** 首次启动向导是否已完成（F-SYS-6） */
+  setupDone: boolean
+  /** 文件保存目录；空 = 跟随系统下载目录（文件功能 v0.2 使用） */
+  fileDir: string
+  /** 新消息系统通知开关 */
+  notifications: boolean
 }
 
 function readJson<T>(path: string): T | null {
@@ -39,6 +45,44 @@ function detectPlatform(): Platform {
 export interface AppState {
   nodeId: string
   profile: Profile
+  config: ConfigFile
+  configPath: string
+}
+
+export interface ProfilePatch {
+  nick: string
+  company: string
+  dept: string
+  team: string
+  fileDir: string
+}
+
+/**
+ * 保存向导/设置提交的资料：资料字段有变则 profileRev+1（触发全网刷新），
+ * 同步原地更新 profile 对象（discovery 持引用，presence 立即携带新 rev）。
+ */
+export function saveProfile(state: AppState, patch: ProfilePatch): void {
+  const { config, profile } = state
+  const profileChanged =
+    patch.nick !== config.nick ||
+    patch.company !== config.company ||
+    patch.dept !== config.dept ||
+    patch.team !== config.team
+
+  config.nick = patch.nick
+  config.company = patch.company
+  config.dept = patch.dept
+  config.team = patch.team
+  config.fileDir = patch.fileDir
+  config.setupDone = true
+  if (profileChanged) config.profileRev += 1
+  atomicWriteJson(state.configPath, config)
+
+  profile.nick = config.nick
+  profile.company = config.company
+  profile.dept = config.dept
+  profile.team = config.team
+  profile.profileRev = config.profileRev
 }
 
 export function loadAppState(dataDir: string, appVersion: string): AppState {
@@ -59,9 +103,23 @@ export function loadAppState(dataDir: string, appVersion: string): AppState {
     } catch {
       // 某些受限环境拿不到用户名，保持默认
     }
-    config = { nick, company: '', dept: '', team: '', avatar: -1, profileRev: 1 }
+    config = {
+      nick,
+      company: '',
+      dept: '',
+      team: '',
+      avatar: -1,
+      profileRev: 1,
+      setupDone: false,
+      fileDir: '',
+      notifications: true
+    }
     atomicWriteJson(configPath, config)
   }
+  // 老配置文件升级：补默认字段
+  config.setupDone = config.setupDone === true
+  config.fileDir = typeof config.fileDir === 'string' ? config.fileDir : ''
+  config.notifications = config.notifications !== false
 
   const profile: Profile = {
     nodeId: identity.nodeId,
@@ -78,5 +136,5 @@ export function loadAppState(dataDir: string, appVersion: string): AppState {
     caps: []
   }
 
-  return { nodeId: identity.nodeId, profile }
+  return { nodeId: identity.nodeId, profile, config, configPath }
 }

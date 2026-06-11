@@ -13,7 +13,10 @@ export const IpcChannels = {
   convMarkRead: 'conv:mark-read',
   msgPage: 'msg:page',
   msgSend: 'msg:send',
-  msgResend: 'msg:resend'
+  msgResend: 'msg:resend',
+  settingsGet: 'settings:get',
+  settingsSaveProfile: 'settings:save-profile',
+  settingsPickDir: 'settings:pick-dir'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -22,7 +25,9 @@ export const IpcEvents = {
   netState: 'net:state',
   msgNew: 'msg:new',
   msgStatus: 'msg:status',
-  convsUpdated: 'convs:updated'
+  convsUpdated: 'convs:updated',
+  /** 点击系统通知/托盘 → 主窗定位到会话 */
+  openConv: 'ui:open-conv'
 } as const
 
 export interface AppInfo {
@@ -85,6 +90,27 @@ export interface MsgStatusEvent {
   status: MessageView['status']
 }
 
+/** 我的资料 + 首启向导状态（F-SYS-6） */
+export interface SettingsView {
+  nick: string
+  company: string
+  dept: string
+  team: string
+  setupDone: boolean
+  /** 用户自选的文件保存目录；空 = 跟随默认 */
+  fileDir: string
+  /** 系统默认下载目录（向导第三步展示用） */
+  defaultFileDir: string
+}
+
+export interface ProfileSubmit {
+  nick: string
+  company: string
+  dept: string
+  team: string
+  fileDir: string
+}
+
 /** preload 经 contextBridge 暴露到 window.pantry 的 API 形状 */
 export interface PantryApi {
   getAppInfo(): Promise<AppInfo>
@@ -101,9 +127,16 @@ export interface PantryApi {
   /** 发文本；超长（>800 字节）或空白返回 null */
   sendText(peerNodeId: string, text: string): Promise<MessageView | null>
   resendMessage(msgId: string): Promise<boolean>
+  getSettings(): Promise<SettingsView>
+  /** 保存资料（向导/设置）：资料有变自动广播刷新全网 */
+  saveProfile(submit: ProfileSubmit): Promise<SettingsView>
+  /** 弹系统目录选择框；取消返回 null */
+  pickDirectory(): Promise<string | null>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void
   onMsgStatus(listener: (event: MsgStatusEvent) => void): () => void
   onConvsUpdated(listener: (convs: ConversationView[]) => void): () => void
+  /** 点通知/托盘后主进程要求打开某会话 */
+  onOpenConv(listener: (convId: string) => void): () => void
 }

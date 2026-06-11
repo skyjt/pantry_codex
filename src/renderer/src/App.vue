@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import type { AppInfo } from '../../shared/ipc'
+import type { AppInfo, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
 import PeerList from './components/PeerList.vue'
 import ConvList from './components/ConvList.vue'
 import ChatPane from './components/ChatPane.vue'
+import SetupWizard from './components/SetupWizard.vue'
 
 type Tab = 'chat' | 'contacts'
 
 const tab = ref<Tab>('chat')
 const info = ref<AppInfo | null>(null)
+const settings = ref<SettingsView | null>(null)
+const showWizard = ref(false)
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
 
@@ -18,10 +21,13 @@ onMounted(async () => {
   void peersStore.init()
   void chatStore.init()
   info.value = await window.pantry.getAppInfo()
+  settings.value = await window.pantry.getSettings()
+  showWizard.value = settings.value !== null && !settings.value.setupDone
 })
 </script>
 
 <template>
+  <SetupWizard v-if="showWizard && settings" :settings="settings" @done="showWizard = false" />
   <div class="shell">
     <nav class="rail">
       <div class="avatar">茶</div>

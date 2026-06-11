@@ -39,6 +39,11 @@ export const useChatStore = defineStore('chat', {
         const target = this.messages[event.convId]?.find((m) => m.id === event.id)
         if (target) target.status = event.status
       })
+      // 点系统通知/托盘 → 直达对应会话（F-SYS-2）
+      window.pantry.onOpenConv((convId) => {
+        const peerId = convId.startsWith('single:') ? convId.slice(7) : null
+        if (peerId) void this.openPeer(peerId)
+      })
     },
 
     /** 从通讯录或会话列表进入会话 */
