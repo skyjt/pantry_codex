@@ -92,6 +92,17 @@ export class Discovery {
     this.udp.send(this.envEntry(), host, port)
   }
 
+  /** 资料变更广播（向导/设置保存后）：同网段即时刷新；跨网段靠 presence 的 rev 失配兜底 */
+  announceProfile(): void {
+    const env = makeEnvelope<ProfilePayload>(MSG_TYPES.profile, this.selfId, {
+      profile: this.profile
+    })
+    this.udp.broadcast(env)
+    for (const record of this.registry.list()) {
+      if (record.online) this.udp.send(env, record.ip, record.udpPort)
+    }
+  }
+
   /** 探活已知节点；未知节点返回 false */
   probeNode(nodeId: string): boolean {
     const record = this.registry.get(nodeId)

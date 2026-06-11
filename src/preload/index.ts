@@ -8,7 +8,9 @@ import {
   type MsgStatusEvent,
   type NetState,
   type PantryApi,
-  type PeerView
+  type PeerView,
+  type ProfileSubmit,
+  type SettingsView
 } from '../shared/ipc'
 
 function subscribe<T>(channel: string, listener: (data: T) => void): () => void {
@@ -34,10 +36,15 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.msgSend, peerNodeId, text),
   resendMessage: (msgId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.msgResend, msgId),
+  getSettings: (): Promise<SettingsView> => ipcRenderer.invoke(IpcChannels.settingsGet),
+  saveProfile: (submit: ProfileSubmit): Promise<SettingsView> =>
+    ipcRenderer.invoke(IpcChannels.settingsSaveProfile, submit),
+  pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.settingsPickDir),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
-  onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener)
+  onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener),
+  onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener)
 }
 
 contextBridge.exposeInMainWorld('pantry', api)
