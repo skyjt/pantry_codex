@@ -60,7 +60,11 @@ export const IpcChannels = {
   stickerList: 'sticker:list',
   stickerRemove: 'sticker:remove',
   stickerReorder: 'sticker:reorder',
-  stickerSend: 'sticker:send'
+  stickerSend: 'sticker:send',
+  /** 沉浸式无标题栏（决议 #49）：Windows/Linux 自绘窗口控制按钮用 */
+  winMinimize: 'win:minimize',
+  winToggleMaximize: 'win:toggle-maximize',
+  winIsMaximized: 'win:is-maximized'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -79,7 +83,9 @@ export const IpcEvents = {
   /** 点击系统通知/托盘 → 主窗定位到会话 */
   openConv: 'ui:open-conv',
   /** 设置页保存后广播给所有窗口，统一主题/字体等外观 */
-  settingsUpdated: 'settings:updated'
+  settingsUpdated: 'settings:updated',
+  /** 窗口最大化状态变化 → 自绘控制按钮切换图标（决议 #49） */
+  winMaximizeChanged: 'win:maximized-changed'
 } as const
 
 export interface AppInfo {
@@ -448,4 +454,11 @@ export interface PantryApi {
   onOpenConv(listener: (convId: string) => void): () => void
   /** 设置变更后同步主窗/设置窗外观 */
   onSettingsUpdated(listener: (settings: SettingsView) => void): () => void
+  /** 沉浸式无标题栏（决议 #49）：最小化当前窗口 */
+  minimizeWindow(): Promise<void>
+  /** 最大化/还原当前窗口；返回切换后是否处于最大化 */
+  toggleMaximizeWindow(): Promise<boolean>
+  isWindowMaximized(): Promise<boolean>
+  /** 当前窗口最大化状态变化（自绘按钮切图标用） */
+  onWinMaximizeChanged(listener: (maximized: boolean) => void): () => void
 }

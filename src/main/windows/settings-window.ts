@@ -21,6 +21,10 @@ export function openSettingsWindow(parent: BrowserWindow | null): void {
     show: false,
     title: '设置 - 茶话间',
     parent: parent ?? undefined,
+    // 沉浸式无标题栏（决议 #49）：mac 红绿灯内嵌（最小化/最大化自动灰显），Win/Linux 自绘关闭按钮
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 10 } }
+      : { frame: false }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

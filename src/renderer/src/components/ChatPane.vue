@@ -5,6 +5,8 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { splitEmojiText } from '../utils/compat-emoji'
+import { emojiAdvanceWidth, fontOfStyle } from '../utils/emoji-metrics'
+import { emojiToTwemojiCode, twemojiUrl } from '../utils/twemoji-assets'
 import { listTime, separatorTime } from '../utils/time'
 import AvatarMark from './AvatarMark.vue'
 import CompatEmoji from './CompatEmoji.vue'
@@ -122,6 +124,30 @@ const inputPlaceholder = computed(() => {
 })
 const draftEmojiParts = computed(() => splitEmojiText(draft.value))
 const draftUsesEmojiMirror = computed(() => draftEmojiParts.value.some((part) => part.emoji))
+/** textarea 的实际 font（measureText 用）；为空时镜像退化为原字符渲染，宽度天然一致 */
+const inputFont = ref('')
+interface MirrorPart {
+  text: string
+  emoji: boolean
+  width: number
+  src: string
+}
+// 镜像层 emoji 的占位宽度 = textarea 字体下该字符的真实 advance 宽度（决议 #48 对齐修正）
+const draftMirrorParts = computed<MirrorPart[]>(() =>
+  draftEmojiParts.value.map((part) => {
+    if (!part.emoji || !inputFont.value) return { ...part, width: 0, src: '' }
+    return {
+      ...part,
+      width: emojiAdvanceWidth(part.text, inputFont.value),
+      src: twemojiUrl(emojiToTwemojiCode(part.text))
+    }
+  })
+)
+
+function refreshInputFont(): void {
+  const ta = inputEl.value
+  inputFont.value = ta ? fontOfStyle(getComputedStyle(ta)) : ''
+}
 const historyResultMeta = computed(() => {
   if (historySearching.value) return '搜索中'
   return `${historyHits.value.length} 条结果`
@@ -174,9 +200,11 @@ function onDocumentPointerDown(event: MouseEvent): void {
 
 onMounted(async () => {
   document.addEventListener('mousedown', onDocumentPointerDown)
+  refreshInputFont()
   settings.value = await window.pantry.getSettings()
   stopSettings = window.pantry.onSettingsUpdated((next) => {
     settings.value = next
+    void nextTick(refreshInputFont)
   })
 })
 
@@ -1214,8 +1242,14 @@ async function onDrop(event: DragEvent): Promise<void> {
             class="input-mirror-content"
             :style="{ transform: `translateY(-${inputScrollTop}px)` }"
           >
-            <template v-for="(part, index) in draftEmojiParts" :key="index">
-              <CompatEmoji v-if="part.emoji" :emoji="part.text" />
+            <template v-for="(part, index) in draftMirrorParts" :key="index">
+              <span
+                v-if="part.emoji && part.width > 0 && part.src"
+                class="mirror-emoji"
+                :style="{ width: `${part.width}px` }"
+              >
+                <img :src="part.src" alt="" aria-hidden="true" draggable="false" />
+              </span>
               <span v-else>{{ part.text }}</span>
             </template>
             <span v-if="draft.endsWith('\n')">&nbsp;</span>
@@ -1798,12 +1832,13 @@ async function onDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
 }
 .head {
-  height: 52px;
-  flex: 0 0 52px;
+  /* 沉浸式（决议 #49）：头部背景直通窗口顶，内容压在 32px 拖拽带下方 */
+  height: 84px;
+  flex: 0 0 84px;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 16px;
+  padding: 32px 16px 0;
   background: var(--bg-window);
   border-bottom: 1px solid var(--line);
   -webkit-app-region: no-drag;
@@ -2234,8 +2269,22 @@ async function onDrop(event: DragEvent): Promise<void> {
   padding: 0;
   will-change: transform;
 }
-.input-mirror :deep(.compat-emoji) {
-  font-size: 14px;
+/* emoji 占位槽：宽度由脚本按 textarea 字体逐字符测量，保证与底层文本逐一对齐；
+   高度压在 1em 内不撑行高，图形绝对定位居中、允许少量视觉溢出 */
+.mirror-emoji {
+  position: relative;
+  display: inline-block;
+  height: 1em;
+  vertical-align: -0.125em;
+}
+.mirror-emoji img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(1.22em, 100%);
+  height: auto;
+  transform: translate(-50%, -52%);
+  pointer-events: none;
 }
 .input-bar {
   display: flex;

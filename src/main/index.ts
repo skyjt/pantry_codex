@@ -515,6 +515,11 @@ if (!gotLock) {
       minHeight: 640,
       show: false,
       title: mainWindowTitle(),
+      // 沉浸式无标题栏（决议 #49）：mac 保留内嵌红绿灯；Win/Linux 渲染层自绘控制按钮。
+      // Windows 不关 thickFrame，边缘缩放与 Aero Snap 保持系统行为；不使用透明窗口（Win7 软渲染安全）。
+      ...(process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 10 } }
+        : { frame: false }),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         contextIsolation: true,
@@ -522,6 +527,14 @@ if (!gotLock) {
         nodeIntegration: false
       }
     })
+
+    // 最大化状态推送：渲染层自绘「最大化/还原」按钮据此切图标
+    mainWindow.on('maximize', () =>
+      mainWindow?.webContents.send(IpcEvents.winMaximizeChanged, true)
+    )
+    mainWindow.on('unmaximize', () =>
+      mainWindow?.webContents.send(IpcEvents.winMaximizeChanged, false)
+    )
 
     // 安全红线（README）：不放行任何窗口内导航与新窗口
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -556,6 +569,23 @@ if (!gotLock) {
       platform: process.platform,
       nodeId: appState?.nodeId ?? ''
     }
+  })
+
+  // 窗口控制（决议 #49）：按调用方 webContents 定位窗口，主窗/设置窗通用
+  ipcMain.handle(IpcChannels.winMinimize, (event): void => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize()
+  })
+
+  ipcMain.handle(IpcChannels.winToggleMaximize, (event): boolean => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || !win.isMaximizable()) return false
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    return win.isMaximized()
+  })
+
+  ipcMain.handle(IpcChannels.winIsMaximized, (event): boolean => {
+    return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
   })
 
   ipcMain.handle(IpcChannels.appOpenUrl, async (_event, raw: unknown): Promise<boolean> => {
