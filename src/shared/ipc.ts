@@ -25,6 +25,7 @@ export const IpcChannels = {
   settingsPickDir: 'settings:pick-dir',
   filePick: 'file:pick',
   fileOffer: 'file:offer',
+  groupFileOffer: 'group-file:offer',
   fileAccept: 'file:accept',
   fileDecline: 'file:decline',
   fileCancel: 'file:cancel',
@@ -35,6 +36,8 @@ export const IpcChannels = {
   dataImport: 'data:import',
   imgSendBytes: 'img:send-bytes',
   imgOfferPath: 'img:offer-path',
+  groupImgSendBytes: 'group-img:send-bytes',
+  groupImgOfferPath: 'group-img:offer-path',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
   msgContext: 'msg:context',
@@ -128,6 +131,8 @@ export interface ConversationView {
 /** 文件消息引用（messages.file_ref 的 JSON 结构） */
 export interface FileRefView {
   transferId: string
+  /** 群聊发送侧：同一条群消息对应的多个点对点 transfer */
+  transferIds?: string[]
   name: string
   size: number
   count: number
@@ -203,6 +208,7 @@ export interface GroupView {
   amMember: boolean
   creatorIp: string
   hasAdminPassword: boolean
+  adminHint: string
   /** 当前本机是否可不输入密码直接管理（无密码组的创建 IP） */
   canManage: boolean
 }
@@ -339,6 +345,8 @@ export interface PantryApi {
   pickFiles(directory: boolean): Promise<string[] | null>
   /** 发起文件传输（对方离线直接失败，不入队——决议 #4）；返回本地文件消息 */
   offerFiles(peerNodeId: string, paths: string[]): Promise<MessageView | null>
+  /** 发起群聊文件传输：只投递给当前在线群成员 */
+  offerGroupFiles(groupId: string, paths: string[]): Promise<MessageView | null>
   /** 接收（saveAs=true 先弹目录选择）；返回是否开始 */
   acceptTransfer(transferId: string, saveAs: boolean): Promise<boolean>
   declineTransfer(transferId: string): Promise<void>
@@ -353,6 +361,9 @@ export interface PantryApi {
   sendImageBytes(peerNodeId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null>
   /** 磁盘上的图片文件按图片消息发送（拖拽/选择器入口） */
   offerImagePath(peerNodeId: string, path: string): Promise<MessageView | null>
+  /** 群聊图片：按在线群成员逐个发 purpose:image offer */
+  sendGroupImageBytes(groupId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null>
+  offerGroupImagePath(groupId: string, path: string): Promise<MessageView | null>
   /** 大图查看器"另存为" */
   saveImageAs(transferId: string): Promise<boolean>
   /** 全局搜索（防抖在渲染层做） */
@@ -369,8 +380,13 @@ export interface PantryApi {
   setPeerRemark(nodeId: string, remark: string): Promise<void>
   /** 打开设置窗口 */
   openSettings(): Promise<void>
-  /** 建讨论组（自动含自己，≥2 人）；adminPassword 可空；返回 null 表示参数不足 */
-  createGroup(name: string, memberIds: string[], adminPassword?: string): Promise<GroupView | null>
+  /** 建讨论组（自动含自己，≥2 人）；adminPassword/adminHint 可空；返回 null 表示参数不足 */
+  createGroup(
+    name: string,
+    memberIds: string[],
+    adminPassword?: string,
+    adminHint?: string
+  ): Promise<GroupView | null>
   /** 改名/增删成员；按创建 IP 或管理密码校验 */
   updateGroup(groupId: string, patch: GroupPatch): Promise<GroupView | null>
   leaveGroup(groupId: string): Promise<void>

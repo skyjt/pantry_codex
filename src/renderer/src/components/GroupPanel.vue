@@ -24,7 +24,11 @@ const canShowAdmin = computed(
 )
 const adminTip = computed(() => {
   if (!props.group.amMember) return ''
-  if (props.group.hasAdminPassword) return '群管理需要管理密码'
+  if (props.group.hasAdminPassword) {
+    return props.group.adminHint
+      ? `群管理需要管理密码；提示：${props.group.adminHint}`
+      : '群管理需要管理密码'
+  }
   if (props.group.canManage) return '当前 IP 可管理此群'
   return `仅创建 IP ${props.group.creatorIp || '未知'} 可管理此群`
 })
@@ -57,7 +61,10 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
   if (!props.group.canManage && !props.group.hasAdminPassword) return false
   const payload = { ...patch }
   if (props.group.hasAdminPassword) {
-    const password = adminPassword.value || window.prompt('请输入群管理密码')?.trim() || ''
+    const promptText = props.group.adminHint
+      ? `请输入群管理密码\n提示：${props.group.adminHint}`
+      : '请输入群管理密码'
+    const password = adminPassword.value || window.prompt(promptText)?.trim() || ''
     if (!password) return false
     adminPassword.value = password
     Object.assign(payload, { adminPassword: password })

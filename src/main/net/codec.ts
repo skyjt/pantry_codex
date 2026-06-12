@@ -145,6 +145,12 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       ) {
         return false
       }
+      if (
+        meta.adminHint !== undefined &&
+        !isStrAllowEmpty(meta.adminHint, LIMITS.groupAdminHint)
+      ) {
+        return false
+      }
       return true
     }
     case MSG_TYPES.ack: {
@@ -167,6 +173,12 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
         return false
       if (!isStr(o.rootName, 255)) return false
       if (o.purpose !== undefined && o.purpose !== 'image' && o.purpose !== 'sticker') return false
+      if (o.groupId !== undefined) {
+        if (!isStr(o.groupId, LIMITS.id)) return false
+        if (!isInt(o.groupRev) || o.groupRev < 0) return false
+      } else if (o.groupRev !== undefined) {
+        return false
+      }
       if (!Array.isArray(o.files) || o.files.length === 0 || o.files.length > OFFER_FILES_PER_PACKET)
         return false
       return o.files.every(

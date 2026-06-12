@@ -95,13 +95,15 @@ describe('GroupsService 群管理权限', () => {
   it('有密码组必须输入正确密码才能管理，且不保存明文', () => {
     const repo = new FakeGroupRepo()
     const groups = service({ selfIp: '10.0.0.1', groupRepo: repo })
-    const group = groups.createGroup('加密管理组', ['node-bob'], 's3cret')
+    const group = groups.createGroup('加密管理组', ['node-bob'], 's3cret', '项目代号')
     const meta = repo.get(group!.groupId)
 
     expect(group?.hasAdminPassword).toBe(true)
+    expect(group?.adminHint).toBe('项目代号')
     expect(group?.canManage).toBe(false)
     expect(meta?.adminSecretHash).toMatch(/^[a-f0-9]{64}$/)
     expect(meta?.adminSecretHash.includes('s3cret')).toBe(false)
+    expect(meta?.adminHint).toBe('项目代号')
 
     expect(groups.updateGroup(group!.groupId, { name: '错误密码', adminPassword: 'bad' })).toBeNull()
     expect(groups.updateGroup(group!.groupId, { name: '正确密码', adminPassword: 's3cret' })?.name).toBe(
@@ -121,7 +123,8 @@ describe('GroupsService 群管理权限', () => {
       updatedBy: 'node-self',
       updatedTs: 1000,
       creatorIp: '10.0.0.1',
-      adminSecretHash: ''
+      adminSecretHash: '',
+      adminHint: ''
     }
     repo.save(local)
 

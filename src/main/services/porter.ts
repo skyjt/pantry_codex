@@ -74,6 +74,7 @@ interface GroupDump {
   updatedTs: number
   creatorIp?: string
   adminSecretHash?: string
+  adminHint?: string
 }
 
 interface StickerDump {
@@ -236,7 +237,8 @@ export class PorterService {
       .prepare(
         `SELECT group_id AS groupId, name, members, rev, updated_by AS updatedBy,
                 updated_ts AS updatedTs, creator_ip AS creatorIp,
-                admin_secret_hash AS adminSecretHash
+                admin_secret_hash AS adminSecretHash,
+                admin_hint AS adminHint
          FROM groups ORDER BY updated_ts ASC`
       )
       .all() as Array<Omit<GroupDump, 'members'> & { members: string }>
@@ -315,12 +317,17 @@ export class PorterService {
     if (!group.groupId || !group.name) return
     const members = group.members.map((id) => (id === exportedBy ? this.selfId : id))
     const updatedBy = group.updatedBy === exportedBy ? this.selfId : group.updatedBy
+    const adminSecretHash =
+      typeof group.adminSecretHash === 'string' ? group.adminSecretHash.slice(0, 64) : ''
+    const adminHint =
+      adminSecretHash && typeof group.adminHint === 'string' ? group.adminHint.slice(0, 40) : ''
     this.db
       .prepare(
         `INSERT INTO groups (
-           group_id, name, members, rev, updated_by, updated_ts, creator_ip, admin_secret_hash
+           group_id, name, members, rev, updated_by, updated_ts,
+           creator_ip, admin_secret_hash, admin_hint
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(group_id) DO UPDATE SET
            name = CASE
              WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
@@ -338,7 +345,10 @@ export class PorterService {
              THEN excluded.creator_ip ELSE groups.creator_ip END,
            admin_secret_hash = CASE
              WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
-             THEN excluded.admin_secret_hash ELSE groups.admin_secret_hash END`
+             THEN excluded.admin_secret_hash ELSE groups.admin_secret_hash END,
+           admin_hint = CASE
+             WHEN excluded.rev > groups.rev OR (excluded.rev = groups.rev AND excluded.updated_ts >= groups.updated_ts)
+             THEN excluded.admin_hint ELSE groups.admin_hint END`
       )
       .run(
         group.groupId,
@@ -348,7 +358,8 @@ export class PorterService {
         updatedBy,
         Number.isInteger(group.updatedTs) ? group.updatedTs : Date.now(),
         typeof group.creatorIp === 'string' ? group.creatorIp.slice(0, 45) : '',
-        typeof group.adminSecretHash === 'string' ? group.adminSecretHash.slice(0, 64) : ''
+        adminSecretHash,
+        adminHint
       )
   }
 

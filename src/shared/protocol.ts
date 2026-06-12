@@ -65,6 +65,7 @@ export const LIMITS = {
   from: 64,
   ip: 45,
   groupAdminPassword: 64,
+  groupAdminHint: 40,
   groupAdminHash: 64
 }
 
@@ -174,6 +175,8 @@ export interface GroupMeta {
   creatorIp: string
   /** 管理密码摘要；空串表示无密码，密码明文不入库、不入协议 */
   adminSecretHash: string
+  /** 管理密码提示；仅用于 UI 展示，不参与鉴权 */
+  adminHint: string
 }
 
 export type GroupPayload =
@@ -218,6 +221,9 @@ export interface FileCtlOffer {
   rootName: string
   /** image/sticker：单文件 ≤20MB 时收端免确认进图片缓存（§7.1）；缺省按普通文件 */
   purpose?: 'image' | 'sticker'
+  /** 群聊媒体上下文；存在时收端把本地消息写入 group:<groupId> 会话 */
+  groupId?: string
+  groupRev?: number
 }
 
 export interface FileCtlSimple {

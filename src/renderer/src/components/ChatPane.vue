@@ -61,6 +61,16 @@ const peerName = computed(() => {
 const peerOnline = computed(() => peer.value?.online ?? false)
 /** 群：成员才可发；单聊：文本随时可发（离线走补发） */
 const canSend = computed(() => (isGroup.value ? (group.value?.amMember ?? false) : true))
+const onlineGroupRecipientCount = computed(() => {
+  if (!group.value) return 0
+  return group.value.members.filter((id) => {
+    if (id === chatStore.selfId) return false
+    return peersStore.byId(id)?.online ?? false
+  }).length
+})
+const canSendMedia = computed(() =>
+  isGroup.value ? canSend.value && onlineGroupRecipientCount.value > 0 : peerOnline.value
+)
 const mentionMembers = computed(() =>
   group.value ? group.value.members.filter((id) => id !== chatStore.selfId) : []
 )
@@ -350,13 +360,13 @@ function isImagePath(path: string): boolean {
 }
 
 async function sendFiles(directory: boolean): Promise<void> {
-  if (!peerOnline.value) return
+  if (!canSendMedia.value) return
   const paths = await window.pantry.pickFiles(directory)
   if (paths) await chatStore.sendFilePaths(paths)
 }
 
 async function sendImage(): Promise<void> {
-  if (!peerOnline.value) return
+  if (!canSendMedia.value) return
   const paths = await window.pantry.pickFiles(false)
   if (!paths) return
   for (const p of paths) {
@@ -367,7 +377,7 @@ async function sendImage(): Promise<void> {
 
 /** 截图 Ctrl+V：剪贴板里的图片直接发送（F-MSG-3） */
 async function onPaste(event: ClipboardEvent): Promise<void> {
-  if (!peerOnline.value || !event.clipboardData) return
+  if (!canSendMedia.value || !event.clipboardData) return
   for (const item of Array.from(event.clipboardData.items)) {
     if (!item.type.startsWith('image/')) continue
     const file = item.getAsFile()
@@ -382,13 +392,13 @@ async function onPaste(event: ClipboardEvent): Promise<void> {
 
 function onDragOver(event: DragEvent): void {
   event.preventDefault()
-  if (peerOnline.value) dragging.value = true
+  if (canSendMedia.value) dragging.value = true
 }
 
 async function onDrop(event: DragEvent): Promise<void> {
   event.preventDefault()
   dragging.value = false
-  if (!peerOnline.value || !event.dataTransfer) return
+  if (!canSendMedia.value || !event.dataTransfer) return
   const paths: string[] = []
   for (const file of Array.from(event.dataTransfer.files)) {
     const p = (file as File & { path?: string }).path
@@ -548,7 +558,7 @@ async function onDrop(event: DragEvent): Promise<void> {
             class="tool"
             type="button"
             aria-label="发送图片"
-            :disabled="isGroup || !peerOnline"
+            :disabled="!canSendMedia"
             @click="sendImage"
           >
             <PantryIcon name="image" :size="18" />
@@ -559,7 +569,7 @@ async function onDrop(event: DragEvent): Promise<void> {
             class="tool"
             type="button"
             aria-label="发送文件"
-            :disabled="isGroup || !peerOnline"
+            :disabled="!canSendMedia"
             @click="sendFiles(false)"
           >
             <PantryIcon name="file" :size="18" />
@@ -570,13 +580,16 @@ async function onDrop(event: DragEvent): Promise<void> {
             class="tool"
             type="button"
             aria-label="发送文件夹"
-            :disabled="isGroup || !peerOnline"
+            :disabled="!canSendMedia"
             @click="sendFiles(true)"
           >
             <PantryIcon name="folder" :size="18" />
           </button>
         </span>
-        <span v-if="isGroup" class="tool-hint">群内文件/图片将在后续版本支持</span>
+        <span v-if="isGroup && canSend && onlineGroupRecipientCount === 0" class="tool-hint">
+          群成员离线，无法发送图片/文件
+        </span>
+        <span v-else-if="isGroup" class="tool-hint">仅在线群成员可接收图片/文件</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
       </div>
       <div v-if="showMentionPicker" class="mention-picker">

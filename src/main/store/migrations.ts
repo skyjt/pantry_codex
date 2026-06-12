@@ -141,6 +141,11 @@ export const MIGRATIONS: ReadonlyArray<string> = [
   `
   ALTER TABLE groups ADD COLUMN creator_ip TEXT NOT NULL DEFAULT '';
   ALTER TABLE groups ADD COLUMN admin_secret_hash TEXT NOT NULL DEFAULT '';
+  `,
+
+  // v8：讨论组管理密码提示（决议 #30）：仅展示，不参与鉴权
+  `
+  ALTER TABLE groups ADD COLUMN admin_hint TEXT NOT NULL DEFAULT '';
   `
 ]
 

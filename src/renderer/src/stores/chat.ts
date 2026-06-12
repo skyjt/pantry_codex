@@ -49,10 +49,10 @@ export const useChatStore = defineStore('chat', {
       window.pantry.onOpenConv((convId) => {
         void this.openConv(convId)
       })
-      // 截图选择"发送"：发到当前单聊会话（无活跃单聊则只留在剪贴板）
+      // 截图选择"发送"：发到当前会话（无可发送会话则只留在剪贴板）
       window.pantry.onCaptured((bytes) => {
         const conv = this.activeConv
-        if (conv && conv.type === 'single') void this.sendImageBytes('截图.png', bytes)
+        if (conv) void this.sendImageBytes('截图.png', bytes)
       })
     },
 
@@ -163,7 +163,10 @@ export const useChatStore = defineStore('chat', {
     async sendFilePaths(paths: string[]): Promise<boolean> {
       const conv = this.activeConv
       if (!conv) return false
-      const view = await window.pantry.offerFiles(conv.peerId, paths)
+      const view =
+        conv.type === 'group'
+          ? await window.pantry.offerGroupFiles(conv.peerId, paths)
+          : await window.pantry.offerFiles(conv.peerId, paths)
       return this.pushOwn(view)
     },
 
@@ -171,7 +174,10 @@ export const useChatStore = defineStore('chat', {
     async sendImagePath(path: string): Promise<boolean> {
       const conv = this.activeConv
       if (!conv) return false
-      const view = await window.pantry.offerImagePath(conv.peerId, path)
+      const view =
+        conv.type === 'group'
+          ? await window.pantry.offerGroupImagePath(conv.peerId, path)
+          : await window.pantry.offerImagePath(conv.peerId, path)
       return this.pushOwn(view)
     },
 
@@ -179,7 +185,10 @@ export const useChatStore = defineStore('chat', {
     async sendImageBytes(name: string, bytes: ArrayBuffer): Promise<boolean> {
       const conv = this.activeConv
       if (!conv) return false
-      const view = await window.pantry.sendImageBytes(conv.peerId, name, bytes)
+      const view =
+        conv.type === 'group'
+          ? await window.pantry.sendGroupImageBytes(conv.peerId, name, bytes)
+          : await window.pantry.sendImageBytes(conv.peerId, name, bytes)
       return this.pushOwn(view)
     },
 

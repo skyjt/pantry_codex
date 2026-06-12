@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.7，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.13，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -103,7 +103,7 @@ src/
 | `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` | 通讯录、探活（F-DISC-8）、手动 IP、网段扫描 |
 | `conv:list` / `conv:pin` / `conv:mute` / `conv:markRead` / `conv:remove` | 会话列表操作 |
 | `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` | 消息分页（倒序游标）、发送、重发、撤回 |
-| `file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套 |
+| `file:offer` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；群聊发送为多条点对点 transfer 的发送侧编排 |
 | `group:create` / `group:update` | 讨论组 |
 | `search:query(q, scope)` | 全局搜索（联系人/组/记录/文件 四分类一次返回） |
 | `sticker:addFromMessage` / `sticker:list` / `sticker:remove` / `sticker:reorder` | 表情包 |
@@ -124,12 +124,12 @@ conversations(id TEXT PK, type TEXT,            -- 'single'|'group'
       pinned INT, muted INT, draft TEXT)
 messages(id TEXT PK,                            -- 协议 msgId，全局唯一
       conv_id TEXT, sender_id TEXT, is_mine INT,
-      kind TEXT, content TEXT, file_ref TEXT,   -- kind: text|file|image|sticker|system；file_ref: JSON
+      kind TEXT, content TEXT, file_ref TEXT,   -- kind: text|file|image|sticker|system；file_ref: JSON；群发文件可含 transferIds[]
       ts INT, seq INT,                          -- seq: 本地单调递增，时钟漂移兜底排序
       status TEXT)                              -- sending|sent|queued|failed|recalled
 messages_fts(fts5: msg_id UNINDEXED, text)      -- 入库时中文按字空格预切；查询 phrase 匹配
 groups(group_id TEXT PK, name, members TEXT, rev INT, updated_by, updated_ts INT,
-      creator_ip TEXT, admin_secret_hash TEXT)
+      creator_ip TEXT, admin_secret_hash TEXT, admin_hint TEXT)
 transfers(transfer_id TEXT PK, msg_id, peer_id, direction, files TEXT,
       status, bytes_done INT, total INT, ts INT)
 send_queue(msg_id TEXT PK, peer_id, envelope TEXT, created INT, attempts INT)
@@ -139,7 +139,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 - 索引：`messages(conv_id, ts, seq)`、`peers(last_seen)`、`send_queue(peer_id)`、`transfers(status)`。
 - `remark` 为本地备注名（决议 #22）：仅本机、不入协议；显示与搜索优先命中备注。
-- `groups.creator_ip/admin_secret_hash` 为讨论组管理门槛（决议 #27）：密码明文不入库；无密码组以创建 IP 作为管理来源限制。该机制服务于内网协作秩序，不替代加密/签名。
+- `groups.creator_ip/admin_secret_hash/admin_hint` 为讨论组管理门槛（决议 #27/#30）：密码明文不入库；提示仅用于成员输入密码时展示，不参与鉴权；无密码组以创建 IP 作为管理来源限制。该机制服务于内网协作秩序，不替代加密/签名。
 - 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。
 - 定时清理（启动 + 每小时）：`dedup` 超 24h、`send_queue` 超 7 天或单 peer 超 200 条（裁剪时回推 UI 标失败）；启动时将残留 `sending` 态消息复位为失败（可点重发），杜绝"永远转圈"。
 - 迁移：`PRAGMA user_version` 递增 + 顺序执行迁移脚本；导入/迁移目录前自动备份 db 文件。
@@ -163,6 +163,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
+- **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
 - token 全部走 `styles/tokens.css` CSS 变量（深色主题 v0.4 只换变量表）。
 - 性能预算（NFR 对照）：通讯录树重聚合 ≤16ms（1000 节点，主进程聚合好再推）；搜索请求防抖 200ms；`transfer:progress` 节流后 UI 才消费。
@@ -239,3 +240,5 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-11 v0.9 P1 本地交付候选：`services/porter.ts` 落地迁移备份包（消息/联系人/群/传输/表情/媒体）、`shared/ipc.ts` 补转发/会话操作/导出范围/端口设置契约；`TransferServer` 支持 TCP 长文本控制帧；数据库自测覆盖 porter 媒体恢复。
 - 2026-06-11 v0.10 图标与群管理权限：图标方案改为项目内自绘 SVG；groups 表迁移 v7 增加 `creator_ip/admin_secret_hash`，服务层按创建 IP 或管理密码摘要限制改名/增删成员，退组保持免管理权限。
 - 2026-06-12 v0.11 头像模板与设置图标修正：头像编号保持 number，前端按“20 个亲和动物 emoji 图标 + 背景色下标”组合解释；设置入口 SVG 重画为明确齿轮。
+- 2026-06-12 v0.12 讨论组创建搜索与密码提示：groups 表迁移 v8 增加 `admin_hint`，群元数据/备份包携带密码提示；建群 UI 改为搜索选人后再设置组名与二次密码确认。
+- 2026-06-12 v0.13 群聊媒体落地：文件 offer 支持群上下文，群聊图片/文件按在线成员逐个点对点传输；发送端一条消息汇总多条 transfer，收端入群会话。

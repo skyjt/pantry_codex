@@ -3,6 +3,7 @@ import { decode, encode, makeEnvelope } from './codec'
 import {
   MSG_TYPES,
   UDP_MAX_INBOUND,
+  type FileCtlPayload,
   type MsgPayload,
   type Profile,
   type ProfilePayload
@@ -128,6 +129,39 @@ describe('codec', () => {
       groupId: 'group-1'
     })
     expect(decode(encode(missingRev))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
+  it('file-ctl 群聊媒体 offer 要求 groupId/groupRev 成对出现', () => {
+    const ok = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-1',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'a.png', size: 10 }],
+      totalSize: 10,
+      fileCount: 1,
+      rootName: 'a.png',
+      purpose: 'image',
+      groupId: 'group-1',
+      groupRev: 2
+    })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const missingRev = makeEnvelope(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-1',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'a.png', size: 10 }],
+      totalSize: 10,
+      fileCount: 1,
+      rootName: 'a.png',
+      groupId: 'group-1'
+    })
+    expect(decode(encode(missingRev))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
   })
 
   it('缺 payload 拒收', () => {

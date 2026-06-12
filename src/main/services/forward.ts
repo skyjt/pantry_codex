@@ -54,13 +54,14 @@ export class ForwardService {
         ? this.deps.groups.sendText(target.id, row.content)
         : this.deps.chat.sendText(target.id, row.content)
     }
-    if (target.type !== 'single') return null
     const ref = this.parseFileRef(row.file_ref)
     if (!ref) return null
     const transfer = this.deps.files.transferView(ref.transferId)
     if (!transfer?.savedPath) return null
     const purpose = row.kind === 'image' || row.kind === 'sticker' ? row.kind : 'file'
-    return this.deps.files.offerPaths(target.id, [transfer.savedPath], purpose)
+    return target.type === 'group'
+      ? this.deps.files.offerGroupPaths(target.id, [transfer.savedPath], purpose)
+      : this.deps.files.offerPaths(target.id, [transfer.savedPath], purpose)
   }
 
   private parseFileRef(raw: string | null): FileRefView | null {

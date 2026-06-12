@@ -327,6 +327,7 @@ if (!gotLock) {
         convRepo: new ConvRepo(db),
         msgRepo: new MsgRepo(db),
         transferRepo: new TransferRepo(db),
+        groupRepo: new GroupRepo(db),
         tcpPort,
         getSaveDir: () =>
           appState?.config.fileDir || join(app.getPath('downloads'), '茶话间'),
@@ -723,6 +724,13 @@ if (!gotLock) {
     return (await files?.offerPaths(peerId, paths as string[])) ?? null
   })
 
+  ipcMain.handle(IpcChannels.groupFileOffer, async (_event, groupId: unknown, paths: unknown) => {
+    if (typeof groupId !== 'string' || groupId.length === 0 || groupId.length > 64) return null
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return null
+    if (!paths.every((p) => typeof p === 'string' && p.length > 0 && p.length < 2048)) return null
+    return (await files?.offerGroupPaths(groupId, paths as string[])) ?? null
+  })
+
   ipcMain.handle(IpcChannels.fileAccept, async (_event, transferId: unknown, saveAs: unknown) => {
     if (typeof transferId !== 'string' || transferId.length > 64 || !files) return false
     let dir: string | undefined
@@ -821,11 +829,34 @@ if (!gotLock) {
     }
   )
 
+  ipcMain.handle(
+    IpcChannels.groupImgSendBytes,
+    async (_event, groupId: unknown, name: unknown, bytes: unknown) => {
+      if (typeof groupId !== 'string' || groupId.length === 0 || groupId.length > 64) return null
+      if (typeof name !== 'string' || name.length === 0 || name.length > 128) return null
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return null
+      if (bytes.byteLength > 20 * 1024 * 1024) return null
+      const ext = IMG_EXTS.has(extname(name).toLowerCase()) ? extname(name).toLowerCase() : '.png'
+      const dir = join(app.getPath('userData'), 'data', 'images', 'out')
+      mkdirSync(dir, { recursive: true })
+      const path = join(dir, `${randomUUID()}${ext}`)
+      writeFileSync(path, Buffer.from(bytes))
+      return (await files?.offerGroupPaths(groupId, [path], 'image')) ?? null
+    }
+  )
+
   ipcMain.handle(IpcChannels.imgOfferPath, async (_event, peerId: unknown, path: unknown) => {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
     return (await files?.offerPaths(peerId, [path], 'image')) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.groupImgOfferPath, async (_event, groupId: unknown, path: unknown) => {
+    if (typeof groupId !== 'string' || groupId.length === 0 || groupId.length > 64) return null
+    if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
+    if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
+    return (await files?.offerGroupPaths(groupId, [path], 'image')) ?? null
   })
 
   ipcMain.handle(IpcChannels.settingsSaveApp, (_event, patch: unknown): SettingsView => {
@@ -917,7 +948,13 @@ if (!gotLock) {
 
   ipcMain.handle(
     IpcChannels.groupCreate,
-    (_event, name: unknown, memberIds: unknown, adminPassword: unknown) => {
+    (
+      _event,
+      name: unknown,
+      memberIds: unknown,
+      adminPassword: unknown,
+      adminHint: unknown
+    ) => {
       if (typeof name !== 'string' || name.length > 32) return null
       if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > 64) {
         return null
@@ -926,7 +963,8 @@ if (!gotLock) {
         return null
       }
       const secret = typeof adminPassword === 'string' && adminPassword.length <= 64 ? adminPassword : ''
-      return groups?.createGroup(name, memberIds as string[], secret) ?? null
+      const hint = typeof adminHint === 'string' && adminHint.length <= 40 ? adminHint : ''
+      return groups?.createGroup(name, memberIds as string[], secret, hint) ?? null
     }
   )
 

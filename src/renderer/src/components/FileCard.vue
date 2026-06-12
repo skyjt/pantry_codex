@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import type { MessageView } from '../../../shared/ipc'
+import type { MessageView, TransferView } from '../../../shared/ipc'
 import { fmtBytes, useTransfersStore } from '../stores/transfers'
 import PantryIcon from './PantryIcon.vue'
 
@@ -11,18 +11,47 @@ const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
 
 const ref_ = computed(() => props.msg.fileRef)
-const transfer = computed(() =>
-  ref_.value ? transfers.byId[ref_.value.transferId] : undefined
+const transferIds = computed(() => {
+  if (!ref_.value) return []
+  return ref_.value.transferIds && ref_.value.transferIds.length > 0
+    ? ref_.value.transferIds
+    : [ref_.value.transferId]
+})
+const transferList = computed(() =>
+  transferIds.value.map((id) => transfers.byId[id]).filter((item): item is TransferView => !!item)
+)
+const transfer = computed(() => transferList.value[0])
+const multiOut = computed(
+  () => transferIds.value.length > 1 && transferList.value.every((t) => t.direction === 'out')
+)
+const multiActive = computed(
+  () => multiOut.value && transferList.value.some((t) => t.status === 'offering' || t.status === 'accepted')
 )
 const percent = computed(() => {
-  const t = transfer.value
-  if (!t || t.totalSize === 0) return 0
-  return Math.min(100, Math.round((t.bytesDone / t.totalSize) * 100))
+  const list = multiOut.value ? transferList.value : transfer.value ? [transfer.value] : []
+  const total = list.reduce((sum, t) => sum + t.totalSize, 0)
+  const done = list.reduce((sum, t) => sum + t.bytesDone, 0)
+  if (total === 0) return 0
+  return Math.min(100, Math.round((done / total) * 100))
 })
 const speed = computed(() =>
-  ref_.value ? (transfers.speed[ref_.value.transferId] ?? 0) : 0
+  transferIds.value.reduce((sum, id) => sum + (transfers.speed[id] ?? 0), 0)
 )
 const statusText = computed(() => {
+  if (multiOut.value) {
+    const total = transferIds.value.length
+    const list = transferList.value
+    const done = list.filter((t) => t.status === 'done').length
+    const failed = list.filter((t) =>
+      t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
+    ).length
+    const active = list.some((t) => t.status === 'accepted')
+    if (done === total) return '已完成'
+    if (active) return `${done} / ${total} 位完成 · ${fmtBytes(speed.value)}/s`
+    if (failed === total && total > 0) return '传输失败'
+    if (failed > 0) return `${done} / ${total} 位完成，${failed} 位未完成`
+    return `等待 ${total} 位成员接收`
+  }
   const t = transfer.value
   if (!t) return ''
   switch (t.status) {
@@ -42,8 +71,12 @@ const statusText = computed(() => {
 })
 
 onMounted(() => {
-  if (ref_.value) void transfers.ensure(ref_.value.transferId)
+  for (const id of transferIds.value) void transfers.ensure(id)
 })
+
+function cancelActiveTransfers(): void {
+  for (const id of transferIds.value) transfers.cancel(id)
+}
 </script>
 
 <template>
@@ -56,7 +89,7 @@ onMounted(() => {
       <div class="meta">
         {{ fmtBytes(ref_.size) }}<span v-if="ref_.count > 1"> · {{ ref_.count }} 个文件</span>
       </div>
-      <div v-if="transfer?.status === 'accepted'" class="bar">
+      <div v-if="transfer?.status === 'accepted' || multiOut" class="bar">
         <div class="fill" :style="{ width: `${percent}%` }"></div>
       </div>
       <div class="state" :class="transfer?.status">{{ statusText }}</div>
@@ -68,9 +101,13 @@ onMounted(() => {
         <button class="act danger" @click="transfers.decline(ref_.transferId)">拒绝</button>
       </template>
       <button
-        v-else-if="transfer?.status === 'offering' || transfer?.status === 'accepted'"
+        v-else-if="
+          multiActive ||
+          transfer?.status === 'offering' ||
+          transfer?.status === 'accepted'
+        "
         class="act danger"
-        @click="transfers.cancel(ref_.transferId)"
+        @click="cancelActiveTransfers"
       >
         取消
       </button>

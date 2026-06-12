@@ -55,6 +55,7 @@ export class GroupsService extends EventEmitter {
       amMember: meta.members.includes(this.deps.selfId),
       creatorIp: meta.creatorIp,
       hasAdminPassword: meta.adminSecretHash.length > 0,
+      adminHint: meta.adminHint,
       canManage: this.canManageWithoutPassword(meta)
     }
   }
@@ -70,7 +71,12 @@ export class GroupsService extends EventEmitter {
 
   // ---------- 建群 / 改群 / 退群 ----------
 
-  createGroup(name: string, memberIds: string[], adminPassword = ''): GroupView | null {
+  createGroup(
+    name: string,
+    memberIds: string[],
+    adminPassword = '',
+    adminHint = ''
+  ): GroupView | null {
     const members = [...new Set([this.deps.selfId, ...memberIds])].slice(0, GROUP_MAX_MEMBERS)
     if (members.length < 2) return null
     const groupId = randomUUID()
@@ -83,7 +89,8 @@ export class GroupsService extends EventEmitter {
       updatedBy: this.deps.selfId,
       updatedTs: Date.now(),
       creatorIp: this.selfIp(),
-      adminSecretHash: secret ? groupAdminSecretHash(groupId, secret) : ''
+      adminSecretHash: secret ? groupAdminSecretHash(groupId, secret) : '',
+      adminHint: secret ? normalizeAdminHint(adminHint) : ''
     }
     this.deps.groupRepo.save(meta)
     this.deps.convRepo.ensureGroup(meta.groupId)
@@ -304,16 +311,29 @@ function normalizeAdminPassword(raw: string): string {
   return raw.trim().slice(0, LIMITS.groupAdminPassword)
 }
 
+function normalizeAdminHint(raw: string): string {
+  return raw.trim().slice(0, LIMITS.groupAdminHint)
+}
+
 function groupAdminSecretHash(groupId: string, password: string): string {
   return createHash('sha256').update(`${groupId}\n${password}`).digest('hex')
 }
 
 function normalizeGroupMeta(meta: GroupMeta): GroupMeta {
-  const raw = meta as GroupMeta & { creatorIp?: unknown; adminSecretHash?: unknown }
+  const raw = meta as GroupMeta & {
+    creatorIp?: unknown
+    adminSecretHash?: unknown
+    adminHint?: unknown
+  }
+  const adminSecretHash = typeof raw.adminSecretHash === 'string' ? raw.adminSecretHash : ''
   return {
     ...meta,
     creatorIp: typeof raw.creatorIp === 'string' ? raw.creatorIp : '',
-    adminSecretHash: typeof raw.adminSecretHash === 'string' ? raw.adminSecretHash : ''
+    adminSecretHash,
+    adminHint:
+      adminSecretHash && typeof raw.adminHint === 'string'
+        ? normalizeAdminHint(raw.adminHint)
+        : ''
   }
 }
 
@@ -326,6 +346,7 @@ function isSelfLeave(local: GroupMeta, incoming: GroupMeta): boolean {
     added.length === 0 &&
     incoming.name === local.name &&
     incoming.creatorIp === local.creatorIp &&
-    incoming.adminSecretHash === local.adminSecretHash
+    incoming.adminSecretHash === local.adminSecretHash &&
+    incoming.adminHint === local.adminHint
   )
 }

@@ -11,7 +11,8 @@ import {
   type Envelope,
   type FileCtlOffer,
   type FileCtlPayload,
-  type FileMeta
+  type FileMeta,
+  type GroupPayload
 } from '../../shared/protocol'
 import type { FileRefView, MessageView, MsgStatusEvent, TransferView } from '../../shared/ipc'
 import { makeEnvelope } from '../net/codec'
@@ -28,6 +29,7 @@ import { sanitizeRelPath } from '../util/sanitize'
 import { convRowToView, type ConvRepo } from '../store/conv-repo'
 import { MsgRepo, msgRowToView } from '../store/msg-repo'
 import type { TransferRepo } from '../store/transfer-repo'
+import type { GroupRepo } from '../store/group-repo'
 
 // 文件传输编排（protocol §8 / 需求 F-FILE-1~3）：
 // 控制面走 messenger 可靠投递（对方离线直接失败，不入队——决议 #4）；
@@ -51,6 +53,8 @@ interface AssemblingOffer {
   fileCount: number
   rootName: string
   purpose?: 'image' | 'sticker'
+  groupId?: string
+  groupRev?: number
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -67,6 +71,22 @@ interface FilesBlob {
   savedPath?: string
 }
 
+interface PreparedOutgoing {
+  metas: FileMeta[]
+  outFiles: Map<string, OutgoingFile>
+  totalSize: number
+  fileCount: number
+  hasDir: boolean
+  rootName: string
+  purpose?: 'image' | 'sticker'
+  savedPath?: string
+}
+
+interface GroupOfferContext {
+  groupId: string
+  groupRev: number
+}
+
 export interface FilesDeps {
   selfId: string
   messenger: Messenger
@@ -74,6 +94,7 @@ export interface FilesDeps {
   convRepo: ConvRepo
   msgRepo: MsgRepo
   transferRepo: TransferRepo
+  groupRepo?: GroupRepo
   tcpPort: number
   getSaveDir: () => string
   /** 图片缓存目录（免确认接收的落点） */
@@ -141,7 +162,166 @@ export class FilesService extends EventEmitter {
   ): Promise<MessageView | null> {
     const peer = this.deps.registry.get(peerId)
     if (!peer || !peer.online || paths.length === 0) return null
+    const prepared = this.prepareOutgoing(paths, want)
+    if (!prepared) return null
+    const transferId = randomUUID()
+    const convId = this.deps.convRepo.ensureSingle(peerId)
+    const msgId = randomUUID()
+    const fileRef: FileRefView = {
+      transferId,
+      name: prepared.rootName,
+      size: prepared.totalSize,
+      count: prepared.fileCount,
+      dir: prepared.hasDir
+    }
+    const now = Date.now()
+    this.deps.msgRepo.insert({
+      id: msgId,
+      convId,
+      senderId: this.deps.selfId,
+      isMine: true,
+      kind: prepared.purpose ?? 'file',
+      content:
+        prepared.purpose === 'sticker'
+          ? '[表情]'
+          : prepared.purpose === 'image'
+            ? '[图片]'
+            : `[文件] ${prepared.rootName}`,
+      fileRef: JSON.stringify(fileRef),
+      ts: now,
+      status: 'sending'
+    })
+    this.deps.convRepo.bump(convId, now)
+    this.deps.transferRepo.insert({
+      transferId,
+      msgId,
+      peerId,
+      direction: 'out',
+      // 发送侧记录单路径源文件/目录：图片可立即渲染，文件可再次转发。
+      files: JSON.stringify({
+        name: prepared.rootName,
+        ...(prepared.savedPath ? { savedPath: prepared.savedPath } : {})
+      } satisfies FilesBlob),
+      status: 'offering',
+      total: prepared.totalSize,
+      ts: now
+    })
+    this.outgoing.set(transferId, {
+      peerId,
+      msgId,
+      files: new Map(prepared.outFiles),
+      totalSize: prepared.totalSize,
+      bytesDone: 0,
+      accepted: false
+    })
+    this.emitConvs()
+    this.emitTransfer(transferId, true)
 
+    // offer 分包可靠发送；任一包失败 → 整体失败
+    void this.sendOfferPackets(peerId, transferId, prepared).then((ok) => {
+      if (!ok) this.finish(transferId, 'failed')
+      this.applyMsgStatus(msgId, ok ? 'sent' : 'failed')
+    })
+
+    const row = this.deps.msgRepo.get(msgId)
+    return row ? msgRowToView(row) : null
+  }
+
+  /** 群聊媒体：只给当前在线群成员逐个发点对点 transfer（决议 #32）。 */
+  async offerGroupPaths(
+    groupId: string,
+    paths: string[],
+    want: 'file' | 'image' | 'sticker' = 'file'
+  ): Promise<MessageView | null> {
+    const meta = this.deps.groupRepo?.get(groupId)
+    if (!meta || !meta.members.includes(this.deps.selfId) || paths.length === 0) return null
+    const recipients = meta.members.filter((member) => {
+      if (member === this.deps.selfId) return false
+      const peer = this.deps.registry.get(member)
+      return !!peer && peer.online
+    })
+    if (recipients.length === 0) return null
+    const prepared = this.prepareOutgoing(paths, want)
+    if (!prepared) return null
+
+    const transfers = recipients.map((peerId) => ({ peerId, transferId: randomUUID() }))
+    const convId = this.deps.convRepo.ensureGroup(groupId)
+    const msgId = randomUUID()
+    const fileRef: FileRefView = {
+      transferId: transfers[0].transferId,
+      ...(transfers.length > 1 ? { transferIds: transfers.map((t) => t.transferId) } : {}),
+      name: prepared.rootName,
+      size: prepared.totalSize,
+      count: prepared.fileCount,
+      dir: prepared.hasDir
+    }
+    const now = Date.now()
+    this.deps.msgRepo.insert({
+      id: msgId,
+      convId,
+      senderId: this.deps.selfId,
+      isMine: true,
+      kind: prepared.purpose ?? 'file',
+      content:
+        prepared.purpose === 'sticker'
+          ? '[表情]'
+          : prepared.purpose === 'image'
+            ? '[图片]'
+            : `[文件] ${prepared.rootName}`,
+      fileRef: JSON.stringify(fileRef),
+      ts: now,
+      status: 'sending'
+    })
+    this.deps.convRepo.bump(convId, now)
+
+    for (const target of transfers) {
+      this.deps.transferRepo.insert({
+        transferId: target.transferId,
+        msgId,
+        peerId: target.peerId,
+        direction: 'out',
+        files: JSON.stringify({
+          name: prepared.rootName,
+          ...(prepared.savedPath ? { savedPath: prepared.savedPath } : {})
+        } satisfies FilesBlob),
+        status: 'offering',
+        total: prepared.totalSize,
+        ts: now
+      })
+      this.outgoing.set(target.transferId, {
+        peerId: target.peerId,
+        msgId,
+        files: new Map(prepared.outFiles),
+        totalSize: prepared.totalSize,
+        bytesDone: 0,
+        accepted: false
+      })
+      this.emitTransfer(target.transferId, true)
+    }
+    this.emitConvs()
+
+    void Promise.all(
+      transfers.map((target) =>
+        this.sendOfferPackets(target.peerId, target.transferId, prepared, {
+          groupId,
+          groupRev: meta.rev
+        }).then((ok) => {
+          if (!ok) this.finish(target.transferId, 'failed')
+          return ok
+        })
+      )
+    ).then((results) => {
+      this.applyMsgStatus(msgId, results.some(Boolean) ? 'sent' : 'failed')
+    })
+
+    const row = this.deps.msgRepo.get(msgId)
+    return row ? msgRowToView(row) : null
+  }
+
+  private prepareOutgoing(
+    paths: string[],
+    want: 'file' | 'image' | 'sticker'
+  ): PreparedOutgoing | null {
     const metas: FileMeta[] = []
     const outFiles = new Map<string, OutgoingFile>()
     let totalSize = 0
@@ -171,88 +351,51 @@ export class FilesService extends EventEmitter {
       want !== 'file' && !hasDir && fileCount === 1 && totalSize <= IMG_AUTO_ACCEPT
         ? want
         : undefined
-
-    const transferId = randomUUID()
     const rootName =
       paths.length === 1 ? basename(paths[0]) : `${basename(paths[0])} 等 ${fileCount} 个文件`
-    const convId = this.deps.convRepo.ensureSingle(peerId)
-    const msgId = randomUUID()
-    const fileRef: FileRefView = {
-      transferId,
-      name: rootName,
-      size: totalSize,
-      count: fileCount,
-      dir: hasDir
-    }
-    const now = Date.now()
-    this.deps.msgRepo.insert({
-      id: msgId,
-      convId,
-      senderId: this.deps.selfId,
-      isMine: true,
-      kind: purpose ?? 'file',
-      content: purpose === 'sticker' ? '[表情]' : purpose === 'image' ? '[图片]' : `[文件] ${rootName}`,
-      fileRef: JSON.stringify(fileRef),
-      ts: now,
-      status: 'sending'
-    })
-    this.deps.convRepo.bump(convId, now)
-    this.deps.transferRepo.insert({
-      transferId,
-      msgId,
-      peerId,
-      direction: 'out',
-      // 发送侧记录单路径源文件/目录：图片可立即渲染，文件可再次转发。
-      files: JSON.stringify({
-        name: rootName,
-        ...(paths.length === 1 ? { savedPath: paths[0] } : {})
-      } satisfies FilesBlob),
-      status: 'offering',
-      total: totalSize,
-      ts: now
-    })
-    this.outgoing.set(transferId, {
-      peerId,
-      msgId,
-      files: outFiles,
+    return {
+      metas,
+      outFiles,
       totalSize,
-      bytesDone: 0,
-      accepted: false
-    })
-    this.emitConvs()
-    this.emitTransfer(transferId, true)
+      fileCount,
+      hasDir,
+      rootName,
+      purpose,
+      ...(paths.length === 1 ? { savedPath: paths[0] } : {})
+    }
+  }
 
-    // offer 分包可靠发送；任一包失败 → 整体失败
-    void (async () => {
-      const totalPackets = Math.ceil(metas.length / OFFER_FILES_PER_PACKET)
-      for (let i = 0; i < totalPackets; i++) {
-        const slice = metas.slice(i * OFFER_FILES_PER_PACKET, (i + 1) * OFFER_FILES_PER_PACKET)
-        const payload: FileCtlOffer = {
-          op: 'offer',
-          transferId,
-          seq: i + 1,
-          total: totalPackets,
-          files: slice,
-          totalSize,
-          fileCount,
-          rootName,
-          ...(purpose ? { purpose } : {})
-        }
-        const ok = await this.deps.messenger.sendReliable(
-          peerId,
-          makeEnvelope(MSG_TYPES.fileCtl, this.deps.selfId, payload)
-        )
-        if (!ok) {
-          this.finish(transferId, 'failed')
-          this.applyMsgStatus(msgId, 'failed')
-          return
-        }
+  private async sendOfferPackets(
+    peerId: string,
+    transferId: string,
+    prepared: PreparedOutgoing,
+    group?: GroupOfferContext
+  ): Promise<boolean> {
+    const totalPackets = Math.ceil(prepared.metas.length / OFFER_FILES_PER_PACKET)
+    for (let i = 0; i < totalPackets; i++) {
+      const slice = prepared.metas.slice(
+        i * OFFER_FILES_PER_PACKET,
+        (i + 1) * OFFER_FILES_PER_PACKET
+      )
+      const payload: FileCtlOffer = {
+        op: 'offer',
+        transferId,
+        seq: i + 1,
+        total: totalPackets,
+        files: slice,
+        totalSize: prepared.totalSize,
+        fileCount: prepared.fileCount,
+        rootName: prepared.rootName,
+        ...(prepared.purpose ? { purpose: prepared.purpose } : {}),
+        ...(group ? { groupId: group.groupId, groupRev: group.groupRev } : {})
       }
-      this.applyMsgStatus(msgId, 'sent')
-    })()
-
-    const row = this.deps.msgRepo.get(msgId)
-    return row ? msgRowToView(row) : null
+      const ok = await this.deps.messenger.sendReliable(
+        peerId,
+        makeEnvelope(MSG_TYPES.fileCtl, this.deps.selfId, payload)
+      )
+      if (!ok) return false
+    }
+    return true
   }
 
   // ---------- 接收侧 ----------
@@ -450,11 +593,14 @@ export class FilesService extends EventEmitter {
         fileCount: offer.fileCount,
         rootName: offer.rootName,
         purpose: offer.purpose,
+        groupId: offer.groupId,
+        groupRev: offer.groupRev,
         timer: setTimeout(() => this.assembling.delete(offer.transferId), OFFER_ASSEMBLE_TIMEOUT)
       }
       this.assembling.set(offer.transferId, asm)
     }
     if (asm.peerId !== peerId) return
+    if (asm.groupId !== offer.groupId || asm.groupRev !== offer.groupRev) return
     asm.parts.set(offer.seq, offer.files)
     if (asm.parts.size < asm.total) return
 
@@ -487,7 +633,9 @@ export class FilesService extends EventEmitter {
         : undefined
     const asImage = inPurpose !== undefined
 
-    const convId = this.deps.convRepo.ensureSingle(peerId)
+    const convId = asm.groupId
+      ? this.deps.convRepo.ensureGroup(asm.groupId)
+      : this.deps.convRepo.ensureSingle(peerId)
     const msgId = randomUUID()
     const fileRef: FileRefView = {
       transferId: offer.transferId,
@@ -532,9 +680,27 @@ export class FilesService extends EventEmitter {
     if (msgRow) this.emit('message', msgRowToView(msgRow))
     this.emitConvs()
     this.emitTransfer(offer.transferId, true)
+    this.requestGroupMetaIfNeeded(peerId, asm.groupId, asm.groupRev)
 
     // 图片：免确认，立即拉进图片缓存（protocol §7.1）
     if (asImage) void this.accept(offer.transferId, this.deps.getImagesDir())
+  }
+
+  private requestGroupMetaIfNeeded(
+    peerId: string,
+    groupId: string | undefined,
+    groupRev: number | undefined
+  ): void {
+    if (!groupId) return
+    const meta = this.deps.groupRepo?.get(groupId)
+    if (meta && groupRev !== undefined && groupRev <= meta.rev) return
+    void this.deps.messenger.sendReliable(
+      peerId,
+      makeEnvelope<GroupPayload>(MSG_TYPES.group, this.deps.selfId, {
+        op: 'need',
+        groupId
+      })
+    )
   }
 
   private async declineUnknown(peerId: string, transferId: string): Promise<void> {

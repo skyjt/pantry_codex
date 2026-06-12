@@ -66,6 +66,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.filePick, directory),
   offerFiles: (peerNodeId: string, paths: string[]): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.fileOffer, peerNodeId, paths),
+  offerGroupFiles: (groupId: string, paths: string[]): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupFileOffer, groupId, paths),
   acceptTransfer: (transferId: string, saveAs: boolean): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.fileAccept, transferId, saveAs),
   declineTransfer: (transferId: string): Promise<void> =>
@@ -85,6 +87,14 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.imgSendBytes, peerNodeId, name, bytes),
   offerImagePath: (peerNodeId: string, path: string): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.imgOfferPath, peerNodeId, path),
+  sendGroupImageBytes: (
+    groupId: string,
+    name: string,
+    bytes: ArrayBuffer
+  ): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupImgSendBytes, groupId, name, bytes),
+  offerGroupImagePath: (groupId: string, path: string): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.groupImgOfferPath, groupId, path),
   saveImageAs: (transferId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.imgSaveAs, transferId),
   search: (query: string): Promise<SearchResult> =>
@@ -102,9 +112,10 @@ const api: PantryApi = {
   createGroup: (
     name: string,
     memberIds: string[],
-    adminPassword?: string
+    adminPassword?: string,
+    adminHint?: string
   ): Promise<GroupView | null> =>
-    ipcRenderer.invoke(IpcChannels.groupCreate, name, memberIds, adminPassword),
+    ipcRenderer.invoke(IpcChannels.groupCreate, name, memberIds, adminPassword, adminHint),
   updateGroup: (groupId: string, patch: GroupPatch): Promise<GroupView | null> =>
     ipcRenderer.invoke(IpcChannels.groupUpdate, groupId, patch),
   leaveGroup: (groupId: string): Promise<void> => ipcRenderer.invoke(IpcChannels.groupLeave, groupId),
