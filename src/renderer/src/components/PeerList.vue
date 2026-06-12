@@ -8,7 +8,7 @@ import { avatarStyle, avatarText } from '../utils/avatar'
 // 字段空缺逐级跳过，全空归"未分组"；组内在线优先（registry 已排序）。
 
 const peersStore = usePeersStore()
-const emit = defineEmits<{ select: [peer: PeerView] }>()
+const emit = defineEmits<{ select: [peer: PeerView]; chat: [nodeId: string] }>()
 const collapsed = ref(new Set<string>())
 
 interface Row {
@@ -98,6 +98,20 @@ function toggle(key: string): void {
   collapsed.value = next
 }
 
+function onRowClick(row: Row): void {
+  if (row.kind === 'group') {
+    toggle(row.key)
+    return
+  }
+  if (row.peer) emit('select', row.peer)
+}
+
+function onRowDoubleClick(row: Row): void {
+  if (row.kind === 'peer' && row.peer) {
+    emit('chat', row.peer.nodeId)
+  }
+}
+
 function displayName(peer: PeerView): string {
   return peer.remark || peer.nick
 }
@@ -121,7 +135,8 @@ function peerAvatarStyle(peer: PeerView): { backgroundColor: string; color: stri
         :key="row.key"
         :class="row.kind"
         :style="{ paddingLeft: `${12 + row.level * 14}px` }"
-        @click="row.kind === 'group' ? toggle(row.key) : emit('select', row.peer!)"
+        @click="onRowClick(row)"
+        @dblclick="onRowDoubleClick(row)"
       >
         <template v-if="row.kind === 'group'">
           <span class="arrow">{{ collapsed.has(row.key) ? '▸' : '▾' }}</span>

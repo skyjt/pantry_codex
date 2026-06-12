@@ -136,7 +136,7 @@ onUnmounted(() => {
         @navigate="((searchQuery = ''), (tab = 'chat'))"
       />
       <ConvList v-else-if="tab === 'chat'" />
-      <PeerList v-else @select="onSelectPeer" />
+      <PeerList v-else @select="onSelectPeer" @chat="chatWith" />
     </aside>
 
     <main class="content">
