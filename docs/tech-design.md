@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.19，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.20，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -14,7 +14,7 @@
 | 构建 | **electron-vite**（Vite 5） | 一份配置管三端产物；renderer 目标 `chrome108`、main/preload 目标 `node16`，红线在构建层强制 |
 | 渲染框架 | **Vue 3 + Pinia** | 组件模型贴合三栏布局；生态对中文社区友好；Chrome 108 完全兼容 |
 | 样式 | **原生 CSS + CSS 变量**（ui-design §9 token 直接映射），Vue SFC scoped；不引组件库/Tailwind | 视觉自绘才能做出"微信感"；避免组件库默认样式拉低质感 |
-| 图标 | **项目内自绘线性 SVG** | 线性 1.6px 风格与 UI 文档一致；不依赖 emoji/system 字形，不引入组件库或图标依赖；设置入口必须是明确齿轮造型 |
+| 图标与品牌 | **项目内自绘线性 SVG + 茶杯气泡 logo** | UI 图标线性 1.6px 风格与 UI 文档一致；品牌 logo 三件套复用同一轮廓；不依赖 emoji/system 字形，不引入组件库或图标依赖 |
 | 数据库 | **better-sqlite3 锁定 9.6.0**（同步 API + WAL + FTS5） | 主进程单线程同步访问最简单可靠；已对 Electron 22 ABI=110 实测编译+运行通过。`.npmrc` 以 `runtime=electron` 让 native 构建始终面向 Electron 而非开发机 Node（开发机 Node 太新会编不过老版本源码） |
 | 图片处理 | **渲染进程 canvas**（缩略图、表情包压缩 WebP） | Chromium 108 原生支持 `toBlob('image/webp')`；**不引 sharp** 等 native 库，避开老 glibc 等编译雷区 |
 | 日志 | 自写轻量 logger（分级、按天分文件、保留 7 天、可打包导出） | 几十行的事，不引依赖 |
@@ -162,6 +162,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
+- **品牌 logo 自绘**：`build/icons/pantry-logo-mono.svg`、`pantry-logo-small.svg`、`pantry-logo-icon.svg` 是品牌源文件；渲染层空状态使用 `PantryBrandLogo` 复用同一轮廓。托盘图标由 `scripts/gen-tray-icon.mjs` 生成 32×32 单色 PNG 后内嵌到 `src/main/windows/tray-icon.ts`，macOS 运行时标记为 template image 适配菜单栏。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
@@ -205,6 +206,7 @@ media/stickers/...  # 自定义表情包媒体
 ## 10. 构建与 CI
 
 - electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；productName `茶话间`，appId `com.pantry.app`。
+- 品牌资源：`build/icons/` 保存可审阅 SVG 源；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
 - GitHub Actions 矩阵：`windows-latest`（x64）、`macos-latest`（universal）、linux 用 `debian:10` 容器 job；每平台产物冒烟脚本（启动→窗口出现→退出码 0）。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。
 - 内网分发：产物 + SHA-256 校验清单一并产出。
