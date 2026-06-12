@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.21，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.22，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -163,6 +163,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
 - **品牌 logo 自绘**：`build/icons/pantry-logo-mono.svg`、`pantry-logo-small.svg`、`pantry-logo-icon.svg` 是品牌源文件；渲染层空状态使用 `PantryBrandLogo` 复用同一轮廓。托盘图标由 `scripts/gen-tray-icon.mjs` 生成 32×32 单色 PNG 后内嵌到 `src/main/windows/tray-icon.ts`，macOS 运行时标记为 template image 适配菜单栏。
+- **托盘未读提示**：`ChatService` / `FilesService` 的 `convs` 事件统一汇总未读数后调用 `updateTrayUnread`（决议 #42）。macOS 使用 `Tray.setTitle` + `dock.setBadge` 显示数字；Windows 使用 `BrowserWindow.setOverlayIcon` 叠加 16×16 数字，并让托盘图标在原图与带数字角标图之间闪烁；Linux 调 `app.setBadgeCount` 作为 best effort，同时以托盘闪烁兜底。动态图标由 `tray-badge.ts` 纯 Node PNG 编码生成，不引入图片库或 native 依赖。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
@@ -254,3 +255,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.19 输入框 hint 颜色修正：新增 `--text-placeholder`，渲染层统一 placeholder 颜色，不涉及 IPC、存储或协议。
 - 2026-06-12 v0.20 品牌 logo 三件套：渲染层空状态与构建图标统一使用本地自绘茶杯气泡标识，托盘图标仍以内嵌 Data URL 适配 asar 场景。
 - 2026-06-12 v0.21 联系人资料页重设计：`PeerList` 双击事件复用打开单聊流程，`ProfileCard` 改为内容区完整资料页。
+- 2026-06-12 v0.22 托盘未读提示：`convs` 未读总数统一驱动 macOS 菜单栏数字 / Dock 角标、Windows taskbar overlay 数字与 Windows/Linux 托盘闪烁兜底。

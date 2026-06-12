@@ -35,7 +35,7 @@ import {
 } from '../shared/ipc'
 import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
 import { loadAppState, saveAppSettings, saveProfile, type AppState } from './store/app-state'
-import { setupTray } from './windows/tray'
+import { setupTray, stopTrayUnreadFlash, updateTrayUnread } from './windows/tray'
 import { openSettingsWindow } from './windows/settings-window'
 import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
 import { StickerRepo } from './store/sticker-repo'
@@ -341,11 +341,12 @@ if (!gotLock) {
       const onConvs = (convs: Array<{ unread: number }>): void => {
         mainWindow?.webContents.send(IpcEvents.convsUpdated, convs)
         const total = convs.reduce((sum, c) => sum + c.unread, 0)
-        if (process.platform === 'darwin') app.dock?.setBadge(total > 0 ? String(total) : '')
+        updateTrayUnread(tray, mainWindow, total)
       }
       chat.on('message', onMessage)
       chat.on('status', onStatus)
       chat.on('convs', onConvs)
+      onConvs(chat.listConversations())
 
       files = new FilesService({
         selfId: state.nodeId,
@@ -1227,6 +1228,7 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
+    stopTrayUnreadFlash(tray)
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时
     discovery = null
     if (pruneTimer) clearInterval(pruneTimer)
