@@ -4,6 +4,8 @@ import {
   IpcEvents,
   type AppInfo,
   type AppSettingsPatch,
+  type ConversationMessageHit,
+  type ConversationSearchOptions,
   type ConversationView,
   type DataExportOptions,
   type DataImportResult,
@@ -99,6 +101,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.imgSaveAs, transferId),
   search: (query: string): Promise<SearchResult> =>
     ipcRenderer.invoke(IpcChannels.searchQuery, query),
+  searchMessages: (options: ConversationSearchOptions): Promise<ConversationMessageHit[]> =>
+    ipcRenderer.invoke(IpcChannels.msgSearch, options),
   getMessageContext: (convId: string, seq: number): Promise<MessageView[]> =>
     ipcRenderer.invoke(IpcChannels.msgContext, convId, seq),
   saveAppSettings: (patch: AppSettingsPatch): Promise<SettingsView> =>

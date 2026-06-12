@@ -5,14 +5,20 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { avatarStyle, avatarText } from '../utils/avatar'
-import { separatorTime } from '../utils/time'
+import { listTime, separatorTime } from '../utils/time'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import ForwardDialog from './ForwardDialog.vue'
 import PantryIcon from './PantryIcon.vue'
-import type { MessageView, PeerView, SettingsView } from '../../../shared/ipc'
+import type {
+  ConversationMessageHit,
+  ConversationSearchKind,
+  MessageView,
+  PeerView,
+  SettingsView
+} from '../../../shared/ipc'
 import { RECALL_WINDOW_MS, TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
 
 const peersStore = usePeersStore()
@@ -24,6 +30,7 @@ transfersStore.init()
 const draft = ref('')
 const dragging = ref(false)
 const showEmoji = ref(false)
+const showHistorySearch = ref(false)
 const showMembers = ref(false)
 const showMentionPicker = ref(false)
 const mentionIds = ref<string[]>([])
@@ -32,10 +39,14 @@ const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
+const historySearchScope = ref<HTMLElement | null>(null)
+const historySearchInput = ref<HTMLInputElement | null>(null)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
+let historySearchTimer: ReturnType<typeof setTimeout> | null = null
+let historySearchRun = 0
 const MSG_MENU_WIDTH = 112
 const MSG_MENU_ITEM_HEIGHT = 32
 const MSG_MENU_PADDING = 10
@@ -44,6 +55,13 @@ interface TextPart {
   text: string
   url: string
 }
+
+const historyQuery = ref('')
+const historyKind = ref<ConversationSearchKind>('all')
+const historyFrom = ref('')
+const historyTo = ref('')
+const historyHits = ref<ConversationMessageHit[]>([])
+const historySearching = ref(false)
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -83,12 +101,21 @@ const inputPlaceholder = computed(() => {
     ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图直接发送'
     : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
 })
+const hasHistoryCriteria = computed(
+  () =>
+    historyQuery.value.trim().length > 0 ||
+    historyKind.value !== 'all' ||
+    historyFrom.value.length > 0 ||
+    historyTo.value.length > 0
+)
 
 function onDocumentPointerDown(event: MouseEvent): void {
-  if (!showEmoji.value) return
   const target = event.target
-  if (target instanceof Node && emojiScope.value?.contains(target)) return
-  showEmoji.value = false
+  if (!(target instanceof Node)) return
+  if (showEmoji.value && !emojiScope.value?.contains(target)) showEmoji.value = false
+  if (showHistorySearch.value && !historySearchScope.value?.contains(target)) {
+    closeHistorySearch()
+  }
 }
 
 onMounted(async () => {
@@ -101,6 +128,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentPointerDown)
+  if (historySearchTimer) clearTimeout(historySearchTimer)
+  historySearchRun += 1
   stopSettings?.()
 })
 
@@ -109,11 +138,15 @@ watch(
   (id) => {
     showMembers.value = false
     showMentionPicker.value = false
+    showHistorySearch.value = false
     mentionIds.value = []
+    resetHistorySearch()
     if (isGroup.value && id) void groupsStore.ensure(id)
   },
   { immediate: true }
 )
+
+watch([historyQuery, historyKind, historyFrom, historyTo], () => scheduleHistorySearch())
 
 function senderName(msg: MessageView): string {
   return peersStore.nameOf(msg.senderId)
@@ -189,6 +222,112 @@ async function onScroll(): Promise<void> {
     el.scrollTop = el.scrollHeight - prevHeight + el.scrollTop
   }
   loadingEarlier.value = false
+}
+
+function resetHistorySearch(): void {
+  if (historySearchTimer) {
+    clearTimeout(historySearchTimer)
+    historySearchTimer = null
+  }
+  historySearchRun += 1
+  historyQuery.value = ''
+  historyKind.value = 'all'
+  historyFrom.value = ''
+  historyTo.value = ''
+  historyHits.value = []
+  historySearching.value = false
+}
+
+function closeHistorySearch(): void {
+  showHistorySearch.value = false
+  if (historySearchTimer) {
+    clearTimeout(historySearchTimer)
+    historySearchTimer = null
+  }
+  historySearching.value = false
+  historySearchRun += 1
+}
+
+function toggleHistorySearch(): void {
+  showHistorySearch.value = !showHistorySearch.value
+  if (!showHistorySearch.value) {
+    closeHistorySearch()
+    return
+  }
+  scheduleHistorySearch()
+  void nextTick(() => historySearchInput.value?.focus())
+}
+
+function clearHistorySearch(): void {
+  resetHistorySearch()
+  void nextTick(() => historySearchInput.value?.focus())
+}
+
+function dayStart(value: string): number | undefined {
+  if (!value) return undefined
+  const ts = new Date(`${value}T00:00:00`).getTime()
+  return Number.isFinite(ts) ? ts : undefined
+}
+
+function dayEnd(value: string): number | undefined {
+  if (!value) return undefined
+  const ts = new Date(`${value}T23:59:59.999`).getTime()
+  return Number.isFinite(ts) ? ts : undefined
+}
+
+function scheduleHistorySearch(): void {
+  if (historySearchTimer) clearTimeout(historySearchTimer)
+  if (!showHistorySearch.value || !chatStore.activeConvId || !hasHistoryCriteria.value) {
+    historyHits.value = []
+    historySearching.value = false
+    return
+  }
+  historySearching.value = true
+  historySearchTimer = setTimeout(() => {
+    historySearchTimer = null
+    void runHistorySearch()
+  }, 200)
+}
+
+async function runHistorySearch(): Promise<void> {
+  const convId = chatStore.activeConvId
+  if (!convId || !hasHistoryCriteria.value) {
+    historyHits.value = []
+    historySearching.value = false
+    return
+  }
+  const run = ++historySearchRun
+  const hits = await window.pantry.searchMessages({
+    convId,
+    query: historyQuery.value,
+    kind: historyKind.value,
+    fromTs: dayStart(historyFrom.value),
+    toTs: dayEnd(historyTo.value),
+    limit: 50
+  })
+  if (run !== historySearchRun) return
+  historyHits.value = hits
+  historySearching.value = false
+}
+
+function historyIcon(hit: ConversationMessageHit): string {
+  if (hit.kind === 'image') return 'image'
+  if (hit.kind === 'file') return 'file'
+  return 'chat'
+}
+
+function historyPrimary(hit: ConversationMessageHit): string {
+  return hit.kind === 'text' ? hit.snippet : hit.title
+}
+
+function historySecondary(hit: ConversationMessageHit): string {
+  const who = hit.isMine ? '我' : peersStore.nameOf(hit.senderId)
+  return `${who} · ${listTime(hit.ts)}`
+}
+
+async function openHistoryHit(hit: ConversationMessageHit): Promise<void> {
+  closeHistorySearch()
+  await chatStore.jumpToMessage(hit.convId, hit.seq, hit.msgId)
 }
 
 function window_startCapture(): void {
@@ -625,6 +764,91 @@ async function onDrop(event: DragEvent): Promise<void> {
         </span>
         <span v-else-if="isGroup" class="tool-hint">仅在线群成员可接收图片/文件</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
+        <span class="toolbar-spacer"></span>
+        <span ref="historySearchScope" class="history-search-scope">
+          <span class="tool-wrap" data-tip="历史搜索">
+            <button
+              class="tool"
+              :class="{ active: showHistorySearch }"
+              type="button"
+              aria-label="历史搜索"
+              @click="toggleHistorySearch"
+            >
+              <PantryIcon name="search" :size="18" />
+            </button>
+          </span>
+          <div v-if="showHistorySearch" class="history-popover">
+            <div class="history-head">
+              <span>搜索聊天记录</span>
+              <button type="button" aria-label="关闭" @click="closeHistorySearch">
+                <PantryIcon name="x" :size="15" />
+              </button>
+            </div>
+            <input
+              ref="historySearchInput"
+              v-model="historyQuery"
+              class="history-input"
+              maxlength="128"
+              placeholder="搜索当前会话"
+            />
+            <div class="history-filters">
+              <div class="history-segments">
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'all' }"
+                  @click="historyKind = 'all'"
+                >
+                  全部
+                </button>
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'image' }"
+                  @click="historyKind = 'image'"
+                >
+                  图片
+                </button>
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'file' }"
+                  @click="historyKind = 'file'"
+                >
+                  文件
+                </button>
+              </div>
+              <button type="button" class="history-clear" @click="clearHistorySearch">清空</button>
+            </div>
+            <div class="history-dates">
+              <label>
+                <span>从</span>
+                <input v-model="historyFrom" type="date" />
+              </label>
+              <label>
+                <span>到</span>
+                <input v-model="historyTo" type="date" />
+              </label>
+            </div>
+            <div class="history-results">
+              <div v-if="!hasHistoryCriteria" class="history-empty">输入关键词，或选择筛选</div>
+              <div v-else-if="historySearching" class="history-empty">搜索中…</div>
+              <div v-else-if="historyHits.length === 0" class="history-empty">没有找到相关记录</div>
+              <template v-else>
+                <button
+                  v-for="hit in historyHits"
+                  :key="hit.msgId"
+                  type="button"
+                  class="history-hit"
+                  @click="openHistoryHit(hit)"
+                >
+                  <span class="history-hit-title">
+                    <PantryIcon :name="historyIcon(hit)" :size="14" />
+                    <span>{{ historyPrimary(hit) }}</span>
+                  </span>
+                  <span class="history-hit-meta">{{ historySecondary(hit) }}</span>
+                </button>
+              </template>
+            </div>
+          </div>
+        </span>
       </div>
       <div v-if="showMentionPicker" class="mention-picker">
         <button
@@ -688,9 +912,19 @@ async function onDrop(event: DragEvent): Promise<void> {
   padding-bottom: 4px;
   position: relative;
 }
+.toolbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
 .emoji-scope {
   display: inline-grid;
   place-items: center;
+}
+.history-search-scope {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
 }
 .mention-picker {
   position: absolute;
@@ -810,13 +1044,187 @@ async function onDrop(event: DragEvent): Promise<void> {
 .tool:hover:not(:disabled) {
   background: var(--line);
 }
+.tool.active {
+  color: var(--primary);
+  background: rgba(61, 139, 107, 0.1);
+}
 .tool:disabled {
   opacity: 0.35;
   cursor: default;
 }
 .tool-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--text-3);
+}
+.history-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 360px;
+  max-height: min(430px, calc(100vh - 220px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+  z-index: 12;
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.history-head button,
+.history-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.history-head button {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.history-head button:hover,
+.history-clear:hover {
+  background: var(--line);
+}
+.history-input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  outline: none;
+  padding: 0 10px;
+  background: var(--bg-list);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+}
+.history-input:focus {
+  border-color: rgba(61, 139, 107, 0.55);
+  background: var(--bg-window);
+}
+.history-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.history-segments {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.history-segments button {
+  width: 52px;
+  height: 28px;
+  border: none;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.history-segments button:last-child {
+  border-right: none;
+}
+.history-segments button.selected {
+  color: var(--primary);
+  background: rgba(61, 139, 107, 0.1);
+}
+.history-clear {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  margin-left: auto;
+}
+.history-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.history-dates label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.history-dates input {
+  min-width: 0;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-list);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 6px;
+}
+.history-results {
+  min-height: 132px;
+  max-height: 246px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.history-empty {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.history-hit {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  padding: 8px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.history-hit:hover {
+  background: var(--line);
+}
+.history-hit-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+}
+.history-hit-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-hit-meta {
+  color: var(--text-3);
+  font-size: 11px;
+  padding-left: 20px;
 }
 .head {
   height: 52px;

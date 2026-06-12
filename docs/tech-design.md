@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.13，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.15，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -102,7 +102,7 @@ src/
 |---|---|
 | `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` | 通讯录、探活（F-DISC-8）、手动 IP、网段扫描 |
 | `conv:list` / `conv:pin` / `conv:mute` / `conv:markRead` / `conv:remove` | 会话列表操作 |
-| `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` | 消息分页（倒序游标）、发送、重发、撤回 |
+| `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` / `msg:search` | 消息分页（倒序游标）、发送、重发、撤回、当前会话历史搜索 |
 | `file:offer` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；群聊发送为多条点对点 transfer 的发送侧编排 |
 | `group:create` / `group:update` | 讨论组 |
 | `search:query(q, scope)` | 全局搜索（联系人/组/记录/文件 四分类一次返回） |
@@ -140,7 +140,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - 索引：`messages(conv_id, ts, seq)`、`peers(last_seen)`、`send_queue(peer_id)`、`transfers(status)`。
 - `remark` 为本地备注名（决议 #22）：仅本机、不入协议；显示与搜索优先命中备注。
 - `groups.creator_ip/admin_secret_hash/admin_hint` 为讨论组管理门槛（决议 #27/#30）：密码明文不入库；提示仅用于成员输入密码时展示，不参与鉴权；无密码组以创建 IP 作为管理来源限制。该机制服务于内网协作秩序，不替代加密/签名。
-- 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。
+- 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。会话内历史搜索固定带 `conv_id` 范围，直接在 `messages` 上按 `kind/content/file_ref/ts` 白名单条件查询：关键词匹配 `content` 与 `file_ref` 展示名，图片/文件/日期筛选只影响本地 SQLite 查询，不产生协议报文或数据库迁移。
 - 定时清理（启动 + 每小时）：`dedup` 超 24h、`send_queue` 超 7 天或单 peer 超 200 条（裁剪时回推 UI 标失败）；启动时将残留 `sending` 态消息复位为失败（可点重发），杜绝"永远转圈"。
 - 迁移：`PRAGMA user_version` 递增 + 顺序执行迁移脚本；导入/迁移目录前自动备份 db 文件。
 
@@ -243,3 +243,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.12 讨论组创建搜索与密码提示：groups 表迁移 v8 增加 `admin_hint`，群元数据/备份包携带密码提示；建群 UI 改为搜索选人后再设置组名与二次密码确认。
 - 2026-06-12 v0.13 群聊媒体落地：文件 offer 支持群上下文，群聊图片/文件按在线成员逐个点对点传输；发送端一条消息汇总多条 transfer，收端入群会话。
 - 2026-06-12 v0.14 群聊图片阈值修订：群聊图片内联上限收紧为 10MB；超限图片按普通文件卡片展示，接收端手动接收后才开始 TCP 拉取。
+- 2026-06-12 v0.15 会话内历史搜索：IPC 增加 `msg:search`，由 `SearchService` 在当前会话范围内按关键词、图片、文件、日期范围查询 `messages`，结果复用既有 `msg:context` 跳转高亮。
