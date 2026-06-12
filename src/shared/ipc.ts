@@ -267,6 +267,7 @@ export interface ConversationMessageHit {
   kind: 'text' | 'file' | 'image'
   title: string
   snippet: string
+  fileRef?: FileRefView
   ts: number
   seq: number
 }

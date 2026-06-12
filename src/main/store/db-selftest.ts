@@ -279,11 +279,15 @@ try {
     searchSvc.conversation({ convId, query: '', kind: 'file' }).some((h) => h.msgId === 'm-f1'),
     '会话内文件筛选应列出文件消息'
   )
+  const imageHits = searchSvc.conversation({ convId, query: '会议', kind: 'image' })
   assert.ok(
-    searchSvc
-      .conversation({ convId, query: '会议', kind: 'image' })
-      .some((h) => h.msgId === 'm-img-search'),
+    imageHits.some((h) => h.msgId === 'm-img-search'),
     '会话内图片搜索应匹配 file_ref 文件名'
+  )
+  assert.equal(
+    imageHits.find((h) => h.msgId === 'm-img-search')?.fileRef?.transferId,
+    't-img-search',
+    '会话内图片搜索应返回缩略图所需的 transferId'
   )
   assert.deepEqual(
     searchSvc.conversation({ convId, query: '', kind: 'all' }),

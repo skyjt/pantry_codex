@@ -39,7 +39,6 @@ const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
-const historySearchScope = ref<HTMLElement | null>(null)
 const historySearchInput = ref<HTMLInputElement | null>(null)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
@@ -62,6 +61,7 @@ const historyFrom = ref('')
 const historyTo = ref('')
 const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
+const historyBrokenImages = ref<Record<string, boolean>>({})
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -108,14 +108,16 @@ const hasHistoryCriteria = computed(
     historyFrom.value.length > 0 ||
     historyTo.value.length > 0
 )
+const historyResultMeta = computed(() => {
+  if (!hasHistoryCriteria.value) return '未开始'
+  if (historySearching.value) return '搜索中'
+  return `${historyHits.value.length} 条结果`
+})
 
 function onDocumentPointerDown(event: MouseEvent): void {
   const target = event.target
   if (!(target instanceof Node)) return
   if (showEmoji.value && !emojiScope.value?.contains(target)) showEmoji.value = false
-  if (showHistorySearch.value && !historySearchScope.value?.contains(target)) {
-    closeHistorySearch()
-  }
 }
 
 onMounted(async () => {
@@ -236,6 +238,7 @@ function resetHistorySearch(): void {
   historyTo.value = ''
   historyHits.value = []
   historySearching.value = false
+  historyBrokenImages.value = {}
 }
 
 function closeHistorySearch(): void {
@@ -246,6 +249,7 @@ function closeHistorySearch(): void {
   }
   historySearching.value = false
   historySearchRun += 1
+  historyBrokenImages.value = {}
 }
 
 function toggleHistorySearch(): void {
@@ -307,6 +311,7 @@ async function runHistorySearch(): Promise<void> {
   })
   if (run !== historySearchRun) return
   historyHits.value = hits
+  historyBrokenImages.value = {}
   historySearching.value = false
 }
 
@@ -317,12 +322,22 @@ function historyIcon(hit: ConversationMessageHit): string {
 }
 
 function historyPrimary(hit: ConversationMessageHit): string {
-  return hit.kind === 'text' ? hit.snippet : hit.title
+  if (hit.kind === 'image') return '图片消息'
+  return hit.kind === 'text' ? '文本消息' : hit.title
 }
 
 function historySecondary(hit: ConversationMessageHit): string {
   const who = hit.isMine ? '我' : peersStore.nameOf(hit.senderId)
   return `${who} · ${listTime(hit.ts)}`
+}
+
+function historyImageSrc(hit: ConversationMessageHit): string {
+  if (hit.kind !== 'image' || historyBrokenImages.value[hit.msgId]) return ''
+  return hit.fileRef?.transferId ? `pantry-img://${hit.fileRef.transferId}` : ''
+}
+
+function markHistoryImageBroken(msgId: string): void {
+  historyBrokenImages.value = { ...historyBrokenImages.value, [msgId]: true }
 }
 
 async function openHistoryHit(hit: ConversationMessageHit): Promise<void> {
@@ -586,6 +601,125 @@ async function onDrop(event: DragEvent): Promise<void> {
 <template>
   <div class="chat" @click="msgMenu = null" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
     <ForwardDialog v-if="forwardMsg" :msg="forwardMsg" @close="forwardMsg = null" />
+    <div
+      v-if="showHistorySearch"
+      class="history-overlay"
+      @mousedown.self="closeHistorySearch"
+      @keydown.esc.stop="closeHistorySearch"
+    >
+      <section
+        class="history-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-search-title"
+        @mousedown.stop
+      >
+        <header class="history-dialog-head">
+          <span class="history-title-block">
+            <span id="history-search-title" class="history-title">搜索聊天记录</span>
+            <span class="history-subtitle">{{ peerName }}</span>
+          </span>
+          <button type="button" class="history-close" aria-label="关闭搜索" @click="closeHistorySearch">
+            <PantryIcon name="x" :size="16" />
+          </button>
+        </header>
+        <div class="history-dialog-body">
+          <aside class="history-sidebar">
+            <label class="history-field">
+              <span>关键词</span>
+              <input
+                ref="historySearchInput"
+                v-model="historyQuery"
+                class="history-input"
+                maxlength="128"
+                placeholder="搜索当前会话"
+              />
+            </label>
+            <div class="history-field">
+              <span>类型</span>
+              <div class="history-segments">
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'all' }"
+                  @click="historyKind = 'all'"
+                >
+                  全部
+                </button>
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'image' }"
+                  @click="historyKind = 'image'"
+                >
+                  图片
+                </button>
+                <button
+                  type="button"
+                  :class="{ selected: historyKind === 'file' }"
+                  @click="historyKind = 'file'"
+                >
+                  文件
+                </button>
+              </div>
+            </div>
+            <div class="history-field">
+              <span>日期</span>
+              <div class="history-dates">
+                <label>
+                  <span>从</span>
+                  <input v-model="historyFrom" type="date" />
+                </label>
+                <label>
+                  <span>到</span>
+                  <input v-model="historyTo" type="date" />
+                </label>
+              </div>
+            </div>
+            <button type="button" class="history-clear" @click="clearHistorySearch">清空筛选</button>
+          </aside>
+          <main class="history-results-panel">
+            <div class="history-results-head">
+              <span>结果</span>
+              <span>{{ historyResultMeta }}</span>
+            </div>
+            <div class="history-results">
+              <div v-if="!hasHistoryCriteria" class="history-empty">暂无筛选条件</div>
+              <div v-else-if="historySearching" class="history-empty">搜索中...</div>
+              <div v-else-if="historyHits.length === 0" class="history-empty">没有找到相关记录</div>
+              <template v-else>
+                <button
+                  v-for="hit in historyHits"
+                  :key="hit.msgId"
+                  type="button"
+                  class="history-hit"
+                  :class="`history-hit-${hit.kind}`"
+                  @click="openHistoryHit(hit)"
+                >
+                  <span class="history-hit-media">
+                    <img
+                      v-if="historyImageSrc(hit)"
+                      class="history-thumb"
+                      :src="historyImageSrc(hit)"
+                      alt="[图片]"
+                      @error="markHistoryImageBroken(hit.msgId)"
+                    />
+                    <span v-else class="history-kind-icon">
+                      <PantryIcon :name="historyIcon(hit)" :size="18" />
+                    </span>
+                  </span>
+                  <span class="history-hit-copy">
+                    <span class="history-hit-title">{{ historyPrimary(hit) }}</span>
+                    <span v-if="hit.kind === 'text'" class="history-hit-snippet">{{
+                      hit.snippet
+                    }}</span>
+                    <span class="history-hit-meta">{{ historySecondary(hit) }}</span>
+                  </span>
+                </button>
+              </template>
+            </div>
+          </main>
+        </div>
+      </section>
+    </div>
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <span class="title-block">
@@ -765,7 +899,7 @@ async function onDrop(event: DragEvent): Promise<void> {
         <span v-else-if="isGroup" class="tool-hint">仅在线群成员可接收图片/文件</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
         <span class="toolbar-spacer"></span>
-        <span ref="historySearchScope" class="history-search-scope">
+        <span class="history-search-scope">
           <span class="tool-wrap" data-tip="历史搜索">
             <button
               class="tool"
@@ -777,77 +911,6 @@ async function onDrop(event: DragEvent): Promise<void> {
               <PantryIcon name="search" :size="18" />
             </button>
           </span>
-          <div v-if="showHistorySearch" class="history-popover">
-            <div class="history-head">
-              <span>搜索聊天记录</span>
-              <button type="button" aria-label="关闭" @click="closeHistorySearch">
-                <PantryIcon name="x" :size="15" />
-              </button>
-            </div>
-            <input
-              ref="historySearchInput"
-              v-model="historyQuery"
-              class="history-input"
-              maxlength="128"
-              placeholder="搜索当前会话"
-            />
-            <div class="history-filters">
-              <div class="history-segments">
-                <button
-                  type="button"
-                  :class="{ selected: historyKind === 'all' }"
-                  @click="historyKind = 'all'"
-                >
-                  全部
-                </button>
-                <button
-                  type="button"
-                  :class="{ selected: historyKind === 'image' }"
-                  @click="historyKind = 'image'"
-                >
-                  图片
-                </button>
-                <button
-                  type="button"
-                  :class="{ selected: historyKind === 'file' }"
-                  @click="historyKind = 'file'"
-                >
-                  文件
-                </button>
-              </div>
-              <button type="button" class="history-clear" @click="clearHistorySearch">清空</button>
-            </div>
-            <div class="history-dates">
-              <label>
-                <span>从</span>
-                <input v-model="historyFrom" type="date" />
-              </label>
-              <label>
-                <span>到</span>
-                <input v-model="historyTo" type="date" />
-              </label>
-            </div>
-            <div class="history-results">
-              <div v-if="!hasHistoryCriteria" class="history-empty">输入关键词，或选择筛选</div>
-              <div v-else-if="historySearching" class="history-empty">搜索中…</div>
-              <div v-else-if="historyHits.length === 0" class="history-empty">没有找到相关记录</div>
-              <template v-else>
-                <button
-                  v-for="hit in historyHits"
-                  :key="hit.msgId"
-                  type="button"
-                  class="history-hit"
-                  @click="openHistoryHit(hit)"
-                >
-                  <span class="history-hit-title">
-                    <PantryIcon :name="historyIcon(hit)" :size="14" />
-                    <span>{{ historyPrimary(hit) }}</span>
-                  </span>
-                  <span class="history-hit-meta">{{ historySecondary(hit) }}</span>
-                </button>
-              </template>
-            </div>
-          </div>
         </span>
       </div>
       <div v-if="showMentionPicker" class="mention-picker">
@@ -1060,56 +1123,100 @@ async function onDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
   color: var(--text-3);
 }
-.history-popover {
+.history-overlay {
   position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  width: 360px;
-  max-height: min(430px, calc(100vh - 220px));
+  inset: 0;
+  z-index: 18;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.16);
+}
+.history-dialog {
+  width: min(680px, 100%);
+  height: min(500px, 100%);
+  min-height: 420px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
   background: var(--bg-window);
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  z-index: 12;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
 }
-.history-head {
+.history-dialog-head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.history-title-block {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.history-title {
   color: var(--text-1);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
-.history-head button,
-.history-clear {
+.history-subtitle {
+  color: var(--text-3);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 28px;
   border: none;
   background: transparent;
   color: var(--text-2);
-  cursor: pointer;
   border-radius: 4px;
-}
-.history-head button {
-  width: 26px;
-  height: 24px;
   display: grid;
   place-items: center;
+  cursor: pointer;
 }
-.history-head button:hover,
-.history-clear:hover {
+.history-close:hover {
   background: var(--line);
+}
+.history-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+}
+.history-sidebar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  background: var(--bg-list);
+  border-right: 1px solid var(--line);
+}
+.history-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--text-3);
+  font-size: 12px;
 }
 .history-input {
   width: 100%;
-  height: 32px;
+  height: 34px;
   border: 1px solid var(--line);
   border-radius: 4px;
   outline: none;
   padding: 0 10px;
-  background: var(--bg-list);
+  background: var(--bg-window);
   color: var(--text-1);
   font: inherit;
   font-size: 13px;
@@ -1118,21 +1225,18 @@ async function onDrop(event: DragEvent): Promise<void> {
   border-color: rgba(61, 139, 107, 0.55);
   background: var(--bg-window);
 }
-.history-filters {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 .history-segments {
-  display: inline-flex;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   align-items: center;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 4px;
+  background: var(--bg-window);
 }
 .history-segments button {
-  width: 52px;
-  height: 28px;
+  height: 32px;
   border: none;
   border-right: 1px solid var(--line);
   background: transparent;
@@ -1148,15 +1252,24 @@ async function onDrop(event: DragEvent): Promise<void> {
   background: rgba(61, 139, 107, 0.1);
 }
 .history-clear {
-  height: 28px;
-  padding: 0 8px;
+  width: 100%;
+  height: 32px;
+  margin-top: auto;
+  border: 1px solid var(--line);
+  background: var(--bg-window);
+  color: var(--text-2);
+  border-radius: 4px;
   font-size: 12px;
-  margin-left: auto;
+  cursor: pointer;
+}
+.history-clear:hover {
+  color: var(--primary);
+  border-color: rgba(61, 139, 107, 0.35);
 }
 .history-dates {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
 }
 .history-dates label {
   min-width: 0;
@@ -1169,24 +1282,48 @@ async function onDrop(event: DragEvent): Promise<void> {
 .history-dates input {
   min-width: 0;
   width: 100%;
-  height: 28px;
+  height: 32px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: var(--bg-list);
+  background: var(--bg-window);
   color: var(--text-1);
   font: inherit;
   font-size: 12px;
   padding: 0 6px;
 }
+.history-results-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-window);
+}
+.history-results-head {
+  flex: 0 0 auto;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+.history-results-head span:last-child {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
 .history-results {
-  min-height: 132px;
-  max-height: 246px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  border-top: 1px solid var(--line);
-  padding-top: 4px;
+  padding: 8px;
 }
 .history-empty {
-  min-height: 120px;
+  height: 100%;
   display: grid;
   place-items: center;
   color: var(--text-3);
@@ -1197,26 +1334,71 @@ async function onDrop(event: DragEvent): Promise<void> {
   border: none;
   background: transparent;
   color: var(--text-1);
-  padding: 8px 6px;
-  border-radius: 4px;
+  padding: 8px;
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.history-hit-image {
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-height: 88px;
+}
+.history-hit + .history-hit {
+  margin-top: 4px;
 }
 .history-hit:hover {
   background: var(--line);
 }
-.history-hit-title {
+.history-hit-media {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--bg-list);
+  color: var(--text-2);
+}
+.history-hit-image .history-hit-media,
+.history-thumb {
+  width: 72px;
+  height: 72px;
+}
+.history-thumb {
+  display: block;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-list);
+}
+.history-kind-icon {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.history-hit-copy {
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
+}
+.history-hit-title {
   min-width: 0;
   font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.history-hit-title span {
+.history-hit-snippet {
   min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1224,7 +1406,6 @@ async function onDrop(event: DragEvent): Promise<void> {
 .history-hit-meta {
   color: var(--text-3);
   font-size: 11px;
-  padding-left: 20px;
 }
 .head {
   height: 52px;

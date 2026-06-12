@@ -2,6 +2,7 @@ import type DatabaseT from 'better-sqlite3'
 import type {
   ConversationMessageHit,
   ConversationSearchOptions,
+  FileRefView,
   FileHit,
   MessageGroupHit,
   SearchResult
@@ -184,7 +185,8 @@ export class SearchService {
     }>
     return rows.map((row) => {
       const title = titleOf(row.kind, row.content, row.fileRef)
-      return {
+      const fileRef = parseFileRef(row.fileRef)
+      const hit: ConversationMessageHit = {
         msgId: row.id,
         convId: row.convId,
         senderId: row.senderId,
@@ -195,6 +197,8 @@ export class SearchService {
         ts: row.ts,
         seq: row.seq
       }
+      if (fileRef) hit.fileRef = fileRef
+      return hit
     })
   }
 }
@@ -223,5 +227,35 @@ function nameFromFileRef(fileRef: string | null): string {
     return typeof parsed.name === 'string' ? parsed.name : ''
   } catch {
     return ''
+  }
+}
+
+function parseFileRef(fileRef: string | null): FileRefView | undefined {
+  if (!fileRef) return undefined
+  try {
+    const parsed = JSON.parse(fileRef) as Partial<FileRefView>
+    if (
+      typeof parsed.transferId === 'string' &&
+      typeof parsed.name === 'string' &&
+      typeof parsed.size === 'number' &&
+      typeof parsed.count === 'number' &&
+      typeof parsed.dir === 'boolean'
+    ) {
+      const view: FileRefView = {
+        transferId: parsed.transferId,
+        name: parsed.name,
+        size: parsed.size,
+        count: parsed.count,
+        dir: parsed.dir
+      }
+      const transferIds = Array.isArray(parsed.transferIds)
+        ? parsed.transferIds.filter((id): id is string => typeof id === 'string')
+        : []
+      if (transferIds.length > 0) view.transferIds = transferIds
+      return view
+    }
+    return undefined
+  } catch {
+    return undefined
   }
 }
