@@ -143,7 +143,6 @@ export class SearchService {
         : undefined
     if (!convId || convId.length > 128) return []
     if (fromTs !== undefined && toTs !== undefined && fromTs > toTs) return []
-    if (!query && kind === 'all' && fromTs === undefined && toTs === undefined) return []
 
     const clauses = ["conv_id = @convId", "status <> 'recalled'"]
     if (kind === 'image') clauses.push("kind = 'image'")

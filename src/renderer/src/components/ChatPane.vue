@@ -54,11 +54,21 @@ interface TextPart {
   text: string
   url: string
 }
+interface HistoryCalendarDay {
+  key: string
+  label: number
+  inMonth: boolean
+  isToday: boolean
+  isStart: boolean
+  isEnd: boolean
+  inRange: boolean
+}
 
 const historyQuery = ref('')
 const historyKind = ref<ConversationSearchKind>('all')
 const historyFrom = ref('')
 const historyTo = ref('')
+const historyCalendarMonth = ref(monthKey(new Date()))
 const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
 const historyBrokenImages = ref<Record<string, boolean>>({})
@@ -101,17 +111,47 @@ const inputPlaceholder = computed(() => {
     ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图直接发送'
     : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
 })
-const hasHistoryCriteria = computed(
-  () =>
-    historyQuery.value.trim().length > 0 ||
-    historyKind.value !== 'all' ||
-    historyFrom.value.length > 0 ||
-    historyTo.value.length > 0
-)
 const historyResultMeta = computed(() => {
-  if (!hasHistoryCriteria.value) return '未开始'
   if (historySearching.value) return '搜索中'
   return `${historyHits.value.length} 条结果`
+})
+const HISTORY_WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+const historyDateRangeLabel = computed(() => {
+  if (historyFrom.value && historyTo.value) {
+    return `${compactDateLabel(historyFrom.value)} 至 ${compactDateLabel(historyTo.value)}`
+  }
+  if (historyFrom.value) return `${compactDateLabel(historyFrom.value)} 起`
+  return '全部日期'
+})
+const historyCalendarTitle = computed(() => {
+  const base = monthDate(historyCalendarMonth.value)
+  return `${base.getFullYear()}年${base.getMonth() + 1}月`
+})
+const historyCalendarDays = computed<HistoryCalendarDay[]>(() => {
+  const base = monthDate(historyCalendarMonth.value)
+  const first = new Date(base.getFullYear(), base.getMonth(), 1)
+  const mondayOffset = (first.getDay() + 6) % 7
+  const start = new Date(first)
+  start.setDate(first.getDate() - mondayOffset)
+  const today = dateKey(new Date())
+  const from = historyFrom.value
+  const to = historyTo.value
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(start)
+    day.setDate(start.getDate() + index)
+    const key = dateKey(day)
+    const isStart = key === from
+    const isEnd = key === to
+    return {
+      key,
+      label: day.getDate(),
+      inMonth: day.getMonth() === base.getMonth(),
+      isToday: key === today,
+      isStart,
+      isEnd,
+      inRange: Boolean(from && to && key > from && key < to)
+    }
+  })
 })
 
 function onDocumentPointerDown(event: MouseEvent): void {
@@ -236,6 +276,7 @@ function resetHistorySearch(): void {
   historyKind.value = 'all'
   historyFrom.value = ''
   historyTo.value = ''
+  historyCalendarMonth.value = monthKey(new Date())
   historyHits.value = []
   historySearching.value = false
   historyBrokenImages.value = {}
@@ -258,13 +299,66 @@ function toggleHistorySearch(): void {
     closeHistorySearch()
     return
   }
+  historyCalendarMonth.value = historyFrom.value
+    ? historyFrom.value.slice(0, 7)
+    : monthKey(new Date())
   scheduleHistorySearch()
   void nextTick(() => historySearchInput.value?.focus())
 }
 
 function clearHistorySearch(): void {
   resetHistorySearch()
+  scheduleHistorySearch()
   void nextTick(() => historySearchInput.value?.focus())
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function monthKey(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
+}
+
+function monthDate(key: string): Date {
+  const matched = /^(\d{4})-(\d{2})$/.exec(key)
+  if (!matched) return new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  return new Date(Number(matched[1]), Number(matched[2]) - 1, 1)
+}
+
+function compactDateLabel(value: string): string {
+  return value.replace(/-/g, '.')
+}
+
+function moveHistoryMonth(offset: number): void {
+  const base = monthDate(historyCalendarMonth.value)
+  base.setMonth(base.getMonth() + offset)
+  historyCalendarMonth.value = monthKey(base)
+}
+
+function pickHistoryDate(key: string): void {
+  historyCalendarMonth.value = key.slice(0, 7)
+  if (!historyFrom.value || historyTo.value) {
+    historyFrom.value = key
+    historyTo.value = ''
+    return
+  }
+  if (key < historyFrom.value) {
+    historyTo.value = historyFrom.value
+    historyFrom.value = key
+    return
+  }
+  historyTo.value = key
+}
+
+function clearHistoryDateRange(): void {
+  historyFrom.value = ''
+  historyTo.value = ''
+  historyCalendarMonth.value = monthKey(new Date())
 }
 
 function dayStart(value: string): number | undefined {
@@ -281,7 +375,7 @@ function dayEnd(value: string): number | undefined {
 
 function scheduleHistorySearch(): void {
   if (historySearchTimer) clearTimeout(historySearchTimer)
-  if (!showHistorySearch.value || !chatStore.activeConvId || !hasHistoryCriteria.value) {
+  if (!showHistorySearch.value || !chatStore.activeConvId) {
     historyHits.value = []
     historySearching.value = false
     return
@@ -295,7 +389,7 @@ function scheduleHistorySearch(): void {
 
 async function runHistorySearch(): Promise<void> {
   const convId = chatStore.activeConvId
-  if (!convId || !hasHistoryCriteria.value) {
+  if (!convId) {
     historyHits.value = []
     historySearching.value = false
     return
@@ -662,16 +756,48 @@ async function onDrop(event: DragEvent): Promise<void> {
               </div>
             </div>
             <div class="history-field">
-              <span>日期</span>
-              <div class="history-dates">
-                <label>
-                  <span>从</span>
-                  <input v-model="historyFrom" type="date" />
-                </label>
-                <label>
-                  <span>到</span>
-                  <input v-model="historyTo" type="date" />
-                </label>
+              <span class="history-field-head">
+                <span>日期</span>
+                <button
+                  v-if="historyFrom || historyTo"
+                  type="button"
+                  class="history-date-clear"
+                  @click="clearHistoryDateRange"
+                >
+                  清除
+                </button>
+              </span>
+              <span class="history-range-label">{{ historyDateRangeLabel }}</span>
+              <div class="history-calendar">
+                <div class="history-calendar-head">
+                  <button type="button" aria-label="上个月" @click="moveHistoryMonth(-1)">
+                    <PantryIcon name="chevron-left" :size="14" />
+                  </button>
+                  <span>{{ historyCalendarTitle }}</span>
+                  <button type="button" aria-label="下个月" @click="moveHistoryMonth(1)">
+                    <PantryIcon name="chevron-right" :size="14" />
+                  </button>
+                </div>
+                <div class="history-weekdays">
+                  <span v-for="day in HISTORY_WEEKDAYS" :key="day">{{ day }}</span>
+                </div>
+                <div class="history-calendar-grid">
+                  <button
+                    v-for="day in historyCalendarDays"
+                    :key="day.key"
+                    type="button"
+                    class="history-day"
+                    :class="{
+                      out: !day.inMonth,
+                      today: day.isToday,
+                      'in-range': day.inRange,
+                      'range-edge': day.isStart || day.isEnd
+                    }"
+                    @click="pickHistoryDate(day.key)"
+                  >
+                    {{ day.label }}
+                  </button>
+                </div>
               </div>
             </div>
             <button type="button" class="history-clear" @click="clearHistorySearch">清空筛选</button>
@@ -682,8 +808,7 @@ async function onDrop(event: DragEvent): Promise<void> {
               <span>{{ historyResultMeta }}</span>
             </div>
             <div class="history-results">
-              <div v-if="!hasHistoryCriteria" class="history-empty">暂无筛选条件</div>
-              <div v-else-if="historySearching" class="history-empty">搜索中...</div>
+              <div v-if="historySearching" class="history-empty">搜索中...</div>
               <div v-else-if="historyHits.length === 0" class="history-empty">没有找到相关记录</div>
               <template v-else>
                 <button
@@ -1209,6 +1334,24 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--text-3);
   font-size: 12px;
 }
+.history-field-head {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.history-date-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.history-date-clear:hover {
+  color: var(--primary);
+}
 .history-input {
   width: 100%;
   height: 34px;
@@ -1266,30 +1409,101 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--primary);
   border-color: rgba(61, 139, 107, 0.35);
 }
-.history-dates {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.history-dates label {
-  min-width: 0;
+.history-range-label {
+  width: 100%;
+  height: 28px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  color: var(--text-3);
-  font-size: 12px;
-}
-.history-dates input {
-  min-width: 0;
-  width: 100%;
-  height: 32px;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--bg-window);
   color: var(--text-1);
+  font-size: 12px;
+  padding: 0 8px;
+}
+.history-calendar {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-window);
+  padding: 7px;
+}
+.history-calendar-head {
+  height: 26px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 26px;
+  align-items: center;
+  gap: 4px;
+}
+.history-calendar-head span {
+  text-align: center;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+}
+.history-calendar-head button {
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.history-calendar-head button:hover {
+  background: var(--line);
+  color: var(--primary);
+}
+.history-weekdays,
+.history-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.history-weekdays {
+  margin: 5px 0 3px;
+}
+.history-weekdays span {
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.history-calendar-grid {
+  gap: 2px;
+}
+.history-day {
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 4px;
   font: inherit;
   font-size: 12px;
-  padding: 0 6px;
+  cursor: pointer;
+}
+.history-day.out {
+  color: var(--text-3);
+  opacity: 0.55;
+}
+.history-day.today:not(.range-edge) {
+  box-shadow: inset 0 0 0 1px rgba(61, 139, 107, 0.38);
+  color: var(--primary);
+}
+.history-day.in-range {
+  background: rgba(61, 139, 107, 0.1);
+  color: var(--primary);
+}
+.history-day.range-edge {
+  background: var(--primary);
+  color: #fff;
+  opacity: 1;
+}
+.history-day:hover:not(.range-edge) {
+  background: var(--line);
+  color: var(--primary);
 }
 .history-results-panel {
   min-width: 0;

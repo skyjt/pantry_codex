@@ -290,9 +290,11 @@ try {
     '会话内图片搜索应返回缩略图所需的 transferId'
   )
   assert.deepEqual(
-    searchSvc.conversation({ convId, query: '', kind: 'all' }),
-    [],
-    '会话内搜索无关键词/筛选时不返回最近消息'
+    searchSvc
+      .conversation({ convId, query: '', kind: 'all', limit: 2 })
+      .map((h) => h.msgId),
+    ['m-img-search', 'm-f1'],
+    '会话内搜索无关键词时应返回当前会话最近记录'
   )
   assert.deepEqual(
     searchSvc

@@ -118,6 +118,12 @@ withDefaults(
     <g v-else-if="name === 'chevron-down'">
       <path d="m7 10 5 5 5-5" />
     </g>
+    <g v-else-if="name === 'chevron-left'">
+      <path d="m14 7-5 5 5 5" />
+    </g>
+    <g v-else-if="name === 'chevron-right'">
+      <path d="m10 7 5 5-5 5" />
+    </g>
     <g v-else>
       <circle cx="12" cy="12" r="7" />
     </g>
