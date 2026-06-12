@@ -51,7 +51,9 @@ jobs:
       - name: 重建 Debian 10 native 模块
         env:
           npm_config_build_from_source: "true"
-        run: npm run rebuild:electron
+        run: |
+          npm run rebuild:electron
+          node scripts/check-native-glibc.cjs node_modules/better-sqlite3/build/Release/better_sqlite3.node
 
       - name: 五连验证
         shell: bash
@@ -66,6 +68,9 @@ jobs:
 
       - name: 构建 Debian 10 / UOS 20 x64 产物
         run: npm run dist:linux
+
+      - name: 校验 Linux 打包 native 模块 glibc 基线
+        run: node scripts/check-native-glibc.cjs
 
       - name: 生成 SHA-256 清单
         shell: bash
