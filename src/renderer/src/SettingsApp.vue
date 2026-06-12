@@ -21,6 +21,7 @@ import {
 import AvatarGlyph from './components/AvatarGlyph.vue'
 import AvatarMark from './components/AvatarMark.vue'
 import PantryIcon from './components/PantryIcon.vue'
+import WindowControls from './components/WindowControls.vue'
 
 // 设置独立小窗（ui-design §8）：P1 起按 8 组完整承载本地设置。
 
@@ -75,6 +76,10 @@ const showHideShortcut = ref('')
 let stopSettings: (() => void) | null = null
 const selectedAvatarEmoji = computed(() => avatarEmojiIndex(avatar.value))
 const selectedAvatarColor = computed(() => avatarColorIndex(avatar.value, nick.value || '茶'))
+const avatarSummary = computed(() => {
+  const colorName = AVATAR_COLORS[selectedAvatarColor.value]?.name ?? ''
+  return avatar.value === -1 ? `昵称首字 · ${colorName}` : `图标 · ${colorName}`
+})
 const currentSection = computed(() => sections.find((item) => item.id === section.value) ?? sections[0])
 const activeNotice = computed(() =>
   section.value === 'network' && scanTip.value ? scanTip.value : savedTip.value
@@ -382,6 +387,9 @@ async function removeRange(cidr: string): Promise<void> {
 
 <template>
   <div class="settings">
+    <!-- 沉浸式无标题栏（决议 #49）：顶部拖拽带；设置窗 Win/Linux 仅自绘关闭按钮 -->
+    <div class="drag-strip"></div>
+    <WindowControls buttons="close" />
     <aside class="sidebar">
       <div class="account-card">
         <AvatarMark class="account-avatar" :avatar="avatar" :name="nick || '茶'" />
@@ -421,17 +429,35 @@ async function removeRange(cidr: string): Promise<void> {
               <h2>个人身份</h2>
               <p>昵称必填。公司、部门、团队会用于通讯录树形分组。</p>
             </div>
+            <!-- 头像编辑器（决议 #50）：大预览 + 样式分段切换 + 图标网格 + 背景色板 -->
             <div class="avatar-editor">
-              <AvatarMark class="avatar-preview" :avatar="avatar" :name="nick || '茶'" />
-              <div class="avatar-tools">
-                <button
-                  type="button"
-                  class="avatar-initial"
-                  :class="{ on: avatar === -1 }"
-                  @click="chooseInitialAvatar"
-                >
-                  昵称首字
-                </button>
+              <div class="avatar-stage">
+                <AvatarMark class="avatar-preview" :avatar="avatar" :name="nick || '茶'" />
+                <span class="avatar-current">{{ avatarSummary }}</span>
+              </div>
+              <div class="avatar-mode-block">
+                <div class="avatar-mode" role="radiogroup" aria-label="头像样式">
+                  <button
+                    type="button"
+                    :class="{ on: avatar >= 0 }"
+                    @click="chooseAvatarEmoji(selectedAvatarEmoji >= 0 ? selectedAvatarEmoji : 0)"
+                  >
+                    图标头像
+                  </button>
+                  <button type="button" :class="{ on: avatar === -1 }" @click="chooseInitialAvatar">
+                    昵称首字
+                  </button>
+                </div>
+                <p class="avatar-mode-hint">
+                  {{
+                    avatar === -1
+                      ? '使用昵称第一个字作头像，背景色按昵称自动分配。'
+                      : '从下方挑一个图标，再配一个背景色。'
+                  }}
+                </p>
+              </div>
+              <div class="avatar-pick">
+                <span class="avatar-label">图标</span>
                 <div class="avatar-grid" aria-label="精选头像图标">
                   <button
                     v-for="(_, idx) in AVATAR_EMOJIS"
@@ -446,6 +472,7 @@ async function removeRange(cidr: string): Promise<void> {
                     <AvatarGlyph :index="idx" />
                   </button>
                 </div>
+                <span class="avatar-label">背景色</span>
                 <div class="avatar-colors" aria-label="头像背景色">
                   <button
                     v-for="(color, idx) in AVATAR_COLORS"
@@ -880,12 +907,23 @@ async function removeRange(cidr: string): Promise<void> {
   color: var(--text-1);
 }
 
+/* 沉浸式拖拽带（决议 #49，与主窗同规格） */
+.drag-strip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  -webkit-app-region: drag;
+  z-index: 12;
+}
+
 .sidebar {
   width: 174px;
   flex: 0 0 174px;
   border-right: 1px solid var(--line);
   background: var(--bg-window);
-  padding: 14px 10px;
+  padding: 38px 10px 14px; /* 顶部让出拖拽带与 mac 红绿灯 */
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -969,7 +1007,9 @@ async function removeRange(cidr: string): Promise<void> {
 .body {
   flex: 1;
   min-width: 0;
-  padding: 18px 22px 24px;
+  /* 滚动视口从拖拽带下方开始，内容滚动时不会钻进顶部 32px 不可交互区 */
+  margin-top: 32px;
+  padding: 8px 22px 24px;
   overflow-y: auto;
 }
 
@@ -1149,50 +1189,95 @@ async function removeRange(cidr: string): Promise<void> {
   overflow-wrap: anywhere;
 }
 
+/* 头像编辑器（决议 #50）：预览与样式切换同行，图标网格与色板全宽分节 */
 .avatar-editor {
   display: grid;
-  grid-template-columns: 58px 1fr;
-  align-items: start;
+  grid-template-columns: 88px 1fr;
+  align-items: center;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.avatar-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .avatar-preview {
-  width: 58px;
-  height: 58px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 26px;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  font-size: 30px;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 4px 14px rgba(0, 0, 0, 0.1);
 }
 
-.avatar-tools {
+.avatar-current {
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.avatar-mode-block {
   min-width: 0;
 }
 
-.avatar-initial {
-  height: 30px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+.avatar-pick {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.avatar-mode {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
   background: var(--bg-list);
-  color: var(--text-2);
-  font-size: 12px;
-  padding: 0 10px;
-  cursor: pointer;
   margin-bottom: 8px;
 }
 
-.avatar-initial.on {
-  border-color: var(--primary);
-  background: var(--primary-weak);
+.avatar-mode-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.avatar-mode button {
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+.avatar-mode button.on {
+  background: var(--bg-window);
   color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+
+.avatar-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
 }
 
 .avatar-grid {
   display: grid;
-  grid-template-columns: repeat(8, 30px);
-  gap: 6px;
+  grid-template-columns: repeat(10, 30px);
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .avatar-choice {
@@ -1205,35 +1290,58 @@ async function removeRange(cidr: string): Promise<void> {
   cursor: pointer;
   font-size: 15px;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.avatar-choice:hover {
+  transform: scale(1.12);
 }
 
 .avatar-choice.on {
   border-color: var(--primary);
   box-shadow:
-    0 0 0 2px var(--primary-weak),
+    0 0 0 2px var(--primary),
     inset 0 0 0 1px rgba(255, 255, 255, 0.78);
 }
 
 .avatar-colors {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 8px;
 }
 
 .color-choice {
-  width: 20px;
-  height: 20px;
+  position: relative;
+  width: 24px;
+  height: 24px;
   border: 2px solid var(--bg-window);
   border-radius: 50%;
   box-shadow: 0 0 0 1px var(--line);
   cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.color-choice:hover {
+  transform: scale(1.12);
 }
 
 .color-choice.on {
-  box-shadow:
-    0 0 0 2px var(--primary),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+.color-choice.on::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .switch {
@@ -1524,10 +1632,6 @@ async function removeRange(cidr: string): Promise<void> {
   .field-grid,
   .port-grid {
     grid-template-columns: 1fr;
-  }
-
-  .avatar-grid {
-    grid-template-columns: repeat(6, 30px);
   }
 }
 </style>
