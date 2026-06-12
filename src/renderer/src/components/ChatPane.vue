@@ -4,8 +4,10 @@ import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
-import { avatarStyle, avatarText } from '../utils/avatar'
+import { splitEmojiText } from '../utils/compat-emoji'
 import { listTime, separatorTime } from '../utils/time'
+import AvatarMark from './AvatarMark.vue'
+import CompatEmoji from './CompatEmoji.vue'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
@@ -220,16 +222,6 @@ function showGroupSender(msg: MessageView): boolean {
   return isGroup.value && !msg.isMine && msg.kind !== 'system' && msg.status !== 'recalled'
 }
 
-function senderAvatarStyle(msg: MessageView): { backgroundColor: string; color: string } {
-  const peer = senderPeer(msg)
-  return avatarStyle(peer?.avatar ?? -1, senderName(msg))
-}
-
-function senderAvatarText(msg: MessageView): string {
-  const peer = senderPeer(msg)
-  return avatarText(peer?.avatar ?? -1, senderName(msg))
-}
-
 const draftBytes = computed(() => new TextEncoder().encode(draft.value.trim()).length)
 const overUdpLimit = computed(() => draftBytes.value > TEXT_UDP_LIMIT)
 const overLimit = computed(() => draftBytes.value > TEXT_TCP_LIMIT)
@@ -422,12 +414,6 @@ function peerLastSeenLabel(p: PeerView): string {
   if (p.online) return '当前在线'
   if (!p.lastSeen) return '离线'
   return listTime(p.lastSeen)
-}
-
-function peerProfileAvatarStyle(p: PeerView): { backgroundColor: string; color: string } {
-  return p.online
-    ? avatarStyle(p.avatar, p.remark || p.nick)
-    : { backgroundColor: 'var(--offline)', color: '#fff' }
 }
 
 async function savePeerProfileRemark(): Promise<void> {
@@ -955,9 +941,12 @@ async function onDrop(event: DragEvent): Promise<void> {
           @keydown.esc.stop="closePeerProfile"
         >
           <header class="peer-profile-head">
-            <span class="profile-avatar" :style="peerProfileAvatarStyle(peer)">
-              {{ avatarText(peer.avatar, peer.remark || peer.nick) }}
-            </span>
+            <AvatarMark
+              class="profile-avatar"
+              :avatar="peer.avatar"
+              :name="peer.remark || peer.nick"
+              :offline="!peer.online"
+            />
             <span class="profile-title">
               <strong>{{ peer.remark || peer.nick }}</strong>
               <small v-if="peer.remark">昵称：{{ peer.nick }}</small>
@@ -1022,9 +1011,12 @@ async function onDrop(event: DragEvent): Promise<void> {
           class="row"
           :class="[msg.isMine ? 'mine' : 'peer', { highlight: msg.id === chatStore.highlightId }]"
         >
-          <span v-if="showGroupSender(msg)" class="msg-avatar" :style="senderAvatarStyle(msg)">
-            {{ senderAvatarText(msg) }}
-          </span>
+          <AvatarMark
+            v-if="showGroupSender(msg)"
+            class="msg-avatar"
+            :avatar="senderPeer(msg)?.avatar ?? -1"
+            :name="senderName(msg)"
+          />
           <span class="message-stack">
             <span v-if="showGroupSender(msg)" class="sender">{{ senderName(msg) }}</span>
             <FileCard
@@ -1053,7 +1045,15 @@ async function onDrop(event: DragEvent): Promise<void> {
                 >
                   {{ part.text }}
                 </button>
-                <span v-else>{{ part.text }}</span>
+                <span v-else>
+                  <template
+                    v-for="(emojiPart, emojiPartIndex) in splitEmojiText(part.text)"
+                    :key="emojiPartIndex"
+                  >
+                    <CompatEmoji v-if="emojiPart.emoji" :emoji="emojiPart.text" />
+                    <span v-else>{{ emojiPart.text }}</span>
+                  </template>
+                </span>
               </template>
             </div>
           </span>

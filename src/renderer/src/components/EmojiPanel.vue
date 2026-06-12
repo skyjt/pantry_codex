@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useStickersStore } from '../stores/stickers'
+import { COMPAT_EMOJIS } from '../utils/compat-emoji'
+import CompatEmoji from './CompatEmoji.vue'
 import PantryIcon from './PantryIcon.vue'
 
 // 表情面板双页签（ui-design §5）：emoji / 我的表情包。
-// Win7 的 twemoji 图片替换方案（tech-design §7）留待 Win7 VM 冒烟时落地。
+// Win7 / UOS 缺字平台：emoji 页使用本地 SVG 展示，点击仍插入原始 UTF-8 字符。
 
 const emit = defineEmits<{ select: [emoji: string]; sticker: [id: string] }>()
 const props = defineProps<{ stickerEnabled: boolean }>()
@@ -13,19 +15,6 @@ const tab = ref<'emoji' | 'sticker'>('emoji')
 const stickers = useStickersStore()
 
 onMounted(() => void stickers.init())
-
-const EMOJIS: string[] = [
-  '😀', '😄', '😁', '😂', '🤣', '😊', '😉', '😍',
-  '😘', '😜', '🤔', '🤗', '😎', '🙄', '😤', '😭',
-  '😱', '😴', '🤤', '😷', '🤝', '👍', '👎', '👌',
-  '✌️', '🤞', '👏', '🙏', '💪', '👀', '🤦', '🤷',
-  '🙋', '✋', '👋', '❤️', '💔', '💯', '🔥', '🎉',
-  '🎊', '✨', '⭐', '🌟', '☀️', '🌧️', '⚡', '❄️',
-  '🌈', '🍵', '☕', '🍺', '🥳', '🍰', '🍜', '🍚',
-  '🍉', '🍎', '🍊', '⏰', '📌', '📎', '✅', '❌',
-  '⚠️', '❓', '❗', '💤', '🚀', '🐛', '🔧', '💻',
-  '📱', '📁', '📄', '✏️', '🔍', '🔒', '🆗', '💡'
-]
 </script>
 
 <template>
@@ -40,7 +29,15 @@ const EMOJIS: string[] = [
     </div>
 
     <div v-if="tab === 'emoji'" class="grid emoji-grid">
-      <button v-for="e in EMOJIS" :key="e" class="emo" @click="emit('select', e)">{{ e }}</button>
+      <button
+        v-for="item in COMPAT_EMOJIS"
+        :key="item.char"
+        class="emo"
+        :title="item.label"
+        @click="emit('select', item.char)"
+      >
+        <CompatEmoji :emoji="item.char" />
+      </button>
     </div>
 
     <div v-else class="grid sticker-grid" :class="{ 'is-empty': stickers.list.length === 0 }">
@@ -127,11 +124,13 @@ const EMOJIS: string[] = [
 .emo {
   border: none;
   background: transparent;
-  font-size: 20px;
+  font-size: 22px;
   padding: 4px;
   border-radius: 4px;
   cursor: pointer;
   line-height: 1.2;
+  display: grid;
+  place-items: center;
 }
 .emo:hover {
   background: var(--line);

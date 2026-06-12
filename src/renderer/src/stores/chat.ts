@@ -60,6 +60,7 @@ export const useChatStore = defineStore('chat', {
     async openPeer(peerNodeId: string): Promise<void> {
       const conv = await window.pantry.openConversation(peerNodeId)
       if (!conv) return
+      this.upsertConversation(conv)
       this.activeConvId = conv.id
       this.viewingHistory = false
       if (!this.messages[conv.id]) {
@@ -103,6 +104,12 @@ export const useChatStore = defineStore('chat', {
       if (!convId) return
       this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
       this.viewingHistory = false
+    },
+
+    upsertConversation(conv: ConversationView): void {
+      const index = this.convs.findIndex((item) => item.id === conv.id)
+      if (index >= 0) this.convs[index] = conv
+      else this.convs = [conv, ...this.convs]
     },
 
     async pinConversation(convId: string, pinned: boolean): Promise<void> {

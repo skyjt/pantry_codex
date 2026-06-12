@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import type { PeerView } from '../../../shared/ipc'
 import PantryIcon from './PantryIcon.vue'
-import { avatarStyle, avatarText } from '../utils/avatar'
+import AvatarMark from './AvatarMark.vue'
 import { listTime } from '../utils/time'
 
 // 联系人资料页（ui-design §4 / 决议 #40）：单击联系人展示，双击联系人由 PeerList 直达单聊。
@@ -98,20 +98,19 @@ function lastSeenLabel(peer: PeerView): string {
   return listTime(peer.lastSeen) || '离线'
 }
 
-function profileAvatarStyle(peer: PeerView): { backgroundColor: string; color: string } {
-  return peer.online
-    ? avatarStyle(peer.avatar, displayName.value)
-    : { backgroundColor: 'var(--offline)', color: '#fff' }
-}
 </script>
 
 <template>
   <div class="profile-page">
     <article class="profile-sheet">
       <header class="profile-hero">
-        <span class="avatar" :class="{ off: !peer.online }" :style="profileAvatarStyle(peer)">
-          {{ avatarText(peer.avatar, displayName) }}
-        </span>
+        <AvatarMark
+          class="avatar"
+          :class="{ off: !peer.online }"
+          :avatar="peer.avatar"
+          :name="displayName"
+          :offline="!peer.online"
+        />
         <div class="identity">
           <div class="identity-row">
             <h2>{{ displayName }}</h2>

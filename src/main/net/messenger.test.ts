@@ -214,6 +214,39 @@ describe('messenger 回环集成', () => {
     expect(a.queue.items).toHaveLength(0)
   })
 
+  it('短文本 UDP 无 ACK 时自动降级为 TCP 控制帧', async () => {
+    nextPort += 20
+    const a = await makeStack('alice', nextPort)
+    const peer = makeProfile('bob', nextPort + 8)
+    const incoming: Envelope[] = []
+    const server = new TransferServer(
+      peer.tcpPort,
+      {
+        resolve: () => null,
+        receiveMessage: (env) => {
+          incoming.push(env)
+          return true
+        }
+      },
+      '127.0.0.1'
+    )
+    tcpServers.push(server)
+    await server.start()
+    a.registry.touch(peer.nodeId, '127.0.0.1', nextPort + 8, peer)
+
+    const outcome = await a.messenger.sendUserMessage(
+      peer.nodeId,
+      textEnv(a.profile.nodeId, 'UOS UDP 兜底')
+    )
+
+    expect(outcome).toBe('sent')
+    expect(incoming).toHaveLength(1)
+    const payload = incoming[0].payload as MsgPayload
+    expect(payload.kind).toBe('text')
+    if (payload.kind === 'text') expect(payload.text).toBe('UOS UDP 兜底')
+    expect(a.queue.items).toHaveLength(0)
+  })
+
   it('重复消息：只入账一次，但每次都回 ACK', async () => {
     nextPort += 2
     const a = await makeStack('alice', nextPort)

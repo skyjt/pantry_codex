@@ -184,7 +184,7 @@ export class Messenger extends EventEmitter {
       let attempt = 0
       const step = (): void => {
         if (attempt === delays.length) {
-          entry.settle(false)
+          void this.sendTcpAwaitAck(peerId, env).then((acked) => entry.settle(acked))
           return
         }
         const record = this.registry.get(peerId)

@@ -38,8 +38,7 @@ export const AVATAR_COLORS = [
 
 const EMOJI_COUNT = AVATAR_EMOJIS.length
 
-export function avatarText(avatar: number, displayName: string): string {
-  if (avatar >= 0) return AVATAR_EMOJIS[avatarEmojiIndex(avatar)]
+export function avatarText(_avatar: number, displayName: string): string {
   return displayName.trim().slice(0, 1) || '茶'
 }
 

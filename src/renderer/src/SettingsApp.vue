@@ -16,9 +16,10 @@ import {
   avatarColorIndex,
   avatarEmojiIndex,
   avatarStyle,
-  avatarText,
   avatarValue
 } from './utils/avatar'
+import AvatarGlyph from './components/AvatarGlyph.vue'
+import AvatarMark from './components/AvatarMark.vue'
 import PantryIcon from './components/PantryIcon.vue'
 
 // 设置独立小窗（ui-design §8）：P1 起按 8 组完整承载本地设置。
@@ -74,7 +75,6 @@ const showHideShortcut = ref('')
 let stopSettings: (() => void) | null = null
 const selectedAvatarEmoji = computed(() => avatarEmojiIndex(avatar.value))
 const selectedAvatarColor = computed(() => avatarColorIndex(avatar.value, nick.value || '茶'))
-const avatarPreviewStyle = computed(() => avatarStyle(avatar.value, nick.value || '茶'))
 const currentSection = computed(() => sections.find((item) => item.id === section.value) ?? sections[0])
 const activeNotice = computed(() =>
   section.value === 'network' && scanTip.value ? scanTip.value : savedTip.value
@@ -384,9 +384,7 @@ async function removeRange(cidr: string): Promise<void> {
   <div class="settings">
     <aside class="sidebar">
       <div class="account-card">
-        <div class="account-avatar" :style="avatarPreviewStyle">
-          {{ avatarText(avatar, nick || '茶') }}
-        </div>
+        <AvatarMark class="account-avatar" :avatar="avatar" :name="nick || '茶'" />
         <div class="account-copy">
           <strong>{{ nick || '未命名' }}</strong>
           <span>{{ company || '未填写公司' }}</span>
@@ -424,9 +422,7 @@ async function removeRange(cidr: string): Promise<void> {
               <p>昵称必填。公司、部门、团队会用于通讯录树形分组。</p>
             </div>
             <div class="avatar-editor">
-              <div class="avatar-preview" :style="avatarPreviewStyle">
-                {{ avatarText(avatar, nick || '茶') }}
-              </div>
+              <AvatarMark class="avatar-preview" :avatar="avatar" :name="nick || '茶'" />
               <div class="avatar-tools">
                 <button
                   type="button"
@@ -438,8 +434,8 @@ async function removeRange(cidr: string): Promise<void> {
                 </button>
                 <div class="avatar-grid" aria-label="精选头像图标">
                   <button
-                    v-for="(label, idx) in AVATAR_EMOJIS"
-                    :key="label"
+                    v-for="(_, idx) in AVATAR_EMOJIS"
+                    :key="idx"
                     type="button"
                     class="avatar-choice"
                     :class="{ on: selectedAvatarEmoji === idx }"
@@ -447,7 +443,7 @@ async function removeRange(cidr: string): Promise<void> {
                     :aria-label="`头像图标 ${idx + 1}`"
                     @click="chooseAvatarEmoji(idx)"
                   >
-                    {{ label }}
+                    <AvatarGlyph :index="idx" />
                   </button>
                 </div>
                 <div class="avatar-colors" aria-label="头像背景色">

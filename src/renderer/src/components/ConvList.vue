@@ -5,7 +5,9 @@ import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { listTime } from '../utils/time'
-import { avatarStyle, avatarText as renderAvatarText } from '../utils/avatar'
+import { splitEmojiText } from '../utils/compat-emoji'
+import AvatarMark from './AvatarMark.vue'
+import CompatEmoji from './CompatEmoji.vue'
 import PantryIcon from './PantryIcon.vue'
 
 const peersStore = usePeersStore()
@@ -17,17 +19,6 @@ const nickOf = computed(() => peersStore.nameOf) // 备注优先（F-DISC-9）
 
 function convName(conv: ConversationView): string {
   return conv.type === 'group' ? groupsStore.nameOf(conv.peerId) : nickOf.value(conv.peerId)
-}
-
-function convAvatarText(conv: ConversationView): string {
-  const peer = peersStore.byId(conv.peerId)
-  return renderAvatarText(peer?.avatar ?? -1, nickOf.value(conv.peerId))
-}
-
-function convAvatarStyle(conv: ConversationView): { backgroundColor: string; color: string } | undefined {
-  if (conv.type === 'group') return undefined
-  const peer = peersStore.byId(conv.peerId)
-  return avatarStyle(peer?.avatar ?? -1, nickOf.value(conv.peerId))
 }
 
 function openMenu(event: MouseEvent, conv: ConversationView): void {
@@ -67,14 +58,15 @@ async function removeConv(): Promise<void> {
         @click="chatStore.openConv(conv.id)"
         @contextmenu.prevent.stop="openMenu($event, conv)"
       >
-        <span
-          class="conv-avatar"
-          :class="{ grp: conv.type === 'group' }"
-          :style="convAvatarStyle(conv)"
-        >
+        <span v-if="conv.type === 'group'" class="conv-avatar grp">
           <PantryIcon v-if="conv.type === 'group'" name="users" :size="18" />
-          <template v-else>{{ convAvatarText(conv) }}</template>
         </span>
+        <AvatarMark
+          v-else
+          class="conv-avatar"
+          :avatar="peersStore.byId(conv.peerId)?.avatar ?? -1"
+          :name="nickOf(conv.peerId)"
+        />
         <span class="conv-main">
           <span class="row1">
             <span class="conv-name">
@@ -86,7 +78,12 @@ async function removeConv(): Promise<void> {
           </span>
           <span class="row2">
             <span v-if="conv.mentioned" class="mention">[有人@我]</span>
-            <span class="conv-preview">{{ conv.preview }}</span>
+            <span class="conv-preview">
+              <template v-for="(part, index) in splitEmojiText(conv.preview)" :key="index">
+                <CompatEmoji v-if="part.emoji" :emoji="part.text" />
+                <span v-else>{{ part.text }}</span>
+              </template>
+            </span>
             <span v-if="conv.unread > 0" class="badge">{{
               conv.unread > 99 ? '99+' : conv.unread
             }}</span>

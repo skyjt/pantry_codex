@@ -16,7 +16,7 @@ import PantryBrandLogo from './components/PantryBrandLogo.vue'
 import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
 import { applyAppearance } from './utils/appearance'
-import { avatarStyle, avatarText } from './utils/avatar'
+import AvatarMark from './components/AvatarMark.vue'
 
 type Tab = 'chat' | 'contacts'
 
@@ -81,12 +81,11 @@ onUnmounted(() => {
   <SetupWizard v-if="showWizard && settings" :settings="settings" @done="showWizard = false" />
   <div class="shell">
     <nav class="rail">
-      <div
+      <AvatarMark
         class="avatar"
-        :style="avatarStyle(settings?.avatar ?? -1, settings?.nick ?? '茶')"
-      >
-        {{ avatarText(settings?.avatar ?? -1, settings?.nick ?? '茶') }}
-      </div>
+        :avatar="settings?.avatar ?? -1"
+        :name="settings?.nick ?? '茶'"
+      />
       <button
         class="rail-btn"
         :class="{ active: tab === 'chat' }"
