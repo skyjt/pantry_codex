@@ -861,6 +861,8 @@ async function removeRange(cidr: string): Promise<void> {
               <strong>{{ info?.nodeId ?? '-' }}</strong>
               <span>许可</span>
               <strong>MIT（暂定）</strong>
+              <span>Emoji 图形</span>
+              <strong>Twemoji（本地打包，CC-BY 4.0）</strong>
             </div>
           </div>
         </section>

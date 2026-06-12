@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.25，P1 本地交付候选；GitHub Actions 发布流水线已配置，目标平台真实打包/运行冒烟待 Windows / Debian / UOS 执行 |
+| 状态 | v0.26，P1 本地交付候选；GitHub Actions 发布流水线已配置，目标平台真实打包/运行冒烟待 Windows / Debian / UOS 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -161,7 +161,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 ## 7. 渲染进程要点
 
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
-- **系统图标与 emoji 兼容自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色。头像模板走 `AvatarMark` / `AvatarGlyph`，按原 `avatar:number` 下标画本地 SVG 动物图标；emoji 面板与消息正文对内置 emoji 子集走 `CompatEmoji` 本地 SVG 渲染，发送、复制、存储仍是原 UTF-8 字符。该路径不引入远程图片、字体、CDN 或新依赖，解决 Win7 / UOS 系统 emoji 缺字方框问题（决议 #45）。
+- **系统图标与 emoji 兼容渲染**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色。头像模板走 `AvatarMark` / `AvatarGlyph`，按原 `avatar:number` 下标加载 Twemoji 本地 SVG 动物图标；emoji 面板与消息正文对内置 emoji 子集走 `CompatEmoji` 加载 `src/renderer/src/assets/twemoji/*.svg`。发送、复制、存储仍是原 UTF-8 字符。该路径不引入远程图片、字体、CDN 或新依赖，解决 Win7 / UOS 系统 emoji 缺字方框问题（决议 #45/#47）。Twemoji 图形按 CC-BY 4.0 在 README、`THIRD_PARTY_NOTICES.md` 和设置 About 页署名。
 - **品牌 logo 自绘**：`build/icons/pantry-logo-mono.svg`、`pantry-logo-small.svg`、`pantry-logo-icon.svg` 是品牌源文件；`pantry-logo-icon.png` / `.ico` / `.icns` 是 electron-builder 打包资产，均由 SVG 源生成。渲染层空状态使用 `PantryBrandLogo` 复用同一轮廓。托盘图标由 `scripts/gen-tray-icon.mjs` 生成 32×32 单色 PNG 后内嵌到 `src/main/windows/tray-icon.ts`，基础标识缩至约 82% 内容区，macOS 运行时标记为 template image 适配菜单栏。
 - **托盘未读提示**：`ChatService` / `FilesService` 的 `convs` 事件统一汇总未读数后调用 `updateTrayUnread`（决议 #42）。macOS 使用 `Tray.setTitle` + `dock.setBadge` 显示数字；Windows 使用 `BrowserWindow.setOverlayIcon` 叠加 16×16 数字，并让托盘图标在原图与带数字角标图之间闪烁；Linux 调 `app.setBadgeCount` 作为 best effort，同时以托盘闪烁兜底。动态图标由 `tray-badge.ts` 纯 Node PNG 编码生成，不引入图片库或 native 依赖。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
@@ -193,7 +193,7 @@ media/stickers/...  # 自定义表情包媒体
 
 | 风险 | 对策 |
 |---|---|
-| Win7 / UOS emoji / 系统图标字形不一致 | 系统图标、头像模板、emoji 面板和消息正文内置 emoji 子集全部走本地 SVG 兼容渲染（§7），不依赖系统彩色 emoji 字体 |
+| Win7 / UOS emoji / 系统图标字形不一致 | 系统图标自绘；头像模板、emoji 面板和消息正文内置 emoji 子集使用 Twemoji 本地 SVG 子集（§7），不依赖系统彩色 emoji 字体 |
 | Debian 10 glibc 2.28 vs CI 编译环境 | linux 侧 better-sqlite3 在 **debian:10 容器**内编译（apt 指向 archive 源）；产物在真 Debian 10 冒烟 |
 | linux arm64 交叉编译 native 模块 | docker buildx + qemu；若拖累节奏，v1 先发 x64，arm64 列 P2 产物（README 平台表加注） |
 | macOS 26 跑 Chromium 108 | 已知风险项（README FAQ）：输入法、通知权限、屏幕录制授权列入发布冒烟清单 |
@@ -259,3 +259,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.23 菜单栏 logo 尺寸：托盘基础单色标识在 32px 画布内缩至约 82% 内容区，未读闪烁图标复用同一缩放比例。
 - 2026-06-12 v0.24 GitHub Actions 发布链路：新增 Windows 7 x64 与 Debian 10 / UOS 20 x64 自动构建、SHA-256 清单、tag Release 发布；Windows 安装版与便携版 artifactName 拆分，避免同名覆盖；打包图标显式接入 `.ico` / `.png` / `.icns`，Linux CI 强制源码重建 native 模块以锁住 glibc 2.28，并补齐 `.deb` Maintainer 元数据。
 - 2026-06-12 v0.25 Win7 / UOS 真实平台兼容：头像与内置 emoji 子集改为本地 SVG 渲染；`Messenger` 在短文本 UDP 退避无 ACK 后复用 TCP 控制帧兜底一次，再决定入离线队列。
+- 2026-06-12 v0.26 头像美术资源修正：头像与内置 emoji 兼容显示改用 Twemoji 本地 SVG 子集，运行时零外网请求，并补 CC-BY 4.0 署名文件与 About 页展示。
