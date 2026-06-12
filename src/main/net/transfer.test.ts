@@ -17,6 +17,20 @@ import {
 const tmpDirs: string[] = []
 const servers: TransferServer[] = []
 
+async function removeTmpWithRetry(dir: string): Promise<void> {
+  let lastErr: unknown
+  for (let i = 0; i < 5; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      return
+    } catch (err) {
+      lastErr = err
+      await new Promise((resolve) => setTimeout(resolve, 25 * (i + 1)))
+    }
+  }
+  throw lastErr
+}
+
 function makeTmp(): string {
   const dir = mkdtempSync(join(tmpdir(), 'pantry-transfer-'))
   tmpDirs.push(dir)
@@ -25,7 +39,7 @@ function makeTmp(): string {
 
 afterEach(async () => {
   for (const server of servers.splice(0)) await server.stop()
-  for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  for (const dir of tmpDirs.splice(0)) await removeTmpWithRetry(dir)
 })
 
 let nextPort = 45000 + Math.floor(Math.random() * 1000)
