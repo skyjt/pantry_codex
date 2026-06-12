@@ -6,7 +6,7 @@ import PantryIcon from './PantryIcon.vue'
 // 表情面板双页签（ui-design §5）：emoji / 我的表情包。
 // Win7 的 twemoji 图片替换方案（tech-design §7）留待 Win7 VM 冒烟时落地。
 
-const emit = defineEmits<{ select: [emoji: string]; sticker: [id: string]; close: [] }>()
+const emit = defineEmits<{ select: [emoji: string]; sticker: [id: string] }>()
 const props = defineProps<{ stickerEnabled: boolean }>()
 
 const tab = ref<'emoji' | 'sticker'>('emoji')
@@ -29,7 +29,7 @@ const EMOJIS: string[] = [
 </script>
 
 <template>
-  <div class="panel" @mouseleave="emit('close')">
+  <div class="panel">
     <div class="tabs">
       <button :class="{ on: tab === 'emoji' }" @click="tab = 'emoji'">
         <PantryIcon name="smile" :size="15" />表情

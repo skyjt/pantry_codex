@@ -30,6 +30,7 @@ const pendingMentionAt = ref<number | null>(null)
 const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
+const emojiScope = ref<HTMLElement | null>(null)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
@@ -81,7 +82,15 @@ const inputPlaceholder = computed(() => {
     : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
 })
 
+function onDocumentPointerDown(event: MouseEvent): void {
+  if (!showEmoji.value) return
+  const target = event.target
+  if (target instanceof Node && emojiScope.value?.contains(target)) return
+  showEmoji.value = false
+}
+
 onMounted(async () => {
+  document.addEventListener('mousedown', onDocumentPointerDown)
   settings.value = await window.pantry.getSettings()
   stopSettings = window.pantry.onSettingsUpdated((next) => {
     settings.value = next
@@ -89,6 +98,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocumentPointerDown)
   stopSettings?.()
 })
 
@@ -525,23 +535,24 @@ async function onDrop(event: DragEvent): Promise<void> {
 
     <footer class="input-area">
       <div class="toolbar">
-        <EmojiPanel
-          v-if="showEmoji"
-          :sticker-enabled="!isGroup && peerOnline"
-          @select="insertEmoji"
-          @sticker="sendStickerById"
-          @close="showEmoji = false"
-        />
-        <span class="tool-wrap" data-tip="表情">
-          <button
-            class="tool"
-            type="button"
-            aria-label="表情"
-            :disabled="!canSend"
-            @click="showEmoji = !showEmoji"
-          >
-            <PantryIcon name="smile" :size="18" />
-          </button>
+        <span ref="emojiScope" class="emoji-scope">
+          <EmojiPanel
+            v-if="showEmoji"
+            :sticker-enabled="!isGroup && peerOnline"
+            @select="insertEmoji"
+            @sticker="sendStickerById"
+          />
+          <span class="tool-wrap" data-tip="表情">
+            <button
+              class="tool"
+              type="button"
+              aria-label="表情"
+              :disabled="!canSend"
+              @click="showEmoji = !showEmoji"
+            >
+              <PantryIcon name="smile" :size="18" />
+            </button>
+          </span>
         </span>
         <span class="tool-wrap" data-tip="截图">
           <button
@@ -653,6 +664,10 @@ async function onDrop(event: DragEvent): Promise<void> {
   gap: 4px;
   padding-bottom: 4px;
   position: relative;
+}
+.emoji-scope {
+  display: inline-grid;
+  place-items: center;
 }
 .mention-picker {
   position: absolute;
