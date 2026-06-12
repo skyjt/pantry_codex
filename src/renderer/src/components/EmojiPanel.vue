@@ -43,7 +43,7 @@ const EMOJIS: string[] = [
       <button v-for="e in EMOJIS" :key="e" class="emo" @click="emit('select', e)">{{ e }}</button>
     </div>
 
-    <div v-else class="grid sticker-grid">
+    <div v-else class="grid sticker-grid" :class="{ 'is-empty': stickers.list.length === 0 }">
       <div
         v-for="(s, index) in stickers.list"
         :key="s.id"
@@ -105,11 +105,12 @@ const EMOJIS: string[] = [
   font-weight: 600;
 }
 .grid {
-  max-height: 200px;
+  height: 200px;
   overflow-y: auto;
   padding: 8px;
   display: grid;
   gap: 2px;
+  box-sizing: border-box;
 }
 .emoji-grid {
   grid-template-columns: repeat(8, 1fr);
@@ -117,6 +118,11 @@ const EMOJIS: string[] = [
 .sticker-grid {
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
+}
+.sticker-grid.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .emo {
   border: none;
