@@ -272,7 +272,7 @@ release 目录列表：
 
 - push 到 `main` 或手动 `workflow_dispatch`：执行 Windows + Linux 两个平台构建，产物作为 Actions artifact 下载。
 - push `v*` tag：构建通过后自动创建/更新 GitHub Release，并上传产物与 SHA-256 清单。
-- Linux job 使用 `node:18-buster` / Debian 10 容器，apt 指向 archive 源，并在 `npm ci` 后强制源码重建 better-sqlite3；CI 冒烟通过 `xvfb` + `xauth` 提供虚拟显示。产物输出 `Pantry-<version>-linux-x64.deb` 与 `Pantry-<version>-linux-x64.AppImage`，同一套产物作为 Debian 10 / UOS 20 x64 发布候选。
+- Linux job 使用 `node:18-buster` / Debian 10 容器，apt 指向 archive 源，并在 `npm ci` 后强制源码重建 better-sqlite3；CI 冒烟通过 `xvfb` + `xauth` 提供虚拟显示，并仅因 root 容器启动 Electron 时追加 `--no-sandbox`。产物输出 `Pantry-<version>-linux-x64.deb` 与 `Pantry-<version>-linux-x64.AppImage`，同一套产物作为 Debian 10 / UOS 20 x64 发布候选。
 - Windows job 使用 `windows-2022` runner 打包 Electron 22 x64，输出 `Pantry-<version>-win-x64-setup.exe` 与 `Pantry-<version>-win-x64-portable.exe`。这只能证明构建链路，不替代 Win7 SP1 x64 VM 启动冒烟。
 
 手动触发：

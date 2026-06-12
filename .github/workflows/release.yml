@@ -61,7 +61,8 @@ jobs:
           npm run test:db
           npm run typecheck
           npm run build
-          xvfb-run -a npm run smoke
+          # CI 容器以 root 运行，Electron 启动冒烟需关闭 Chromium sandbox；应用运行时安全配置不变。
+          xvfb-run -a npm run smoke -- --no-sandbox
 
       - name: 构建 Debian 10 / UOS 20 x64 产物
         run: npm run dist:linux
