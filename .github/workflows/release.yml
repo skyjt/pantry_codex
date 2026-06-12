@@ -72,7 +72,14 @@ jobs:
         run: |
           set -euo pipefail
           cd release
-          sha256sum Pantry-*-linux-x64.deb Pantry-*-linux-x64.AppImage > SHA256SUMS-debian10-uos20-x64.txt
+          shopt -s nullglob
+          files=(Pantry-*-linux-amd64.deb Pantry-*-linux-x86_64.AppImage)
+          if [ "${#files[@]}" -lt 2 ]; then
+            ls -la
+            echo "Linux 产物数量不足，期望 deb 与 AppImage 各一个。" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS-debian10-uos20-x64.txt
 
       - name: 上传 Linux 产物
         uses: actions/upload-artifact@v4
@@ -80,8 +87,8 @@ jobs:
           name: pantry-debian10-uos20-x64
           if-no-files-found: error
           path: |
-            release/Pantry-*-linux-x64.deb
-            release/Pantry-*-linux-x64.AppImage
+            release/Pantry-*-linux-amd64.deb
+            release/Pantry-*-linux-x86_64.AppImage
             release/SHA256SUMS-debian10-uos20-x64.txt
 
   windows7-x64:
