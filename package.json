@@ -62,14 +62,17 @@
             "x64"
           ]
         }
-      ],
-      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Pantry-${version}-win-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Pantry-${version}-win-${arch}-portable.${ext}"
     },
     "linux": {
       "target": [

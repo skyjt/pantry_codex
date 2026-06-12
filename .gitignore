@@ -2,6 +2,7 @@
 node_modules/
 out/
 dist/
+release/
 *.tsbuildinfo
 
 # 日志与本地数据

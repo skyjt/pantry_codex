@@ -266,7 +266,31 @@ release 目录列表：
 截图或录屏：
 ```
 
-## 9. 给 agent 的开场指令
+## 9. GitHub Actions 自动构建发布
+
+仓库内置 `.github/workflows/release.yml`：
+
+- push 到 `main` 或手动 `workflow_dispatch`：执行 Windows + Linux 两个平台构建，产物作为 Actions artifact 下载。
+- push `v*` tag：构建通过后自动创建/更新 GitHub Release，并上传产物与 SHA-256 清单。
+- Linux job 使用 `node:18-buster` / Debian 10 容器，apt 指向 archive 源，重新编译 better-sqlite3，输出 `Pantry-<version>-linux-x64.deb` 与 `Pantry-<version>-linux-x64.AppImage`，同一套产物作为 Debian 10 / UOS 20 x64 发布候选。
+- Windows job 使用 `windows-2022` runner 打包 Electron 22 x64，输出 `Pantry-<version>-win-x64-setup.exe` 与 `Pantry-<version>-win-x64-portable.exe`。这只能证明构建链路，不替代 Win7 SP1 x64 VM 启动冒烟。
+
+手动触发：
+
+```bash
+gh workflow run release.yml --repo skyjt/pantry_codex
+```
+
+正式发布：
+
+```bash
+git tag v0.5.0
+git push origin v0.5.0
+```
+
+Release 下载后仍需按本文 §4 / §5 在 Win7 SP1 x64、Debian 10、UOS 20 x64 目标环境做真实桌面冒烟。
+
+## 10. 给 agent 的开场指令
 
 ### Windows 打包 agent
 

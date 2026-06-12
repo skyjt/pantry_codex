@@ -1,0 +1,178 @@
+name: 构建发布包
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CI: "true"
+  NO_UPDATE_NOTIFIER: "1"
+  ELECTRON_MIRROR: "https://github.com/electron/electron/releases/download/"
+  ELECTRON_BUILDER_BINARIES_MIRROR: "https://github.com/electron-userland/electron-builder-binaries/releases/download/"
+
+jobs:
+  linux-debian10-uos20-x64:
+    name: Debian 10 / UOS 20 x64
+    runs-on: ubuntu-22.04
+    container:
+      image: node:18-buster
+    steps:
+      - name: 修正 Debian 10 archive 源并安装构建依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          deb http://archive.debian.org/debian buster-updates main contrib non-free
+          EOF
+          printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99no-check-valid-until
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates python3 make g++ pkg-config dpkg fakeroot rpm \
+            xvfb dbus-x11 libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
+            xdg-utils libatspi2.0-0 libuuid1 libfuse2 libasound2 libgbm1 \
+            libdrm2 libx11-xcb1
+          rm -rf /var/lib/apt/lists/*
+
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 安装 npm 依赖
+        run: npm ci
+
+      - name: 五连验证
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run test:db
+          npm run typecheck
+          npm run build
+          xvfb-run -a npm run smoke
+
+      - name: 构建 Debian 10 / UOS 20 x64 产物
+        run: npm run dist:linux
+
+      - name: 生成 SHA-256 清单
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum Pantry-*-linux-x64.deb Pantry-*-linux-x64.AppImage > SHA256SUMS-debian10-uos20-x64.txt
+
+      - name: 上传 Linux 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pantry-debian10-uos20-x64
+          if-no-files-found: error
+          path: |
+            release/Pantry-*-linux-x64.deb
+            release/Pantry-*-linux-x64.AppImage
+            release/SHA256SUMS-debian10-uos20-x64.txt
+
+  windows7-x64:
+    name: Windows 7 x64
+    runs-on: windows-2022
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+
+      - name: 安装 npm 依赖
+        run: npm ci
+
+      - name: 五连验证
+        run: |
+          npm test
+          npm run test:db
+          npm run typecheck
+          npm run build
+          npm run smoke
+
+      - name: 构建 Win7 x64 产物
+        run: npm run dist:win
+
+      - name: 生成 SHA-256 清单
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem release -File | Where-Object {
+            $_.Name -like 'Pantry-*-win-x64-setup.exe' -or $_.Name -like 'Pantry-*-win-x64-portable.exe'
+          }
+          if ($files.Count -lt 2) {
+            Get-ChildItem release -File | Format-Table Name, Length
+            throw "Windows 产物数量不足，期望 setup 与 portable 两个 exe。"
+          }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content release/SHA256SUMS-win7-x64.txt -Encoding ascii
+
+      - name: 上传 Windows 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pantry-win7-x64
+          if-no-files-found: error
+          path: |
+            release/Pantry-*-win-x64-setup.exe
+            release/Pantry-*-win-x64-portable.exe
+            release/SHA256SUMS-win7-x64.txt
+
+  publish-github-release:
+    name: 发布 GitHub Release
+    runs-on: ubuntu-22.04
+    needs:
+      - linux-debian10-uos20-x64
+      - windows7-x64
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 生成发布说明
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >release-notes.md <<EOF
+          茶话间 ${GITHUB_REF_NAME} 自动构建产物。
+
+          - Windows 7 SP1 x64：NSIS 安装包与便携版 exe。
+          - Debian 10 / UOS 20 x64：deb 与 AppImage，native 模块在 Debian 10 容器内编译。
+          - 每个平台产物附 SHA-256 清单。
+
+          Win7 / Debian 10 / UOS 20 的真实桌面冒烟仍按 docs/packaging-test.md 在目标 VM 或真机执行。
+          EOF
+          find artifacts -type f | sort
+
+      - name: 创建或更新 GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find artifacts -type f | sort)
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "茶话间 ${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" \
+              --title "茶话间 ${GITHUB_REF_NAME}" \
+              --notes-file release-notes.md
+          fi

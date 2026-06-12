@@ -1,7 +1,7 @@
 # 茶话间（Pantry）开发交接文档
 
 > 给接手本项目的任何 AI 代理或开发者。读完本文 + [AGENTS.md](../AGENTS.md) 即可无缝继续开发。
-> 最后更新：2026-06-12（v0.5.12 菜单栏 logo 尺寸候选）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
+> 最后更新：2026-06-12（v0.5.13 GitHub Actions 发布流水线候选）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
 
 ## 0. 必读顺序（15 分钟上手）
 
@@ -28,6 +28,7 @@
 | P1 文件/数据 | `.part` 断点续传；传输记录；HTML/TXT 阅读导出；`.pantry-bak` 迁移备份包（消息、联系人、群、传输、表情、图片/表情媒体）+ 身份映射导入 |
 | P1 系统/设置 | 开机自启、关闭到托盘/退出、通知预览、系统提示音开关、托盘 / 菜单栏未读数字与闪烁兜底、深色主题、字体缩放、截图/显示隐藏快捷键、UDP/TCP 端口保存（重启生效） |
 | 打包链条 | `electron-builder@24.13.3` 精确锁；`dist:win`/`dist:linux`/`dist:mac` 本地脚本；Windows/Debian 真实打包测试留给目标平台 |
+| GitHub 发布 | private 仓库：[skyjt/pantry_codex](https://github.com/skyjt/pantry_codex)；`.github/workflows/release.yml` 已配置 Windows 7 x64 与 Debian 10 / UOS 20 x64 构建；push `main` / 手动触发上传 artifact，推送 `v*` tag 自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 packaging-test 执行 |
 | UI | 三栏主窗、左侧 56px 茶青导航（聊天/通讯录主图标 25px，设置图标 21px）、三级通讯录树（公司▸部门▸团队，单击右侧资料页、双击直达单聊）、联系人完整资料页+本地备注、私聊头部资料弹窗+备注编辑、全局搜索（FTS 按字）、发起讨论组两步搜索选人+设置、自绘 SVG 系统图标、明确齿轮设置入口、20 个亲和动物 emoji + 背景色头像模板、茶杯气泡品牌 logo 三件套（菜单栏单色缩小留边、彩色小标、大图标/空状态）、输入区图标中文延迟提示、输入框 placeholder 独立浅 hint 色、输入区最右侧会话内历史搜索（设置页尺度弹窗，默认显示最近记录，关键词/图片/文件/连续日期筛选，图片结果显示缩略图）、消息内容级右键菜单与边缘避让、历史滚动加载、设置独立小窗（桌面软件式分组面板）、首启向导、托盘+通知直达会话 |
 | 存储 | SQLite WAL，迁移 v8（user_version 机制，**只追加永不改旧迁移**）|
 
@@ -67,9 +68,9 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 
 ## 4. 下一步：P1 交付收尾
 
-1. **本地五连验证**：本轮菜单栏 logo 尺寸微调沿用 `npm test` → `npm run test:db` → `npm run typecheck` → `npm run build` → `PANTRY_UDP_PORT=47878 PANTRY_TCP_PORT=47879 npm run smoke`；后续改动仍需按同链路重跑，任何失败先修复再交付。
-2. **目标平台打包测试**：按用户要求，本地确认基本无误后交给 Windows 7 x64 VM / Debian 10 做真实打包与运行冒烟；macOS 当前架构包可本机验证。流程见 [packaging-test.md](packaging-test.md)。
-3. **v1.0 打磨项**：GitHub Actions（linux 必须 debian:10 容器编译 native）、macOS universal 包专项、Win7 VM 专项（twemoji 图片渲染、软渲染验证、SHA-2 KB 提示文案）、LICENSE 定稿（暂定 MIT，需用户确认）。
+1. **本地五连验证**：本轮 GitHub Actions 发布流水线沿用 `npm test` → `npm run test:db` → `npm run typecheck` → `npm run build` → `PANTRY_UDP_PORT=47878 PANTRY_TCP_PORT=47879 npm run smoke`；后续改动仍需按同链路重跑，任何失败先修复再交付。
+2. **目标平台打包测试**：GitHub Actions 可先产出 Windows 7 x64、Debian 10 / UOS 20 x64 发布候选；真实启动、收发、托盘、通知、防火墙/权限仍交给 Windows 7 x64 VM、Debian 10、UOS 20 目标环境按 [packaging-test.md](packaging-test.md) 冒烟。
+3. **v1.0 打磨项**：macOS universal 包专项、Win7 VM 专项（twemoji 图片渲染、软渲染验证、SHA-2 KB 提示文案）、LICENSE 定稿（暂定 MIT，需用户确认）。
 
 ## 5. 已知遗留 / TODO（非阻塞）
 
