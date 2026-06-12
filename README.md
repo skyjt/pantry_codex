@@ -146,6 +146,12 @@ npm run dist:mac     # dmg + zip（当前 macOS 架构；正式 universal 包后
 
 目标平台打包与冒烟的详细流程见 [docs/packaging-test.md](docs/packaging-test.md)。
 
+GitHub Actions 发布链路：
+
+- push 到 `main` 或手动触发 `release.yml`：构建 Windows 7 x64、Debian 10 / UOS 20 x64 产物并上传 artifact。
+- push `v*` tag：构建通过后自动创建/更新 GitHub Release，上传安装包、便携版、deb、AppImage 与 SHA-256 清单。
+- Windows 产物仍需在 Win7 SP1 x64 VM 冒烟；Linux 产物仍需在 Debian 10 / UOS 20 x64 目标环境冒烟。
+
 本机多客户端联调（验证发现/消息/文件链路，不需要多台机器）：
 
 ```bash
