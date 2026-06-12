@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -212,5 +212,98 @@ describe('FilesService 群聊媒体', () => {
       })
     }
     expect(msgRepo.get(view!.id)?.status).toBe('sent')
+  })
+
+  it('群聊图片不超过 10MB 时按图片 offer 投递', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '群图片.png')
+    writeFileSync(filePath, 'small image')
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const group: GroupMeta = {
+      groupId: 'group-1',
+      name: '项目组',
+      members: ['node-self', 'node-bob'],
+      rev: 3,
+      updatedBy: 'node-self',
+      updatedTs: 1000,
+      creatorIp: '127.0.0.1',
+      adminSecretHash: '',
+      adminHint: ''
+    }
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: new FakeGroupRepo(group) as unknown as GroupRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerGroupPaths('group-1', [filePath], 'image')
+    expect(view?.kind).toBe('image')
+
+    await waitTick()
+    expect(messenger.sent[0].env.payload).toMatchObject({
+      op: 'offer',
+      purpose: 'image',
+      groupId: 'group-1'
+    })
+  })
+
+  it('群聊图片超过 10MB 时退化为普通文件，等待成员手动接收', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '超限群图片.png')
+    writeFileSync(filePath, '')
+    truncateSync(filePath, 10 * 1024 * 1024 + 1)
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const group: GroupMeta = {
+      groupId: 'group-1',
+      name: '项目组',
+      members: ['node-self', 'node-bob'],
+      rev: 3,
+      updatedBy: 'node-self',
+      updatedTs: 1000,
+      creatorIp: '127.0.0.1',
+      adminSecretHash: '',
+      adminHint: ''
+    }
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: new FakeGroupRepo(group) as unknown as GroupRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerGroupPaths('group-1', [filePath], 'image')
+    expect(view?.kind).toBe('file')
+    expect(view?.text).toBe('[文件] 超限群图片.png')
+
+    await waitTick()
+    expect(messenger.sent[0].env.payload).toMatchObject({
+      op: 'offer',
+      groupId: 'group-1'
+    })
+    expect('purpose' in messenger.sent[0].env.payload).toBe(false)
+    expect([...transferRepo.rows.values()][0].status).toBe('offering')
   })
 })

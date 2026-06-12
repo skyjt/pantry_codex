@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  GROUP_IMG_AUTO_ACCEPT,
   GROUP_MAX_MEMBERS,
   LIMITS,
   MAX_FILES_PER_TRANSFER,
@@ -176,6 +177,7 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       if (o.groupId !== undefined) {
         if (!isStr(o.groupId, LIMITS.id)) return false
         if (!isInt(o.groupRev) || o.groupRev < 0) return false
+        if (o.purpose !== undefined && o.totalSize! > GROUP_IMG_AUTO_ACCEPT) return false
       } else if (o.groupRev !== undefined) {
         return false
       }

@@ -361,7 +361,7 @@ export interface PantryApi {
   sendImageBytes(peerNodeId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null>
   /** 磁盘上的图片文件按图片消息发送（拖拽/选择器入口） */
   offerImagePath(peerNodeId: string, path: string): Promise<MessageView | null>
-  /** 群聊图片：按在线群成员逐个发 purpose:image offer */
+  /** 群聊图片：≤10MB 按图片 offer，超限退化为普通文件 offer */
   sendGroupImageBytes(groupId: string, name: string, bytes: ArrayBuffer): Promise<MessageView | null>
   offerGroupImagePath(groupId: string, path: string): Promise<MessageView | null>
   /** 大图查看器"另存为" */

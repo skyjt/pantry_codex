@@ -207,6 +207,8 @@ export interface FileMeta {
 
 /** 图片免确认上限（决议 #2，用户指定 20MB）；超限退化为普通文件流程 */
 export const IMG_AUTO_ACCEPT = 20 * 1024 * 1024
+/** 群聊图片内联上限（决议 #33）：超限按普通文件发送，由收端手动接收 */
+export const GROUP_IMG_AUTO_ACCEPT = 10 * 1024 * 1024
 
 export interface FileCtlOffer {
   op: 'offer'
@@ -219,7 +221,7 @@ export interface FileCtlOffer {
   fileCount: number
   /** 展示名：单文件=文件名，文件夹=目录名，多文件=首文件名 */
   rootName: string
-  /** image/sticker：单文件 ≤20MB 时收端免确认进图片缓存（§7.1）；缺省按普通文件 */
+  /** image/sticker：单聊单文件 ≤20MB、群聊图片 ≤10MB 时收端免确认进图片缓存（§7.1）；缺省按普通文件 */
   purpose?: 'image' | 'sticker'
   /** 群聊媒体上下文；存在时收端把本地消息写入 group:<groupId> 会话 */
   groupId?: string

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decode, encode, makeEnvelope } from './codec'
 import {
+  GROUP_IMG_AUTO_ACCEPT,
   MSG_TYPES,
   UDP_MAX_INBOUND,
   type FileCtlPayload,
@@ -159,6 +160,24 @@ describe('codec', () => {
       groupId: 'group-1'
     })
     expect(decode(encode(missingRev))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
+
+    const oversizedGroupImage = makeEnvelope(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-1',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'a.png', size: GROUP_IMG_AUTO_ACCEPT + 1 }],
+      totalSize: GROUP_IMG_AUTO_ACCEPT + 1,
+      fileCount: 1,
+      rootName: 'a.png',
+      purpose: 'image',
+      groupId: 'group-1',
+      groupRev: 2
+    })
+    expect(decode(encode(oversizedGroupImage))).toEqual({
       ok: false,
       reason: 'bad-payload:file-ctl'
     })

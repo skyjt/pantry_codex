@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import { readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import {
+  GROUP_IMG_AUTO_ACCEPT,
   IMG_AUTO_ACCEPT,
   MAX_FILES_PER_TRANSFER,
   MSG_TYPES,
@@ -241,7 +242,7 @@ export class FilesService extends EventEmitter {
       return !!peer && peer.online
     })
     if (recipients.length === 0) return null
-    const prepared = this.prepareOutgoing(paths, want)
+    const prepared = this.prepareOutgoing(paths, want, GROUP_IMG_AUTO_ACCEPT)
     if (!prepared) return null
 
     const transfers = recipients.map((peerId) => ({ peerId, transferId: randomUUID() }))
@@ -320,7 +321,8 @@ export class FilesService extends EventEmitter {
 
   private prepareOutgoing(
     paths: string[],
-    want: 'file' | 'image' | 'sticker'
+    want: 'file' | 'image' | 'sticker',
+    imageLimit = IMG_AUTO_ACCEPT
   ): PreparedOutgoing | null {
     const metas: FileMeta[] = []
     const outFiles = new Map<string, OutgoingFile>()
@@ -346,9 +348,9 @@ export class FilesService extends EventEmitter {
     if (fileCount === 0 || fileCount > MAX_FILES_PER_TRANSFER) return null
     for (const m of metas) totalSize += m.size
 
-    // 图片/表情用途：单文件且 ≤20MB 才成立，否则退化为普通文件（决议 #2）
+    // 图片/表情用途：单文件且小于当前会话阈值才成立，否则退化为普通文件。
     const purpose =
-      want !== 'file' && !hasDir && fileCount === 1 && totalSize <= IMG_AUTO_ACCEPT
+      want !== 'file' && !hasDir && fileCount === 1 && totalSize <= imageLimit
         ? want
         : undefined
     const rootName =
@@ -621,11 +623,12 @@ export class FilesService extends EventEmitter {
     }
     if (plans.filter((p) => !p.isDir).length !== asm.fileCount) return // 分包不一致，丢弃
 
-    // 图片/表情免确认条件复核（不信任发送方标记，大小/单文件条件自己验——决议 #2）
+    // 图片/表情免确认条件复核（不信任发送方标记；群聊图片走 10MB 上限——决议 #33）
+    const imageLimit = asm.groupId ? GROUP_IMG_AUTO_ACCEPT : IMG_AUTO_ACCEPT
     const inPurpose =
       (asm.purpose === 'image' || asm.purpose === 'sticker') &&
       asm.fileCount === 1 &&
-      asm.totalSize <= IMG_AUTO_ACCEPT &&
+      asm.totalSize <= imageLimit &&
       plans.length === 1 &&
       !plans[0].isDir &&
       !plans[0].relPath.includes('/')
@@ -682,7 +685,7 @@ export class FilesService extends EventEmitter {
     this.emitTransfer(offer.transferId, true)
     this.requestGroupMetaIfNeeded(peerId, asm.groupId, asm.groupRev)
 
-    // 图片：免确认，立即拉进图片缓存（protocol §7.1）
+    // 图片：通过阈值复核后免确认，立即拉进图片缓存（protocol §7.1）
     if (asImage) void this.accept(offer.transferId, this.deps.getImagesDir())
   }
 
