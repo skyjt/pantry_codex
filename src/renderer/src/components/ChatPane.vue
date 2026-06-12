@@ -1832,7 +1832,9 @@ async function onDrop(event: DragEvent): Promise<void> {
   font-size: 11px;
 }
 .head {
-  /* 沉浸式（决议 #49）：头部背景直通窗口顶，内容压在 32px 拖拽带下方 */
+  /* 沉浸式（决议 #49）：头部背景直通窗口顶，内容压在 32px 拖拽带下方。
+     这里不许设 no-drag —— no-drag 矩形会从系统 drag region 中挖洞，
+     把聊天区顶部 32px 的拖拽带挖掉（Win7/mac 实测顶部无法拖窗）。 */
   height: 84px;
   flex: 0 0 84px;
   display: flex;
@@ -1841,7 +1843,6 @@ async function onDrop(event: DragEvent): Promise<void> {
   padding: 32px 16px 0;
   background: var(--bg-window);
   border-bottom: 1px solid var(--line);
-  -webkit-app-region: no-drag;
 }
 .title {
   font-size: 15px;
@@ -2281,8 +2282,10 @@ async function onDrop(event: DragEvent): Promise<void> {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: min(1.22em, 100%);
-  height: auto;
+  /* 固定 1.3em 与消息正文一致（ui-design §9）：缺字平台（Win7/UOS）字符槽很窄，
+     若按槽宽缩放图标会"特别小"；占位宽仍按真实字符测量，光标对齐不受影响 */
+  width: 1.3em;
+  height: 1.3em;
   transform: translate(-50%, -52%);
   pointer-events: none;
 }

@@ -124,8 +124,10 @@ onMounted(() => void stickers.init())
 .emo {
   border: none;
   background: transparent;
-  font-size: 22px;
-  padding: 4px;
+  /* 16px × CompatEmoji 1.3em ≈ 21px 图标：比正文（1.3em ≈ 18px）略大便于点选，
+     不再用 22px 字号（≈ 29px 图标，与消息/输入框尺度脱节，ui-design §9） */
+  font-size: 16px;
+  padding: 6px 4px;
   border-radius: 4px;
   cursor: pointer;
   line-height: 1.2;

@@ -60,8 +60,9 @@ import { Messenger } from './net/messenger'
 import { ChatService } from './services/chat'
 import type { PeerRecord } from './net/peer-registry'
 
-// Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠 —— 默认软渲染（tech-design §9）
-if (process.platform === 'win32' && release().startsWith('6.1')) {
+// Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠；UOS/Debian 目标机多国产 GPU 或旧驱动，
+// GPU 进程频报 ContextResult::kTransientFailure —— 两者默认软渲染（tech-design §9，决议 #55）
+if ((process.platform === 'win32' && release().startsWith('6.1')) || process.platform === 'linux') {
   app.disableHardwareAcceleration()
 }
 
