@@ -37,7 +37,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             git ca-certificates python3 make g++ pkg-config dpkg fakeroot rpm \
-            xvfb dbus-x11 libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
+            xvfb xauth dbus-x11 libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
             xdg-utils libatspi2.0-0 libuuid1 libfuse2 libasound2 libgbm1 \
             libdrm2 libx11-xcb1
           rm -rf /var/lib/apt/lists/*
