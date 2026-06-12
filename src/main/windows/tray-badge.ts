@@ -3,6 +3,8 @@ import { deflateSync } from 'node:zlib'
 const SIZE = 32
 const OVERLAY_SIZE = 16
 const VIEWBOX = 64
+const MARK_SCALE = 0.82
+const MARK_CENTER = 32
 const BASE_COLOR = [0x11, 0x11, 0x11] as const
 const BADGE_COLOR = [0xfa, 0x51, 0x51] as const
 const WHITE = [0xff, 0xff, 0xff] as const
@@ -46,6 +48,10 @@ function clamp(v: number, min = 0, max = 1): number {
 
 function strokeAlpha(distance: number): number {
   return clamp(0.5 - distance / aa)
+}
+
+function scaledMarkCoord(v: number): number {
+  return MARK_CENTER + (v - MARK_CENTER) / MARK_SCALE
 }
 
 function fillAlpha(distance: number): number {
@@ -112,8 +118,8 @@ function renderTrayBitmap(count: number): { size: number; raw: Buffer } {
   const raw = emptyRaw(SIZE)
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      const px = ((x + 0.5) / SIZE) * VIEWBOX
-      const py = ((y + 0.5) / SIZE) * VIEWBOX
+      const px = scaledMarkCoord(((x + 0.5) / SIZE) * VIEWBOX)
+      const py = scaledMarkCoord(((y + 0.5) / SIZE) * VIEWBOX)
       const alpha = markAlpha(px, py)
       paint(raw, SIZE, x, y, BASE_COLOR, Math.round(alpha * 255))
     }

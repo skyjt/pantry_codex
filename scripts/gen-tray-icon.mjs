@@ -4,6 +4,8 @@ import { deflateSync } from 'node:zlib'
 
 const SIZE = 32
 const VIEWBOX = 64
+const MARK_SCALE = 0.82
+const MARK_CENTER = 32
 const COLOR = [0x11, 0x11, 0x11] // 模板图：macOS 菜单栏按 alpha 自动着色
 
 const clamp = (v, min = 0, max = 1) => Math.max(min, Math.min(max, v))
@@ -11,6 +13,10 @@ const aa = 1.25
 
 function strokeAlpha(distance) {
   return clamp(0.5 - distance / aa)
+}
+
+function scaledMarkCoord(v) {
+  return MARK_CENTER + (v - MARK_CENTER) / MARK_SCALE
 }
 
 function segmentDistance(px, py, ax, ay, bx, by) {
@@ -65,8 +71,8 @@ const raw = Buffer.alloc(SIZE * (1 + SIZE * 4))
 for (let y = 0; y < SIZE; y++) {
   raw[y * (1 + SIZE * 4)] = 0 // filter: None
   for (let x = 0; x < SIZE; x++) {
-    const px = ((x + 0.5) / SIZE) * VIEWBOX
-    const py = ((y + 0.5) / SIZE) * VIEWBOX
+    const px = scaledMarkCoord(((x + 0.5) / SIZE) * VIEWBOX)
+    const py = scaledMarkCoord(((y + 0.5) / SIZE) * VIEWBOX)
     const alpha = markAlpha(px, py)
     const offset = y * (1 + SIZE * 4) + 1 + x * 4
     raw[offset] = COLOR[0]
