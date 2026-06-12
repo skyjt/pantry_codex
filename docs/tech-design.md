@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.15，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.19，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-12 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -165,6 +165,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
+- **输入提示层级**：渲染层所有 `input/textarea::placeholder` 统一读取 `--text-placeholder`（决议 #38），该 token 低于 `--text-3`，用于占位 hint；真实输入、标签、错误仍使用既有文字 token，避免把提示当内容。
 - token 全部走 `styles/tokens.css` CSS 变量（深色主题 v0.4 只换变量表）。
 - 性能预算（NFR 对照）：通讯录树重聚合 ≤16ms（1000 节点，主进程聚合好再推）；搜索请求防抖 200ms；`transfer:progress` 节流后 UI 才消费。
 
@@ -247,3 +248,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.16 会话内历史搜索 UI 精修：`ConversationMessageHit` 对图片/文件结果携带 `fileRef`，图片缩略图复用 `pantry-img://transferId`，弹窗改为设置页尺度的大面板。
 - 2026-06-12 v0.17 会话内历史搜索默认展示：`msg:search` 允许空关键词返回当前会话最近记录，日期筛选由渲染层日历范围组件产生起止时间戳。
 - 2026-06-12 v0.18 私聊资料弹窗：私聊头部昵称区域打开资料弹窗，备注修改复用 `peers:set-remark`，不新增线上协议。
+- 2026-06-12 v0.19 输入框 hint 颜色修正：新增 `--text-placeholder`，渲染层统一 placeholder 颜色，不涉及 IPC、存储或协议。

@@ -5,6 +5,7 @@
   --text-1: #1a1a1a;
   --text-2: #666666;
   --text-3: #999999;
+  --text-placeholder: #b8b8b8;
   --bg-window: #ffffff;
   --bg-list: #f7f7f7;
   --bg-chat: #f5f5f5;
@@ -23,6 +24,7 @@ html[data-theme='dark'] {
   --text-1: #ecefed;
   --text-2: #b4b9b6;
   --text-3: #7f8782;
+  --text-placeholder: #646d67;
   --bg-window: #171a18;
   --bg-list: #202421;
   --bg-chat: #111412;
@@ -54,4 +56,10 @@ body {
   background: var(--bg-window);
   user-select: none;
   overflow: hidden;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1;
 }
