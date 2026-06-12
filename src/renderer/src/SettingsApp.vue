@@ -22,6 +22,7 @@ import AvatarGlyph from './components/AvatarGlyph.vue'
 import AvatarMark from './components/AvatarMark.vue'
 import PantryIcon from './components/PantryIcon.vue'
 import WindowControls from './components/WindowControls.vue'
+import WindowDragStrip from './components/WindowDragStrip.vue'
 
 // 设置独立小窗（ui-design §8）：P1 起按 8 组完整承载本地设置。
 
@@ -387,8 +388,8 @@ async function removeRange(cidr: string): Promise<void> {
 
 <template>
   <div class="settings">
-    <!-- 沉浸式无标题栏（决议 #49）：顶部拖拽带；设置窗 Win/Linux 仅自绘关闭按钮 -->
-    <div class="drag-strip"></div>
+    <!-- 沉浸式无标题栏（决议 #49/#52）：顶部拖拽带；设置窗 Win/Linux 仅自绘关闭按钮 -->
+    <WindowDragStrip />
     <WindowControls buttons="close" />
     <aside class="sidebar">
       <div class="account-card">
@@ -905,17 +906,6 @@ async function removeRange(cidr: string): Promise<void> {
   min-width: 620px;
   background: var(--bg-list);
   color: var(--text-1);
-}
-
-/* 沉浸式拖拽带（决议 #49，与主窗同规格） */
-.drag-strip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
-  -webkit-app-region: drag;
-  z-index: 12;
 }
 
 .sidebar {

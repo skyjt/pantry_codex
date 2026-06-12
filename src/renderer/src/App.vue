@@ -14,6 +14,7 @@ import MassSender from './components/MassSender.vue'
 import PantryIcon from './components/PantryIcon.vue'
 import PantryBrandLogo from './components/PantryBrandLogo.vue'
 import WindowControls from './components/WindowControls.vue'
+import WindowDragStrip from './components/WindowDragStrip.vue'
 import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
 import { applyAppearance } from './utils/appearance'
@@ -80,8 +81,8 @@ onUnmounted(() => {
 
 <template>
   <SetupWizard v-if="showWizard && settings" :settings="settings" @done="showWizard = false" />
-  <!-- 沉浸式无标题栏（决议 #49）：顶部 32px 隐形拖拽带 + Win/Linux 自绘窗口控制按钮 -->
-  <div class="drag-strip"></div>
+  <!-- 沉浸式无标题栏（决议 #49/#52）：顶部 32px 隐形拖拽带 + Win/Linux 自绘窗口控制按钮 -->
+  <WindowDragStrip />
   <WindowControls />
   <div class="shell">
     <nav class="rail">
@@ -167,18 +168,6 @@ onUnmounted(() => {
   display: flex;
   height: 100%;
   min-height: 0;
-}
-
-/* 沉浸式拖拽带（决议 #49）：透明、不占文档流；z 在常规内容之上、全屏弹层之下，
-   弹层打开时其遮罩自然盖住拖拽带，顶部交互不受影响 */
-.drag-strip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 32px;
-  -webkit-app-region: drag;
-  z-index: 12;
 }
 
 /* 栏① 导航 */

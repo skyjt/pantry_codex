@@ -45,7 +45,7 @@
 
 - `app.requestSingleInstanceLock()`：二开实例 → 唤起已有主窗。
 - 主窗 `show: false` + `ready-to-show` 再显示，避免白屏闪烁。
-- **沉浸式无标题栏**（决议 #49）：macOS `titleBarStyle: 'hiddenInset'`（红绿灯内嵌，原生行为保留）；Windows / Linux `frame: false`（Windows 保留默认 `thickFrame`，边缘缩放与 Aero Snap 不受影响）。渲染层顶部 32px 设 `-webkit-app-region: drag` 拖拽带；Windows / Linux 的最小化 / 最大化经 IPC `win:minimize` / `win:toggle-maximize`（`BrowserWindow.fromWebContents` 定位窗口），关闭直接 `window.close()` 复用既有"关闭进托盘"逻辑；最大化状态经事件 `win:maximized-changed` 推送图标切换。不使用透明窗口，Win7 软渲染下安全。
+- **沉浸式无标题栏**（决议 #49/#51/#52）：macOS `titleBarStyle: 'hiddenInset'`（主窗 `trafficLightPosition` x=68 置于列表栏顶部，56px 导航栏放不下三钮；设置窗 x=12）；Windows / Linux `frame: false`（Windows 保留默认 `thickFrame`，边缘缩放与 Aero Snap 不受影响）。拖拽带（顶部 32px）分平台实现：macOS / Windows 用 `-webkit-app-region: drag`；**Linux 禁用 CSS 拖拽区**——Electron 在 Linux 上的 drag region 命中计算不可靠（受桌面环境/缩放影响，UOS 实测会吞掉客户区点击，决议 #52），改为渲染层 Pointer Capture + 主进程 `win:begin-drag` / `win:end-drag`（`screen.getCursorScreenPoint()` 间隔 16ms 跟随移窗，窗口销毁/二次 begin 自动清理），双击走 `win:toggle-maximize`。Windows / Linux 的最小化 / 最大化经 IPC `win:minimize` / `win:toggle-maximize`（`BrowserWindow.fromWebContents` 定位窗口），关闭直接 `window.close()` 复用既有"关闭进托盘"逻辑；最大化状态经事件 `win:maximized-changed` 推送图标切换。不使用透明窗口，Win7 软渲染下安全。若 UOS 复测仍异常，预案：Linux 回退 `frame: true`。
 - 安全基线（README 红线落点）：`contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`；严格 CSP（`default-src 'self'`）；`will-navigate` 全拦截、`setWindowOpenHandler` 一律 deny；渲染进程只加载本地资源。
 - **日志脱敏**（决议 #22）：logger 永不记录消息正文/文件内容，只记元数据（消息 ID、类型、长度、对端 nodeId）——"导出诊断日志"不等于泄聊天。
 - 通知：用 Electron `Notification`（Win7 下 Electron 自带仿原生降级实现；macOS 26 未签名场景列入冒烟清单）。
@@ -263,3 +263,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.26 头像美术资源修正：头像与内置 emoji 兼容显示改用 Twemoji 本地 SVG 子集，运行时零外网请求，并补 CC-BY 4.0 署名文件与 About 页展示。
 - 2026-06-12 v0.27 输入框 emoji 兼容补齐：聊天输入框在草稿包含内置 emoji 时启用 Twemoji 本地 SVG 镜像层，底层仍保留原生 textarea 编辑行为。
 - 2026-06-12 v0.28 沉浸式窗口与镜像对齐：主窗 / 设置窗 frameless（决议 #49，新增 `win:minimize` / `win:toggle-maximize` / `win:is-maximized` IPC 与 `win:maximized-changed` 事件，渲染层 `WindowControls` 组件）；输入框 emoji 镜像层改为隐藏 DOM 探针按实际字体逐字符测宽对齐（`utils/emoji-metrics`；canvas measureText 对 emoji 的度量与 DOM 排版不一致不可用；探针挂 `<html>` 下避开 body zoom 字体缩放）；设置页头像编辑器重排（决议 #50，纯渲染层改动）。
+- 2026-06-12 v0.29 沉浸式跨平台修正（决议 #51/#52）：mac 主窗 `trafficLightPosition` 移至 x=68；Linux 弃用 CSS 拖拽区，新增 `win:begin-drag` / `win:end-drag` IPC（主进程光标跟随移窗），渲染层拖拽带抽为 `WindowDragStrip` 组件按平台分流。

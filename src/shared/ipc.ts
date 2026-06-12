@@ -64,7 +64,10 @@ export const IpcChannels = {
   /** 沉浸式无标题栏（决议 #49）：Windows/Linux 自绘窗口控制按钮用 */
   winMinimize: 'win:minimize',
   winToggleMaximize: 'win:toggle-maximize',
-  winIsMaximized: 'win:is-maximized'
+  winIsMaximized: 'win:is-maximized',
+  /** Linux JS 拖拽（决议 #52）：CSS 拖拽区在 Linux 不可靠，主进程跟随光标移窗 */
+  winBeginDrag: 'win:begin-drag',
+  winEndDrag: 'win:end-drag'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -461,4 +464,7 @@ export interface PantryApi {
   isWindowMaximized(): Promise<boolean>
   /** 当前窗口最大化状态变化（自绘按钮切图标用） */
   onWinMaximizeChanged(listener: (maximized: boolean) => void): () => void
+  /** Linux JS 拖拽（决议 #52）：按住拖拽带时主进程跟随光标移窗 */
+  beginWindowDrag(): Promise<void>
+  endWindowDrag(): Promise<void>
 }

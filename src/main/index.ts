@@ -517,8 +517,9 @@ if (!gotLock) {
       title: mainWindowTitle(),
       // 沉浸式无标题栏（决议 #49）：mac 保留内嵌红绿灯；Win/Linux 渲染层自绘控制按钮。
       // Windows 不关 thickFrame，边缘缩放与 Aero Snap 保持系统行为；不使用透明窗口（Win7 软渲染安全）。
+      // 红绿灯置于列表栏顶部留白（决议 #51）：56px 导航栏放不下三钮，不允许横跨分界线。
       ...(process.platform === 'darwin'
-        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 10 } }
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 68, y: 10 } }
         : { frame: false }),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
@@ -587,6 +588,35 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.winIsMaximized, (event): boolean => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
   })
+
+  // Linux JS 拖拽（决议 #52）：CSS 拖拽区在 Linux 命中不可靠（UOS 实测吞点击），
+  // 渲染层按住拖拽带时由主进程按光标位置跟随移窗；单鼠标场景同一时刻只有一个拖拽。
+  let dragTimer: NodeJS.Timeout | null = null
+
+  function stopWindowDrag(): void {
+    if (dragTimer) clearInterval(dragTimer)
+    dragTimer = null
+  }
+
+  ipcMain.handle(IpcChannels.winBeginDrag, (event): void => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isMaximized() || win.isFullScreen()) return
+    stopWindowDrag()
+    const cursor = screen.getCursorScreenPoint()
+    const [winX, winY] = win.getPosition()
+    const offsetX = cursor.x - winX
+    const offsetY = cursor.y - winY
+    dragTimer = setInterval(() => {
+      if (win.isDestroyed()) {
+        stopWindowDrag()
+        return
+      }
+      const point = screen.getCursorScreenPoint()
+      win.setPosition(point.x - offsetX, point.y - offsetY)
+    }, 16)
+  })
+
+  ipcMain.handle(IpcChannels.winEndDrag, (): void => stopWindowDrag())
 
   ipcMain.handle(IpcChannels.appOpenUrl, async (_event, raw: unknown): Promise<boolean> => {
     if (typeof raw !== 'string' || raw.length > 2048) return false
