@@ -15,6 +15,16 @@ describe('compat emoji rendering helpers', () => {
     expect(splitEmojiText('✌️完成')[0]).toEqual({ text: '✌️', emoji: true })
   })
 
+  it('支持输入框草稿中的换行和多个 emoji 镜像渲染', () => {
+    expect(splitEmojiText('第一行😀\n第二行👍 OK')).toEqual([
+      { text: '第一行', emoji: false },
+      { text: '😀', emoji: true },
+      { text: '\n第二行', emoji: false },
+      { text: '👍', emoji: true },
+      { text: ' OK', emoji: false }
+    ])
+  })
+
   it('内置 emoji 有本地渲染元数据', () => {
     expect(compatEmojiItem('👍')).toMatchObject({ label: '赞', mark: '赞' })
     expect(compatEmojiItem('不存在')).toBeUndefined()

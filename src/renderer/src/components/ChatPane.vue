@@ -43,6 +43,7 @@ const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
 const peerProfileScope = ref<HTMLElement | null>(null)
 const historySearchInput = ref<HTMLInputElement | null>(null)
+const inputScrollTop = ref(0)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
@@ -119,6 +120,8 @@ const inputPlaceholder = computed(() => {
     ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图直接发送'
     : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
 })
+const draftEmojiParts = computed(() => splitEmojiText(draft.value))
+const draftUsesEmojiMirror = computed(() => draftEmojiParts.value.some((part) => part.emoji))
 const historyResultMeta = computed(() => {
   if (historySearching.value) return '搜索中'
   return `${historyHits.value.length} 条结果`
@@ -200,6 +203,10 @@ watch(
 )
 
 watch([historyQuery, historyKind, historyFrom, historyTo], () => scheduleHistorySearch())
+
+watch(draft, () => {
+  void nextTick(syncInputMirrorScroll)
+})
 
 watch(
   () => [peer.value?.nodeId ?? '', peer.value?.remark ?? ''] as const,
@@ -535,6 +542,10 @@ function insertEmoji(emoji: string): void {
     ta.focus()
     ta.selectionStart = ta.selectionEnd = start + emoji.length
   })
+}
+
+function syncInputMirrorScroll(): void {
+  inputScrollTop.value = inputEl.value?.scrollTop ?? 0
 }
 
 function insertNewline(): void {
@@ -1197,15 +1208,31 @@ async function onDrop(event: DragEvent): Promise<void> {
           {{ peersStore.nameOf(id) }}
         </button>
       </div>
-      <textarea
-        ref="inputEl"
-        v-model="draft"
-        class="input"
-        :disabled="!canSend"
-        :placeholder="inputPlaceholder"
-        @keydown="onKeydown"
-        @paste="onPaste"
-      ></textarea>
+      <div class="input-shell" :class="{ 'has-mirror': draftUsesEmojiMirror }">
+        <div v-if="draftUsesEmojiMirror" class="input-mirror" aria-hidden="true">
+          <div
+            class="input-mirror-content"
+            :style="{ transform: `translateY(-${inputScrollTop}px)` }"
+          >
+            <template v-for="(part, index) in draftEmojiParts" :key="index">
+              <CompatEmoji v-if="part.emoji" :emoji="part.text" />
+              <span v-else>{{ part.text }}</span>
+            </template>
+            <span v-if="draft.endsWith('\n')">&nbsp;</span>
+          </div>
+        </div>
+        <textarea
+          ref="inputEl"
+          v-model="draft"
+          class="input"
+          :class="{ 'mirror-active': draftUsesEmojiMirror }"
+          :disabled="!canSend"
+          :placeholder="inputPlaceholder"
+          @keydown="onKeydown"
+          @paste="onPaste"
+          @scroll="syncInputMirrorScroll"
+        ></textarea>
+      </div>
       <div class="input-bar">
         <span v-if="draftBytes > 600" class="counter" :class="{ over: overLimit }">
           {{ draftBytes }} / {{ TEXT_TCP_LIMIT }} 字节{{
@@ -2161,9 +2188,15 @@ async function onDrop(event: DragEvent): Promise<void> {
   border-top: 1px solid var(--line);
   padding: 8px 12px 10px;
 }
-.input {
-  width: 100%;
+.input-shell {
+  position: relative;
   height: 72px;
+}
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border: none;
   outline: none;
   resize: none;
@@ -2171,7 +2204,38 @@ async function onDrop(event: DragEvent): Promise<void> {
   font-size: 14px;
   line-height: 1.5;
   background: transparent;
+  color: var(--text-1);
+  padding: 0;
   user-select: text;
+}
+.input.mirror-active {
+  color: transparent;
+  caret-color: var(--text-1);
+}
+.input.mirror-active::selection {
+  color: transparent;
+  background: rgba(61, 139, 107, 0.18);
+}
+.input-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.input-mirror-content {
+  min-height: 100%;
+  padding: 0;
+  will-change: transform;
+}
+.input-mirror :deep(.compat-emoji) {
+  font-size: 14px;
 }
 .input-bar {
   display: flex;
