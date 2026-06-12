@@ -40,6 +40,7 @@ export const IpcChannels = {
   groupImgOfferPath: 'group-img:offer-path',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
+  msgSearch: 'msg:search',
   msgContext: 'msg:context',
   settingsSaveApp: 'settings:save-app',
   netAddPeer: 'net:add-peer',
@@ -247,6 +248,29 @@ export interface SearchResult {
   files: FileHit[]
 }
 
+export type ConversationSearchKind = 'all' | 'image' | 'file'
+
+export interface ConversationSearchOptions {
+  convId: string
+  query: string
+  kind: ConversationSearchKind
+  fromTs?: number
+  toTs?: number
+  limit?: number
+}
+
+export interface ConversationMessageHit {
+  msgId: string
+  convId: string
+  senderId: string
+  isMine: boolean
+  kind: 'text' | 'file' | 'image'
+  title: string
+  snippet: string
+  ts: number
+  seq: number
+}
+
 /** 我的资料 + 首启向导状态（F-SYS-6） */
 export interface SettingsView {
   nick: string
@@ -368,6 +392,8 @@ export interface PantryApi {
   saveImageAs(transferId: string): Promise<boolean>
   /** 全局搜索（防抖在渲染层做） */
   search(query: string): Promise<SearchResult>
+  /** 当前会话历史搜索：关键词 + 图片/文件/日期筛选 */
+  searchMessages(options: ConversationSearchOptions): Promise<ConversationMessageHit[]>
   /** 搜索跳转：取目标 seq 前后窗口（按时间升序），用于会话内定位 */
   getMessageContext(convId: string, seq: number): Promise<MessageView[]>
   /** 应用级设置（通知/手动节点/扫描网段） */

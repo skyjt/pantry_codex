@@ -248,12 +248,55 @@ try {
     ts: 4000,
     status: 'sent'
   })
+  msgRepo.insert({
+    id: 'm-img-search',
+    convId,
+    senderId: 'node-bob',
+    isMine: false,
+    kind: 'image',
+    content: '[图片]',
+    fileRef: JSON.stringify({
+      transferId: 't-img-search',
+      name: '截图-会议.png',
+      size: 2048,
+      count: 1,
+      dir: false
+    }),
+    ts: 5000,
+    status: 'sent'
+  })
   const sr = searchSvc.query('文档')
   assert.ok(sr.messageGroups.length >= 1, '聊天记录应有聚合命中')
   assert.equal(sr.messageGroups[0].convId, 'conv-1', '命中应来自含「文档」的会话')
   assert.ok(sr.files.some((f) => f.name === '需求文档v3.docx'), '文件名应命中')
   assert.equal(searchSvc.query('alice').peers.length, 1, '联系人按昵称命中')
   assert.equal(searchSvc.query('   ').messageGroups.length, 0, '空查询返回空')
+  assert.ok(
+    searchSvc.conversation({ convId, query: '回你', kind: 'all' }).some((h) => h.msgId === 'm-2'),
+    '会话内搜索应命中文本消息'
+  )
+  assert.ok(
+    searchSvc.conversation({ convId, query: '', kind: 'file' }).some((h) => h.msgId === 'm-f1'),
+    '会话内文件筛选应列出文件消息'
+  )
+  assert.ok(
+    searchSvc
+      .conversation({ convId, query: '会议', kind: 'image' })
+      .some((h) => h.msgId === 'm-img-search'),
+    '会话内图片搜索应匹配 file_ref 文件名'
+  )
+  assert.deepEqual(
+    searchSvc.conversation({ convId, query: '', kind: 'all' }),
+    [],
+    '会话内搜索无关键词/筛选时不返回最近消息'
+  )
+  assert.deepEqual(
+    searchSvc
+      .conversation({ convId, query: '', kind: 'all', fromTs: 4500, toTs: 5500 })
+      .map((h) => h.msgId),
+    ['m-img-search'],
+    '会话内日期筛选应限定时间范围'
+  )
 
   const ctx = msgRepo.around(convId, 2, 25)
   assert.ok(ctx.some((m) => m.id === 'm-2'), '上下文窗口应包含目标')

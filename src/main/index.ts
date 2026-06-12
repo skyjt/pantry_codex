@@ -22,6 +22,7 @@ import {
   IpcEvents,
   type AppInfo,
   type AppSettingsPatch,
+  type ConversationSearchOptions,
   type DataExportOptions,
   type DataImportResult,
   type ExportFormat,
@@ -185,6 +186,32 @@ if (!gotLock) {
       out.toTs = Math.floor(raw.toTs)
     }
     return Object.keys(out).length > 0 ? out : undefined
+  }
+
+  function normalizeConversationSearch(input: unknown): ConversationSearchOptions | null {
+    if (typeof input !== 'object' || input === null) return null
+    const raw = input as Record<string, unknown>
+    if (typeof raw.convId !== 'string' || raw.convId.length === 0 || raw.convId.length > 128) {
+      return null
+    }
+    if (typeof raw.query !== 'string' || raw.query.length > 128) return null
+    const kind =
+      raw.kind === 'image' || raw.kind === 'file' || raw.kind === 'all' ? raw.kind : 'all'
+    const out: ConversationSearchOptions = {
+      convId: raw.convId,
+      query: raw.query,
+      kind
+    }
+    if (typeof raw.fromTs === 'number' && Number.isFinite(raw.fromTs) && raw.fromTs >= 0) {
+      out.fromTs = Math.floor(raw.fromTs)
+    }
+    if (typeof raw.toTs === 'number' && Number.isFinite(raw.toTs) && raw.toTs >= 0) {
+      out.toTs = Math.floor(raw.toTs)
+    }
+    if (typeof raw.limit === 'number' && Number.isInteger(raw.limit)) {
+      out.limit = Math.max(1, Math.min(raw.limit, 100))
+    }
+    return out
   }
 
   function registerGlobalShortcuts(): void {
@@ -1096,6 +1123,12 @@ if (!gotLock) {
       return { peers: [], messageGroups: [], files: [] }
     }
     return search.query(query)
+  })
+
+  ipcMain.handle(IpcChannels.msgSearch, (_event, options: unknown) => {
+    const clean = normalizeConversationSearch(options)
+    if (!clean || !search) return []
+    return search.conversation(clean)
   })
 
   ipcMain.handle(IpcChannels.msgContext, (_event, convId: unknown, seq: unknown) => {

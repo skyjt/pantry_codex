@@ -1,5 +1,11 @@
 import type DatabaseT from 'better-sqlite3'
-import type { SearchResult, MessageGroupHit, FileHit } from '../../shared/ipc'
+import type {
+  ConversationMessageHit,
+  ConversationSearchOptions,
+  FileHit,
+  MessageGroupHit,
+  SearchResult
+} from '../../shared/ipc'
 import type { PeerRegistry } from '../net/peer-registry'
 import { toFtsQuery } from '../store/fts'
 
@@ -12,7 +18,7 @@ export class SearchService {
   private readonly fileStmt: DatabaseT.Statement
 
   constructor(
-    db: DatabaseT.Database,
+    private readonly db: DatabaseT.Database,
     private readonly registry: PeerRegistry,
     private readonly remarkOf: (nodeId: string) => string = () => ''
   ) {
@@ -113,5 +119,109 @@ export class SearchService {
     )
 
     return { peers, messageGroups, files }
+  }
+
+  conversation(options: ConversationSearchOptions): ConversationMessageHit[] {
+    const convId = options.convId.trim()
+    const query = options.query.trim()
+    const kind =
+      options.kind === 'image' || options.kind === 'file' || options.kind === 'all'
+        ? options.kind
+        : 'all'
+    const limit =
+      typeof options.limit === 'number' && Number.isInteger(options.limit)
+        ? Math.max(1, Math.min(options.limit, 100))
+        : 50
+    const fromTs =
+      typeof options.fromTs === 'number' && Number.isFinite(options.fromTs)
+        ? Math.max(0, Math.floor(options.fromTs))
+        : undefined
+    const toTs =
+      typeof options.toTs === 'number' && Number.isFinite(options.toTs)
+        ? Math.max(0, Math.floor(options.toTs))
+        : undefined
+    if (!convId || convId.length > 128) return []
+    if (fromTs !== undefined && toTs !== undefined && fromTs > toTs) return []
+    if (!query && kind === 'all' && fromTs === undefined && toTs === undefined) return []
+
+    const clauses = ["conv_id = @convId", "status <> 'recalled'"]
+    if (kind === 'image') clauses.push("kind = 'image'")
+    else if (kind === 'file') clauses.push("kind = 'file'")
+    else clauses.push("kind IN ('text', 'image', 'file')")
+
+    const params: Record<string, string | number> = { convId, limit }
+    if (fromTs !== undefined) {
+      clauses.push('ts >= @fromTs')
+      params.fromTs = fromTs
+    }
+    if (toTs !== undefined) {
+      clauses.push('ts <= @toTs')
+      params.toTs = toTs
+    }
+    if (query) {
+      params.like = `%${escapeLike(query)}%`
+      clauses.push("(content LIKE @like ESCAPE '\\' OR COALESCE(file_ref, '') LIKE @like ESCAPE '\\')")
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT id, conv_id AS convId, sender_id AS senderId, is_mine AS isMine,
+             kind, content, file_ref AS fileRef, ts, seq
+      FROM messages
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY ts DESC, seq DESC
+      LIMIT @limit
+    `)
+    const rows = stmt.all(params) as Array<{
+      id: string
+      convId: string
+      senderId: string
+      isMine: number
+      kind: 'text' | 'file' | 'image'
+      content: string
+      fileRef: string | null
+      ts: number
+      seq: number
+    }>
+    return rows.map((row) => {
+      const title = titleOf(row.kind, row.content, row.fileRef)
+      return {
+        msgId: row.id,
+        convId: row.convId,
+        senderId: row.senderId,
+        isMine: row.isMine !== 0,
+        kind: row.kind,
+        title,
+        snippet: snippetOf(row.kind, row.content, title),
+        ts: row.ts,
+        seq: row.seq
+      }
+    })
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+function titleOf(kind: 'text' | 'file' | 'image', content: string, fileRef: string | null): string {
+  if (kind === 'text') return '文本消息'
+  const name = nameFromFileRef(fileRef)
+  if (name) return name
+  return content.replace(/^\[(文件|图片)\] ?/, '') || (kind === 'image' ? '图片' : '文件')
+}
+
+function snippetOf(kind: 'text' | 'file' | 'image', content: string, title: string): string {
+  if (kind === 'text') return content
+  const stripped = content.replace(/^\[(文件|图片)\] ?/, '')
+  return stripped || title
+}
+
+function nameFromFileRef(fileRef: string | null): string {
+  if (!fileRef) return ''
+  try {
+    const parsed = JSON.parse(fileRef) as { name?: unknown }
+    return typeof parsed.name === 'string' ? parsed.name : ''
+  } catch {
+    return ''
   }
 }
