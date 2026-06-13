@@ -37,6 +37,15 @@ html[data-theme='dark'] {
   --badge: #ff5f62;
 }
 
+/* 输入框等宽空白字形字体（决议 #56）：仅聊天输入框 textarea 与其镜像层使用——
+   内置 emoji 字符恒占 1.3em、FE0F/ZWJ 零宽，可见图形由镜像层 Twemoji 提供。
+   其余 UI（消息、列表预览、搜索框）严禁使用本字体，否则 emoji 字符会显示为空白。 */
+@font-face {
+  font-family: 'PantryEmojiBlank';
+  src: url('../assets/fonts/pantry-emoji-blank.ttf') format('truetype');
+  font-display: block;
+}
+
 * {
   margin: 0;
   padding: 0;
