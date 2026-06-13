@@ -175,9 +175,10 @@ onUnmounted(() => {
 
 /* 栏① 导航 */
 .rail {
-  /* 68px 容纳标准 mac 红绿灯（决议 #68）：红绿灯回左上角导航栏顶部留白、不横跨列表栏 */
+  /* 68px 容纳标准 mac 红绿灯（决议 #68）；浅灰底（决议 #70，微信式）让红绿灯落在浅色上自然 */
   width: 68px;
-  background: var(--primary);
+  background: var(--rail-bg);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -201,16 +202,15 @@ onUnmounted(() => {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.92);
+  color: var(--text-2); /* 浅灰底上用深灰图标（决议 #70） */
   cursor: pointer;
-  opacity: 0.7;
   display: grid;
   place-items: center;
 }
 .rail-btn.active,
 .rail-btn:hover {
-  background: rgba(255, 255, 255, 0.18);
-  opacity: 1;
+  background: var(--primary-weak);
+  color: var(--primary); /* 选中/悬停茶青高亮，品牌主色点缀 */
 }
 .rail-badge {
   position: absolute;

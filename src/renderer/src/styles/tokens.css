@@ -16,6 +16,8 @@
   --offline: #c2c2c2;
   --danger: #e5484d;
   --badge: #fa5151;
+  /* 导航栏底色（决议 #70）：微信式浅灰，让 mac 红绿灯落在浅色上自然；比列表栏略深 + 细线分隔 */
+  --rail-bg: #edeef0;
 }
 
 html[data-theme='dark'] {
@@ -35,6 +37,7 @@ html[data-theme='dark'] {
   --offline: #626a64;
   --danger: #ff6b72;
   --badge: #ff5f62;
+  --rail-bg: #1a1d1b;
 }
 
 /* 输入框等宽空白字形字体（决议 #56）：仅聊天输入框 textarea 与其镜像层使用——
