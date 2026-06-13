@@ -172,12 +172,64 @@ jobs:
             release/Pantry-*-win-x64-portable.exe
             release/SHA256SUMS-win7-x64.txt
 
+  macos-arm64:
+    name: macOS arm64（Apple Silicon）
+    runs-on: macos-14
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+
+      - name: 安装 npm 依赖
+        run: npm ci
+
+      - name: 五连验证
+        run: |
+          npm test
+          npm run test:db
+          npm run typecheck
+          npm run build
+          npm run smoke
+
+      - name: 构建 macOS arm64 产物
+        run: npm run dist:mac
+
+      - name: 生成 SHA-256 清单
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          shopt -s nullglob
+          files=(Pantry-*-mac-arm64.dmg Pantry-*-mac-arm64.zip)
+          if [ "${#files[@]}" -lt 2 ]; then
+            ls -la
+            echo "macOS 产物数量不足，期望 dmg 与 zip 各一个。" >&2
+            exit 1
+          fi
+          shasum -a 256 "${files[@]}" > SHA256SUMS-mac-arm64.txt
+
+      - name: 上传 macOS 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pantry-mac-arm64
+          if-no-files-found: error
+          path: |
+            release/Pantry-*-mac-arm64.dmg
+            release/Pantry-*-mac-arm64.zip
+            release/SHA256SUMS-mac-arm64.txt
+
   publish-github-release:
     name: 发布 GitHub Release
     runs-on: ubuntu-22.04
     needs:
       - linux-debian10-uos20-x64
       - windows7-x64
+      - macos-arm64
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: 下载构建产物
@@ -194,6 +246,7 @@ jobs:
 
           - Windows 7 SP1 x64：NSIS 安装包与便携版 exe。
           - Debian 10 / UOS 20 x64：deb 与 AppImage，native 模块在 Debian 10 容器内编译。
+          - macOS arm64（Apple Silicon / M 系列）：dmg 与 zip（未签名，首次打开需右键「打开」绕过 Gatekeeper）。
           - 每个平台产物附 SHA-256 清单。
 
           Win7 / Debian 10 / UOS 20 的真实桌面冒烟仍按 docs/packaging-test.md 在目标 VM 或真机执行。
