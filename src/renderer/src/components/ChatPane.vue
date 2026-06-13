@@ -5,7 +5,7 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { splitEmojiText } from '../utils/compat-emoji'
-import { emojiAdvanceWidth, fontOfStyle } from '../utils/emoji-metrics'
+import { emojiAdvanceWidth, fontOfStyle, setTextMeasurer } from '../utils/emoji-metrics'
 import { emojiToTwemojiCode, twemojiUrl } from '../utils/twemoji-assets'
 import { listTime, separatorTime } from '../utils/time'
 import AvatarMark from './AvatarMark.vue'
@@ -126,15 +126,19 @@ const draftEmojiParts = computed(() => splitEmojiText(draft.value))
 const draftUsesEmojiMirror = computed(() => draftEmojiParts.value.some((part) => part.emoji))
 /** textarea 的实际 font（measureText 用）；为空时镜像退化为原字符渲染，宽度天然一致 */
 const inputFont = ref('')
+/** PantryEmojiBlank 加载完成后 +1：清测量缓存并强制镜像重算（决议 #56） */
+const fontEpoch = ref(0)
 interface MirrorPart {
   text: string
   emoji: boolean
   width: number
   src: string
 }
-// 镜像层 emoji 的占位宽度 = textarea 字体下该字符的真实 advance 宽度（决议 #48 对齐修正）
-const draftMirrorParts = computed<MirrorPart[]>(() =>
-  draftEmojiParts.value.map((part) => {
+// 镜像层 emoji 的占位宽度 = textarea 字体下该字符的真实 advance 宽度（决议 #48 对齐修正；
+// PantryEmojiBlank 生效后测量值恒为 1.3em，决议 #56）
+const draftMirrorParts = computed<MirrorPart[]>(() => {
+  void fontEpoch.value
+  return draftEmojiParts.value.map((part) => {
     if (!part.emoji || !inputFont.value) return { ...part, width: 0, src: '' }
     return {
       ...part,
@@ -142,7 +146,7 @@ const draftMirrorParts = computed<MirrorPart[]>(() =>
       src: twemojiUrl(emojiToTwemojiCode(part.text))
     }
   })
-)
+})
 
 function refreshInputFont(): void {
   const ta = inputEl.value
@@ -201,6 +205,14 @@ function onDocumentPointerDown(event: MouseEvent): void {
 onMounted(async () => {
   document.addEventListener('mousedown', onDocumentPointerDown)
   refreshInputFont()
+  // 空白字形字体就绪前测得的是系统字符宽——就绪后清缓存重测，镜像槽宽收敛到 1.3em
+  void document.fonts
+    ?.load('14px PantryEmojiBlank')
+    .catch(() => undefined)
+    .then(() => {
+      setTextMeasurer(null)
+      fontEpoch.value += 1
+    })
   settings.value = await window.pantry.getSettings()
   stopSettings = window.pantry.onSettingsUpdated((next) => {
     settings.value = next
@@ -2236,7 +2248,14 @@ async function onDrop(event: DragEvent): Promise<void> {
   border: none;
   outline: none;
   resize: none;
-  font-family: inherit;
+  /* PantryEmojiBlank 在首位（决议 #56）：内置 emoji 恒占 1.3em 空白槽，
+     文字不在其 cmap 内自动落到系统字体；镜像层必须保持同一字体栈 */
+  font-family:
+    'PantryEmojiBlank',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Noto Sans CJK SC',
+    sans-serif;
   font-size: 14px;
   line-height: 1.5;
   background: transparent;
@@ -2258,7 +2277,12 @@ async function onDrop(event: DragEvent): Promise<void> {
   overflow: hidden;
   pointer-events: none;
   color: var(--text-1);
-  font-family: inherit;
+  font-family:
+    'PantryEmojiBlank',
+    'PingFang SC',
+    'Microsoft YaHei',
+    'Noto Sans CJK SC',
+    sans-serif;
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -2282,10 +2306,10 @@ async function onDrop(event: DragEvent): Promise<void> {
   position: absolute;
   left: 50%;
   top: 50%;
-  /* 固定 1.3em 与消息正文一致（ui-design §9）：缺字平台（Win7/UOS）字符槽很窄，
-     若按槽宽缩放图标会"特别小"；占位宽仍按真实字符测量，光标对齐不受影响 */
-  width: 1.3em;
-  height: 1.3em;
+  /* PantryEmojiBlank 生效时字符槽恒为 1.3em，图标恰好满槽（决议 #56）；
+     字体加载失败时槽宽回落到系统字符宽，min() 让图标随槽缩小、对齐优先 */
+  width: min(1.3em, 100%);
+  height: auto;
   transform: translate(-50%, -52%);
   pointer-events: none;
 }
