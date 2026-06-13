@@ -12,6 +12,7 @@ import AvatarMark from './AvatarMark.vue'
 import CompatEmoji from './CompatEmoji.vue'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
+import ImageViewer from './ImageViewer.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import ForwardDialog from './ForwardDialog.vue'
@@ -51,6 +52,8 @@ const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
+// 历史搜索结果点图片：单击放大 / 双击定位的延时区分（决议 #74）
+let hitClickTimer: ReturnType<typeof setTimeout> | null = null
 let peerProfileSavedTimer: ReturnType<typeof setTimeout> | null = null
 let historySearchRun = 0
 const MSG_MENU_WIDTH = 112
@@ -78,6 +81,8 @@ const historyTo = ref('')
 const historyCalendarMonth = ref(monthKey(new Date()))
 const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
+/** 搜索结果内点击图片放大查看（浮于搜索面板之上，不离开，决议 #74） */
+const historyViewer = ref<{ src: string; transferId: string } | null>(null)
 const historyBrokenImages = ref<Record<string, boolean>>({})
 const showPeerProfile = ref(false)
 const peerProfileRemark = ref('')
@@ -338,6 +343,7 @@ function resetHistorySearch(): void {
   historyHits.value = []
   historySearching.value = false
   historyBrokenImages.value = {}
+  historyViewer.value = null
 }
 
 function closePeerProfile(): void {
@@ -537,9 +543,10 @@ function historyIcon(hit: ConversationMessageHit): string {
   return 'chat'
 }
 
-function historyPrimary(hit: ConversationMessageHit): string {
-  if (hit.kind === 'image') return '图片消息'
-  return hit.kind === 'text' ? '文本消息' : hit.title
+function openHistoryViewer(hit: ConversationMessageHit): void {
+  const src = historyImageSrc(hit)
+  if (!src) return
+  historyViewer.value = { src, transferId: hit.fileRef?.transferId ?? '' }
 }
 
 function historySecondary(hit: ConversationMessageHit): string {
@@ -559,6 +566,27 @@ function markHistoryImageBroken(msgId: string): void {
 async function openHistoryHit(hit: ConversationMessageHit): Promise<void> {
   closeHistorySearch()
   await chatStore.jumpToMessage(hit.convId, hit.seq, hit.msgId)
+}
+
+// 图片命中：单击放大看图（延时区分），双击跳转定位；其余命中单击即定位（决议 #74）
+function onHistoryHitClick(hit: ConversationMessageHit): void {
+  if (hit.kind !== 'image') {
+    void openHistoryHit(hit)
+    return
+  }
+  if (hitClickTimer) clearTimeout(hitClickTimer)
+  hitClickTimer = setTimeout(() => {
+    hitClickTimer = null
+    openHistoryViewer(hit)
+  }, 220)
+}
+
+function onHistoryHitDblClick(hit: ConversationMessageHit): void {
+  if (hitClickTimer) {
+    clearTimeout(hitClickTimer)
+    hitClickTimer = null
+  }
+  void openHistoryHit(hit)
 }
 
 function window_startCapture(): void {
@@ -978,9 +1006,10 @@ async function onDrop(event: DragEvent): Promise<void> {
                   type="button"
                   class="history-hit"
                   :class="`history-hit-${hit.kind}`"
-                  @click="openHistoryHit(hit)"
+                  @click="onHistoryHitClick(hit)"
+                  @dblclick="onHistoryHitDblClick(hit)"
                 >
-                  <span class="history-hit-media">
+                  <span v-if="hit.kind !== 'text'" class="history-hit-media">
                     <img
                       v-if="historyImageSrc(hit)"
                       class="history-thumb"
@@ -989,14 +1018,20 @@ async function onDrop(event: DragEvent): Promise<void> {
                       @error="markHistoryImageBroken(hit.msgId)"
                     />
                     <span v-else class="history-kind-icon">
-                      <PantryIcon :name="historyIcon(hit)" :size="18" />
+                      <PantryIcon :name="historyIcon(hit)" :size="20" />
                     </span>
                   </span>
                   <span class="history-hit-copy">
-                    <span class="history-hit-title">{{ historyPrimary(hit) }}</span>
-                    <span v-if="hit.kind === 'text'" class="history-hit-snippet">{{
-                      hit.snippet
-                    }}</span>
+                    <span v-if="hit.kind === 'file'" class="history-hit-title">{{ hit.title }}</span>
+                    <span v-else-if="hit.kind === 'text'" class="history-hit-snippet">
+                      <template
+                        v-for="(seg, segIdx) in splitEmojiText(hit.snippet)"
+                        :key="segIdx"
+                      >
+                        <CompatEmoji v-if="seg.emoji" :emoji="seg.text" />
+                        <span v-else>{{ seg.text }}</span>
+                      </template>
+                    </span>
                     <span class="history-hit-meta">{{ historySecondary(hit) }}</span>
                   </span>
                 </button>
@@ -1006,6 +1041,12 @@ async function onDrop(event: DragEvent): Promise<void> {
         </div>
       </section>
     </div>
+    <ImageViewer
+      v-if="historyViewer"
+      :src="historyViewer.src"
+      :transfer-id="historyViewer.transferId"
+      @close="historyViewer = null"
+    />
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <div v-if="!isGroup && peer" ref="peerProfileScope" class="peer-profile-scope">
@@ -1525,7 +1566,8 @@ async function onDrop(event: DragEvent): Promise<void> {
 .history-dialog {
   width: min(680px, 100%);
   height: min(500px, 100%);
-  min-height: 420px;
+  /* 不再用 min-height 兜底，矮窗（Win7 VM）下会撑破遮罩 padding 导致末行被裁（决议 #74） */
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-window);
@@ -1799,7 +1841,8 @@ async function onDrop(event: DragEvent): Promise<void> {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px;
+  /* 末尾多留白：Win7/Chrome108 下 flex+overflow 容器最后一项易被裁（决议 #74） */
+  padding: 8px 8px 16px;
 }
 .history-empty {
   height: 100%;
@@ -1825,6 +1868,10 @@ async function onDrop(event: DragEvent): Promise<void> {
 .history-hit-image {
   grid-template-columns: 72px minmax(0, 1fr);
   min-height: 88px;
+}
+/* 文本命中：去掉媒体列，摘要直接当主体（决议 #74） */
+.history-hit-text {
+  grid-template-columns: minmax(0, 1fr);
 }
 .history-hit + .history-hit {
   margin-top: 4px;
@@ -1876,11 +1923,13 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .history-hit-snippet {
   min-width: 0;
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .history-hit-meta {
   color: var(--text-3);

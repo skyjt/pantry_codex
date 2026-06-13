@@ -91,8 +91,13 @@ export const useChatStore = defineStore('chat', {
         await window.pantry.markRead(convId)
       }
       this.activeConvId = convId
-      this.messages[convId] = await window.pantry.getMessageContext(convId, seq)
-      this.viewingHistory = true
+      const ctx = await window.pantry.getMessageContext(convId, seq)
+      this.messages[convId] = ctx
+      // 跳转窗口若已含会话最新消息（尾条 ts 触达 lastTs），则不算"看历史"，
+      // 避免点最新命中 / 关闭搜索后仍误显"回到最新"（决议 #74）
+      const conv = this.convs.find((c) => c.id === convId)
+      const tail = ctx[ctx.length - 1]
+      this.viewingHistory = !(conv && tail && tail.ts >= conv.lastTs)
       this.highlightId = msgId || null
       setTimeout(() => {
         if (this.highlightId === msgId) this.highlightId = null
