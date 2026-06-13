@@ -569,7 +569,7 @@ if (!gotLock) {
       // Windows 不关 thickFrame，边缘缩放与 Aero Snap 保持系统行为；不使用透明窗口（Win7 软渲染安全）。
       // 红绿灯置于列表栏顶部留白（决议 #51）：56px 导航栏放不下三钮，不允许横跨分界线。
       ...(process.platform === 'darwin'
-        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 18 } }
+        ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 10, y: 12 } }
         : { frame: false }),
       ...linuxWindowIcon(),
       webPreferences: {
