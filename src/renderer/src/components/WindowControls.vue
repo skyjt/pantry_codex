@@ -33,7 +33,9 @@ async function toggleMaximize(): Promise<void> {
 }
 
 function close(): void {
-  window.close()
+  // 决议 #59：不许用 DOM window.close() —— Electron 对渲染层发起的关闭走
+  // CloseImmediately，绕过主进程 close 事件，"关闭进托盘"会失效直接退出。
+  void window.pantry.closeWindow()
 }
 </script>
 

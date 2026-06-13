@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage } from 'electron'
-import { TRAY_ICON_DATAURL } from './tray-icon'
+import { TRAY_ICON_COLOR_DATAURL, TRAY_ICON_MONO_DATAURL } from './tray-icon'
 import {
   createUnreadOverlayIconDataURL,
   createUnreadTrayIconDataURL,
@@ -12,6 +12,11 @@ export interface TrayDeps {
   quit: () => void
 }
 
+/** 托盘基础图（决议 #58）：mac 单色 template，Win/Linux 彩色填充版 */
+function trayBaseDataURL(): string {
+  return process.platform === 'darwin' ? TRAY_ICON_MONO_DATAURL : TRAY_ICON_COLOR_DATAURL
+}
+
 let flashTimer: ReturnType<typeof setInterval> | null = null
 let flashOn = false
 
@@ -21,7 +26,7 @@ let flashOn = false
  */
 export function setupTray(deps: TrayDeps): Tray | null {
   try {
-    const icon = nativeImage.createFromDataURL(TRAY_ICON_DATAURL)
+    const icon = nativeImage.createFromDataURL(trayBaseDataURL())
     if (process.platform === 'darwin') icon.setTemplateImage(true)
     const tray = new Tray(icon)
     tray.setToolTip('茶话间')
@@ -73,12 +78,12 @@ export function stopTrayUnreadFlash(tray?: Tray | null): void {
   }
   flashOn = false
   if (tray && process.platform !== 'darwin') {
-    tray.setImage(nativeImage.createFromDataURL(TRAY_ICON_DATAURL))
+    tray.setImage(nativeImage.createFromDataURL(trayBaseDataURL()))
   }
 }
 
 function startTrayUnreadFlash(tray: Tray, count: number): void {
-  const baseIcon = nativeImage.createFromDataURL(TRAY_ICON_DATAURL)
+  const baseIcon = nativeImage.createFromDataURL(trayBaseDataURL())
   const unreadIcon = nativeImage.createFromDataURL(createUnreadTrayIconDataURL(count))
   tray.setImage(unreadIcon)
   flashOn = true

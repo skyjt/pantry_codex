@@ -1,7 +1,7 @@
 {
   "name": "pantry",
   "productName": "茶话间",
-  "version": "0.5.21",
+  "version": "0.5.22",
   "description": "茶话间（Pantry）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
   "private": true,
   "main": "./out/main/index.js",
@@ -77,7 +77,7 @@
       "artifactName": "Pantry-${version}-win-${arch}-portable.${ext}"
     },
     "linux": {
-      "icon": "build/icons/pantry-logo-icon.png",
+      "icon": "build/icons/linux",
       "maintainer": "Pantry Maintainers <pantry-maintainers@example.invalid>",
       "target": [
         {
@@ -94,7 +94,10 @@
         }
       ],
       "category": "Network",
-      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}",
+      "desktop": {
+        "StartupWMClass": "pantry"
+      }
     },
     "deb": {
       "depends": [
@@ -115,7 +118,13 @@
         "zip"
       ],
       "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/icons/linux/256x256.png",
+        "to": "icons/pantry.png"
+      }
+    ]
   },
   "devDependencies": {
     "@electron/rebuild": "3.6.0",

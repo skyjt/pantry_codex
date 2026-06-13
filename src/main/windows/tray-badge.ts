@@ -3,9 +3,11 @@ import { deflateSync } from 'node:zlib'
 const SIZE = 32
 const OVERLAY_SIZE = 16
 const VIEWBOX = 64
-const MARK_SCALE = 0.82
+// 与 scripts/gen-tray-icon.mjs 彩色版一致（决议 #58）：茶青圆角块 + 白杯；
+// 本文件只为 Windows / Linux 生成未读闪烁帧（macOS 走菜单栏数字，不进这里）。
+const MARK_SCALE = 0.78
 const MARK_CENTER = 32
-const BASE_COLOR = [0x11, 0x11, 0x11] as const
+const PRIMARY = [0x3d, 0x8b, 0x6b] as const
 const BADGE_COLOR = [0xfa, 0x51, 0x51] as const
 const WHITE = [0xff, 0xff, 0xff] as const
 const aa = 1.25
@@ -118,10 +120,12 @@ function renderTrayBitmap(count: number): { size: number; raw: Buffer } {
   const raw = emptyRaw(SIZE)
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      const px = scaledMarkCoord(((x + 0.5) / SIZE) * VIEWBOX)
-      const py = scaledMarkCoord(((y + 0.5) / SIZE) * VIEWBOX)
-      const alpha = markAlpha(px, py)
-      paint(raw, SIZE, x, y, BASE_COLOR, Math.round(alpha * 255))
+      const vx = ((x + 0.5) / SIZE) * VIEWBOX
+      const vy = ((y + 0.5) / SIZE) * VIEWBOX
+      const block = fillAlpha(roundedRectSdf(vx, vy, 2, 2, 60, 60, 14))
+      paint(raw, SIZE, x, y, PRIMARY, Math.round(block * 255))
+      const alpha = markAlpha(scaledMarkCoord(vx), scaledMarkCoord(vy))
+      paintOver(raw, SIZE, x, y, WHITE, Math.round(alpha * 255))
     }
   }
   drawBadge(raw, SIZE, unreadBadgeText(count))

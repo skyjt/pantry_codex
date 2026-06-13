@@ -1,10 +1,19 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
 
 // 设置独立小窗（决议 #3 审美轮）：640×480，左分组导航；
 // 复用同一渲染包，经 #/settings 哈希路由挂载 SettingsApp。
 
 let win: BrowserWindow | null = null
+
+/** Linux 窗口图标（决议 #58）：与主窗同款，任务栏不依赖 desktop 关联 */
+function linuxWindowIcon(): { icon: string } | Record<string, never> {
+  if (process.platform !== 'linux') return {}
+  const icon = app.isPackaged
+    ? join(process.resourcesPath, 'icons/pantry.png')
+    : join(app.getAppPath(), 'build/icons/linux/256x256.png')
+  return { icon }
+}
 
 export function openSettingsWindow(parent: BrowserWindow | null): void {
   if (win && !win.isDestroyed()) {
@@ -25,6 +34,7 @@ export function openSettingsWindow(parent: BrowserWindow | null): void {
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 10 } }
       : { frame: false }),
+    ...linuxWindowIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

@@ -123,6 +123,15 @@ if (!gotLock) {
     return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null
   }
 
+  /** Linux 窗口图标（决议 #58）：显式设置 _NET_WM_ICON，任务栏不依赖桌面环境的 desktop 关联 */
+  function linuxWindowIcon(): { icon: string } | Record<string, never> {
+    if (process.platform !== 'linux') return {}
+    const icon = app.isPackaged
+      ? join(process.resourcesPath, 'icons/pantry.png')
+      : join(app.getAppPath(), 'build/icons/linux/256x256.png')
+    return { icon }
+  }
+
   function showMainWindow(): void {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
@@ -522,6 +531,7 @@ if (!gotLock) {
       ...(process.platform === 'darwin'
         ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 68, y: 10 } }
         : { frame: false }),
+      ...linuxWindowIcon(),
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         contextIsolation: true,
@@ -588,6 +598,12 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.winIsMaximized, (event): boolean => {
     return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
+  })
+
+  // 决议 #59：自绘关闭按钮唯一入口。主进程 close() 走标准流程触发 close 事件，
+  // 主窗的"关闭进托盘"拦截才有机会执行；DOM window.close() 会 CloseImmediately 绕过。
+  ipcMain.handle(IpcChannels.winClose, (event): void => {
+    BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
   // Linux JS 拖拽（决议 #52）：CSS 拖拽区在 Linux 命中不可靠（UOS 实测吞点击），
