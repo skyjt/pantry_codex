@@ -2260,7 +2260,9 @@ async function onDrop(event: DragEvent): Promise<void> {
   line-height: 1.5;
   background: transparent;
   color: var(--text-1);
-  padding: 0;
+  /* 顶部留白（决议 #61）：Win7 微软雅黑 ascent 偏高，line-height 的顶部 half-leading
+     不足，首行字形与 placeholder 顶部会被裁几像素；镜像层须用同一 padding 保持对齐 */
+  padding: 5px 0 0;
   user-select: text;
 }
 .input.mirror-active {
@@ -2276,6 +2278,8 @@ async function onDrop(event: DragEvent): Promise<void> {
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+  /* 必须与 .input 的 padding 完全一致，否则镜像 emoji 与光标错位（决议 #61） */
+  padding: 5px 0 0;
   color: var(--text-1);
   font-family:
     'PantryEmojiBlank',
