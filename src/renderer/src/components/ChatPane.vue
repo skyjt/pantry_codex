@@ -124,8 +124,8 @@ const mentionMembers = computed(() =>
 const inputPlaceholder = computed(() => {
   if (!canSend.value) return '你已不在该讨论组，无法发言'
   return settings.value?.sendKey === 'ctrlEnter'
-    ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图直接发送'
-    : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图直接发送'
+    ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图/文件直接发送'
+    : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图/文件直接发送'
 })
 const draftEmojiParts = computed(() => splitEmojiText(draft.value))
 const draftUsesEmojiMirror = computed(() => draftEmojiParts.value.some((part) => part.emoji))
@@ -842,9 +842,22 @@ async function sendImage(): Promise<void> {
   }
 }
 
-/** 截图 Ctrl+V：剪贴板里的图片直接发送（F-MSG-3） */
+/** Ctrl+V 粘贴：复制的文件按路径发（保留文件名/类型），截图位图按 bytes 发（F-MSG-3 / 决议 #76） */
 async function onPaste(event: ClipboardEvent): Promise<void> {
   if (!canSendMedia.value || !event.clipboardData) return
+  // 1) 从文件管理器复制的真实文件：Electron 为剪贴板 File 注入 path（与拖拽同机制）
+  const paths: string[] = []
+  for (const file of Array.from(event.clipboardData.files)) {
+    const p = (file as File & { path?: string }).path
+    if (p) paths.push(p)
+  }
+  if (paths.length > 0) {
+    event.preventDefault()
+    if (paths.length === 1 && isImagePath(paths[0])) await chatStore.sendImagePath(paths[0])
+    else await chatStore.sendFilePaths(paths)
+    return
+  }
+  // 2) 截图位图（无对应文件路径）：直接按图片 bytes 发送
   for (const item of Array.from(event.clipboardData.items)) {
     if (!item.type.startsWith('image/')) continue
     const file = item.getAsFile()
