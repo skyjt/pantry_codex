@@ -134,8 +134,32 @@ async function removeConv(): Promise<void> {
 .conv:hover {
   background: var(--line);
 }
-.conv.active {
-  background: rgba(61, 139, 107, 0.12);
+/* 选中当前会话：实心茶青 + 白字（决议 #71，微信式），一眼看清在哪个会话 */
+.conv.active,
+.conv.active:hover {
+  background: var(--primary);
+}
+.conv.active .conv-name {
+  color: #fff;
+}
+.conv.active .conv-time,
+.conv.active .conv-preview {
+  color: rgba(255, 255, 255, 0.82);
+}
+.conv.active .mention {
+  color: #fff;
+}
+.conv.active .flag {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.7);
+}
+.conv.active .flag.muted {
+  color: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.conv.active .badge {
+  background: #fff;
+  color: var(--primary);
 }
 .conv-avatar {
   width: 38px;
