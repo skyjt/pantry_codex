@@ -558,6 +558,16 @@ if (!gotLock) {
   }
 
   function createMainWindow(): void {
+    // dev 模式 mac Dock 显示茶杯图标（决议 #72）：打包版靠 .app 内嵌 icns，而 `npm run dev`
+    // 跑未打包 Electron、Dock 是其默认图标；运行时 setIcon 仅补 dev，打包版不覆盖（icns 更精细）。
+    if (process.platform === 'darwin' && !app.isPackaged) {
+      try {
+        app.dock?.setIcon(join(app.getAppPath(), 'build/icons/pantry-logo-icon.png'))
+      } catch {
+        // 图标缺失不致命
+      }
+    }
+
     mainWindow = new BrowserWindow({
       width: 960,
       height: 640,
