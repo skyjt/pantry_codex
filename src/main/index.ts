@@ -14,7 +14,7 @@ import {
   type Tray
 } from 'electron'
 import { networkInterfaces, release } from 'node:os'
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import {
@@ -280,18 +280,19 @@ if (!gotLock) {
           return
         }
         mkdirSync(dir, { recursive: true })
-        writeFileSync(
-          file,
-          [
-            '[Desktop Entry]',
-            'Type=Application',
-            'Name=茶话间',
-            `Exec="${process.execPath}"`,
-            'Terminal=false',
-            'X-GNOME-Autostart-enabled=true',
-            ''
-          ].join('\n')
-        )
+        const content = [
+          '[Desktop Entry]',
+          'Type=Application',
+          'Name=茶话间',
+          `Exec="${process.execPath}"`,
+          'Terminal=false',
+          'X-GNOME-Autostart-enabled=true',
+          ''
+        ].join('\n')
+        // 内容未变则跳过写入：此前每次启动无条件重写 autostart 文件，
+        // UOS/部分桌面会检测到写入并弹"茶话间 正在设置开机自启动"提示（决议 #79）
+        const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
+        if (existing !== content) writeFileSync(file, content)
         return
       }
       app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true })
