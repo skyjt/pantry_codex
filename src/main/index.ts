@@ -59,6 +59,7 @@ import { UdpChannel } from './net/udp'
 import { PeerRegistry } from './net/peer-registry'
 import { Discovery, type ManualPeer } from './net/discovery'
 import { Messenger } from './net/messenger'
+import { PeerClock } from './net/peer-clock'
 import { ChatService } from './services/chat'
 import type { PeerRecord } from './net/peer-registry'
 
@@ -326,7 +327,9 @@ if (!gotLock) {
     ]
     const udp = new UdpChannel({ port: udpPort })
     registry = new PeerRegistry(state.nodeId)
-    discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers: allManual })
+    // 时钟偏移矫正（决议 #65）：发现层观测各节点时钟差，chat/groups 显示时矫正到本机钟
+    const peerClock = new PeerClock()
+    discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers: allManual, peerClock })
 
     // 存储层降级链：文件库 → 内存库（功能照常、不持久）→ 全不可用则只剩发现功能
     try {
@@ -357,6 +360,7 @@ if (!gotLock) {
         msgRepo: new MsgRepo(db),
         groupRepo: new GroupRepo(db),
         messenger,
+        peerClock,
         probe: (peerId) => {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
         }
@@ -407,7 +411,8 @@ if (!gotLock) {
         convRepo: new ConvRepo(db),
         msgRepo: new MsgRepo(db),
         groupRepo: new GroupRepo(db),
-        getSelfIp: currentLocalIpv4
+        getSelfIp: currentLocalIpv4,
+        peerClock
       })
       groups.on('message', onMessage)
       groups.on('convs', onConvs)

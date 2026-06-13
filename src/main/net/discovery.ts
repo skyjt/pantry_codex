@@ -13,6 +13,7 @@ import {
   type Timings
 } from '../../shared/protocol'
 import { makeEnvelope } from './codec'
+import type { PeerClock } from './peer-clock'
 import type { UdpChannel } from './udp'
 import type { PeerRegistry } from './peer-registry'
 
@@ -29,6 +30,8 @@ export interface DiscoveryOptions {
   manualPeers?: ManualPeer[]
   /** 测试注入：缩短时序 */
   timings?: Partial<Timings>
+  /** 时钟偏移矫正（决议 #65）：收到实时发现报文时观测各节点与本机的时钟差 */
+  peerClock?: PeerClock
 }
 
 /**
@@ -41,6 +44,7 @@ export class Discovery {
   private readonly profile: Profile
   private readonly manualPeers: ManualPeer[]
   private readonly t: Timings
+  private readonly peerClock?: PeerClock
 
   private presenceSeq = 0
   private presenceTimer: ReturnType<typeof setInterval> | null = null
@@ -58,6 +62,7 @@ export class Discovery {
     this.profile = opts.profile
     this.manualPeers = opts.manualPeers ?? []
     this.t = { ...TIMINGS, ...opts.timings }
+    this.peerClock = opts.peerClock
     this.udp.on('envelope', (env: Envelope, known: boolean, rinfo: RemoteInfo) => {
       if (known) this.handle(env, rinfo)
       // 未知类型按协议忽略（向前兼容）
@@ -198,6 +203,10 @@ export class Discovery {
 
   private handle(env: Envelope, rinfo: RemoteInfo): void {
     if (env.from === this.selfId) return // 自己的广播回环
+
+    // 实时发现报文校准时钟偏移（决议 #65）：entry/alive/profile/presence 均即时发出，
+    // 其 ts ≈ 本机收到时刻，是估算对端时钟差最稳的来源（聊天消息可能稀疏）。
+    this.peerClock?.observe(env.from, env.ts, Date.now())
 
     switch (env.type) {
       case MSG_TYPES.entry: {

@@ -17,6 +17,7 @@ import type { Messenger } from '../net/messenger'
 import { ConvRepo, convRowToView } from '../store/conv-repo'
 import { MsgRepo, msgRowToView } from '../store/msg-repo'
 import { GroupRepo } from '../store/group-repo'
+import type { PeerClock } from '../net/peer-clock'
 
 // 讨论组编排（§7.4 / F-MSG-4）：
 // 群消息 = 同一信封逐成员单播（离线走补发）；元数据 LWW；
@@ -31,6 +32,8 @@ export interface GroupsDeps {
   groupRepo: GroupRepo
   /** 当前本机用于“创建 IP 管理”的 IPv4；测试可注入 */
   getSelfIp?: () => string
+  /** 时钟偏移矫正（决议 #65）：把群成员消息显示时间换算到本机钟 */
+  peerClock?: PeerClock
 }
 
 type GroupPatch = { name?: string; add?: string[]; remove?: string[]; adminPassword?: string }
@@ -196,6 +199,9 @@ export class GroupsService extends EventEmitter {
     if (payload.kind !== 'group-text' || !payload.groupId) return
 
     const convId = this.deps.convRepo.ensureGroup(payload.groupId)
+    // 实时群消息校准时钟偏移；显示时间矫正到本机钟（决议 #65）；排序仍用本地 seq
+    if (!payload.resend) this.deps.peerClock?.observe(env.from, env.ts, Date.now())
+    const ts = this.deps.peerClock?.correct(env.from, env.ts) ?? env.ts
     const inserted = this.deps.msgRepo.insert({
       id: env.id,
       convId,
@@ -203,11 +209,11 @@ export class GroupsService extends EventEmitter {
       isMine: false,
       kind: 'text',
       content: payload.text,
-      ts: env.ts,
+      ts,
       status: 'sent'
     })
     if (inserted) {
-      this.deps.convRepo.bump(convId, env.ts)
+      this.deps.convRepo.bump(convId, ts)
       this.deps.convRepo.incUnread(convId)
       const mentioned = Array.isArray(payload.mentions) && payload.mentions.includes(this.deps.selfId)
       if (mentioned) this.deps.convRepo.markMentioned(convId)

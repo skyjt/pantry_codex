@@ -13,6 +13,7 @@ import type { Messenger } from '../net/messenger'
 import { ConvRepo, convRowToView, type ConvRow } from '../store/conv-repo'
 import { GroupRepo } from '../store/group-repo'
 import { MsgRepo, msgRowToView, type MsgRow } from '../store/msg-repo'
+import type { PeerClock } from '../net/peer-clock'
 
 // 聊天用例编排（tech-design §3）：发消息 = 写库 → 网络 → 状态回推。
 // 事件出口：'message'（新消息入库）、'status'（发送状态变化）、'convs'（会话列表变化）。
@@ -26,6 +27,8 @@ export interface ChatDeps {
   messenger: Messenger
   /** 打开会话时的探活回调（F-DISC-8），由 index 接 discovery.probeNode */
   probe?: (peerId: string) => void
+  /** 时钟偏移矫正（决议 #65）：把对方消息显示时间换算到本机钟 */
+  peerClock?: PeerClock
 }
 
 const toConvView = convRowToView
@@ -192,6 +195,9 @@ export class ChatService extends EventEmitter {
     }
     if (payload.kind !== 'text') return
     const convId = this.deps.convRepo.ensureSingle(env.from)
+    // 实时消息（非补发）顺带校准时钟偏移；显示时间矫正到本机钟（决议 #65）；排序仍用本地 seq
+    if (!payload.resend) this.deps.peerClock?.observe(env.from, env.ts, Date.now())
+    const ts = this.deps.peerClock?.correct(env.from, env.ts) ?? env.ts
     const inserted = this.deps.msgRepo.insert({
       id: env.id,
       convId,
@@ -199,11 +205,11 @@ export class ChatService extends EventEmitter {
       isMine: false,
       kind: 'text',
       content: payload.text,
-      ts: env.ts, // 显示用发送方时间；排序用本地 seq（时钟漂移兜底）
+      ts,
       status: 'sent'
     })
     if (!inserted) return // 持久化去重之外的最后一道闸（messages 主键幂等）
-    this.deps.convRepo.bump(convId, env.ts)
+    this.deps.convRepo.bump(convId, ts)
     this.deps.convRepo.incUnread(convId)
     const row = this.deps.msgRepo.get(env.id)
     if (row) this.emit('message', toMsgView(row))
