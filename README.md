@@ -1,10 +1,47 @@
-# 茶话间 (Pantry)
+<div align="center">
 
-> 纯内网、基于 IP 的局域网即时通讯与文件传输工具
+<img src="build/icons/pantry-logo-icon.svg" alt="茶话间 Logo" width="120" height="120" />
 
-**茶话间**是一款面向**纯内网环境**的桌面聊天与文件传输工具：不依赖互联网、不依赖任何中心服务器。启动后自动发现同一局域网内的其他在线用户，即可收发消息、互传文件。所有数据只在内网中流动，适合办公内网、隔离网络、实验室等不便或不允许连接外网的场景。
+<h1>茶话间 &nbsp;·&nbsp; Pantry</h1>
 
-产品形态参考内网通、飞秋（FeiQ）、IP Messenger（ipmsg）、iptux。
+<p><b>纯内网、基于 IP 的局域网即时通讯与文件传输工具</b></p>
+
+<p>
+  <a href="https://github.com/skyjt/pantry_codex/releases/latest">
+    <img src="https://img.shields.io/github/v/release/skyjt/pantry_codex?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-3D8B6B?style=flat-square" alt="MIT License" />
+  </a>
+  <a href="https://github.com/skyjt/pantry_codex/releases">
+    <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%207%2B%20%7C%20Linux%20%7C%20macOS-0366d6?style=flat-square" alt="平台" />
+  </a>
+  <img src="https://img.shields.io/badge/Electron-22-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron 22" />
+</p>
+
+<p>
+  <a href="#特性">特性</a>
+  &nbsp;·&nbsp;
+  <a href="#平台支持">平台支持</a>
+  &nbsp;·&nbsp;
+  <a href="#安装">安装</a>
+  &nbsp;·&nbsp;
+  <a href="#使用">使用</a>
+  &nbsp;·&nbsp;
+  <a href="#工作原理">工作原理</a>
+  &nbsp;·&nbsp;
+  <a href="#安全性">安全性</a>
+  &nbsp;·&nbsp;
+  <a href="#参与开发">参与开发</a>
+</p>
+
+</div>
+
+---
+
+**茶话间**是一款面向**纯内网环境**的桌面聊天与文件传输工具——不依赖互联网，不依赖任何中心服务器。启动后自动发现同一局域网内的其他在线用户，即可收发消息、互传文件。所有数据只在内网中流动，适合办公内网、隔离网络、实验室等不便或不允许连接外网的场景。
+
+> 产品形态参考内网通、飞秋（FeiQ）、IP Messenger（ipmsg）、iptux。
 
 ## 特性
 
@@ -27,11 +64,17 @@
 
 ## 安装
 
-前往 [Releases](https://github.com/skyjt/pantry_codex/releases) 下载对应平台的安装包：
+前往 [**Releases**](https://github.com/skyjt/pantry_codex/releases) 下载对应平台的安装包。
 
-- **Windows** —— 运行 NSIS 安装包，或解压便携版直接使用。Windows 7 需为 **SP1 且 64 位**；若启用了代码签名，未打补丁的 Win7 需先安装系统更新 KB4474419。
-- **Linux** —— `.deb` 适用于 Debian / Ubuntu / UOS 等；其他发行版可用 `AppImage`（`chmod +x` 后运行）。
-- **macOS** —— 打开 `.dmg` 拖入「应用程序」。内网分发若未签名 / 公证，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行 `xattr -dr com.apple.quarantine /Applications/茶话间.app` 去除隔离属性。
+**Windows** — 运行 NSIS 安装包，或解压便携版直接使用。Windows 7 需为 **SP1 且 64 位**；若启用了代码签名，未打补丁的 Win7 需先安装系统更新 KB4474419。
+
+**Linux** — `.deb` 适用于 Debian / Ubuntu / UOS 等；其他发行版可用 `AppImage`（`chmod +x` 后运行）。
+
+**macOS** — 打开 `.dmg` 拖入「应用程序」。内网分发若未签名 / 公证，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/茶话间.app
+```
 
 ## 使用
 
@@ -72,11 +115,13 @@
 
 欢迎参与。源码构建、开发约定与本机联调说明见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
+如遇问题或有功能建议，请在 [Issues](https://github.com/skyjt/pantry_codex/issues) 提交。
+
 ## 参考项目
 
-- [IP Messenger](https://ipmsg.org/)（ipmsg，内网 IM 协议鼻祖）
-- [iptux](https://github.com/iptux-src/iptux)（Linux 下的 ipmsg 兼容实现）
-- 飞秋（FeiQ）、内网通 —— Windows 平台流行的内网 IM，产品形态参考
+- [IP Messenger](https://ipmsg.org/) — ipmsg，内网 IM 协议鼻祖
+- [iptux](https://github.com/iptux-src/iptux) — Linux 下的 ipmsg 兼容实现
+- 飞秋（FeiQ）、内网通 — Windows 平台流行的内网 IM，产品形态参考
 
 ## 第三方资源
 
