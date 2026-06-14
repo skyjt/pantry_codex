@@ -8,7 +8,7 @@
 
 <p>
   <a href="https://github.com/skyjt/pantry_codex/releases/latest">
-    <img src="https://img.shields.io/github/v/release/skyjt/pantry_codex?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
+    <img src="https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v0.11.3-3D8B6B?style=flat-square&logo=github&logoColor=white" alt="最新版本 v0.11.3" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-3D8B6B?style=flat-square" alt="MIT License" />
