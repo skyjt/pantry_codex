@@ -18,9 +18,15 @@ Thumbs.db
 .vscode/
 .idea/
 
-# 会话笔记（Claude Code 本地记忆）
+# Claude Code 本地痕迹（会话记忆、本地配置，不公开）
 .remember/
+.claude/
 
 # 参考源码（克隆的外部仓库，不入库；获取方式见 references/readme.md）
 references/ipmsg/
 references/iptux/
+
+# 面向开发的内部文档（本地保留，不公开到 GitHub）
+docs/
+AGENTS.md
+CLAUDE.md
