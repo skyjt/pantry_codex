@@ -1830,8 +1830,6 @@ async function removeRange(cidr: string): Promise<void> {
 
 .about-logo {
   margin-bottom: 14px;
-  /* drop-shadow 跟随 logo 圆角方块的真实轮廓（box-shadow 只会按矩形包围盒） */
-  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.12));
 }
 
 .about-hero h2 {

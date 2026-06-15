@@ -1,16 +1,12 @@
 import { deflateSync } from 'node:zlib'
+import { TRAY_ICON_COLOR_RGBA_BASE64 } from './tray-icon'
 
 const SIZE = 32
 const OVERLAY_SIZE = 16
-const VIEWBOX = 64
-// 与 scripts/gen-tray-icon.mjs 彩色版一致（决议 #58）：茶青圆角块 + 白杯；
-// 本文件只为 Windows / Linux 生成未读闪烁帧（macOS 走菜单栏数字，不进这里）。
-const MARK_SCALE = 0.78
-const MARK_CENTER = 32
-const PRIMARY = [0x3d, 0x8b, 0x6b] as const
 const BADGE_COLOR = [0xfa, 0x51, 0x51] as const
 const WHITE = [0xff, 0xff, 0xff] as const
 const aa = 1.25
+const BASE_COLOR_RGBA = Buffer.from(TRAY_ICON_COLOR_RGBA_BASE64, 'base64')
 
 const DIGITS: Record<string, string[]> = {
   '0': ['111', '101', '101', '101', '111'],
@@ -48,32 +44,8 @@ function clamp(v: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, v))
 }
 
-function strokeAlpha(distance: number): number {
-  return clamp(0.5 - distance / aa)
-}
-
-function scaledMarkCoord(v: number): number {
-  return MARK_CENTER + (v - MARK_CENTER) / MARK_SCALE
-}
-
 function fillAlpha(distance: number): number {
   return clamp(0.5 - distance / aa)
-}
-
-function segmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const vx = bx - ax
-  const vy = by - ay
-  const wx = px - ax
-  const wy = py - ay
-  const len2 = vx * vx + vy * vy
-  const t = len2 === 0 ? 0 : clamp((wx * vx + wy * vy) / len2)
-  const dx = px - (ax + vx * t)
-  const dy = py - (ay + vy * t)
-  return Math.sqrt(dx * dx + dy * dy)
-}
-
-function capsule(px: number, py: number, ax: number, ay: number, bx: number, by: number, width: number): number {
-  return segmentDistance(px, py, ax, ay, bx, by) - width / 2
 }
 
 function roundedRectSdf(px: number, py: number, x: number, y: number, w: number, h: number, r: number): number {
@@ -82,50 +54,15 @@ function roundedRectSdf(px: number, py: number, x: number, y: number, w: number,
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r
 }
 
-function roundedRectStroke(
-  px: number,
-  py: number,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-  width: number
-): number {
-  return Math.abs(roundedRectSdf(px, py, x, y, w, h, r)) - width / 2
-}
-
-function handleStroke(px: number, py: number): number {
-  const dx = (px - 50.5) / 7.3
-  const dy = (py - 38) / 7.2
-  const angle = Math.atan2(dy, dx)
-  if (Math.abs(angle) > 1.65) return 99
-  return Math.abs(Math.sqrt(dx * dx + dy * dy) - 1) * 7.2 - 3.8 / 2
-}
-
-function markAlpha(px: number, py: number): number {
-  const distances = [
-    roundedRectStroke(px, py, 14, 22, 36, 28, 8, 3.8),
-    capsule(px, py, 20, 50, 20, 55, 3.8),
-    capsule(px, py, 20, 55, 27.5, 50, 3.8),
-    handleStroke(px, py),
-    capsule(px, py, 24, 31.5, 44, 31.5, 3.8),
-    capsule(px, py, 27.5, 15.5, 28.5, 9, 3.8),
-    capsule(px, py, 37.5, 15.5, 36.5, 9, 3.8)
-  ]
-  return Math.max(...distances.map(strokeAlpha))
-}
-
 function renderTrayBitmap(count: number): { size: number; raw: Buffer } {
+  if (BASE_COLOR_RGBA.length !== SIZE * SIZE * 4) {
+    throw new Error(`托盘底图 RGBA 尺寸异常: ${BASE_COLOR_RGBA.length}`)
+  }
   const raw = emptyRaw(SIZE)
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      const vx = ((x + 0.5) / SIZE) * VIEWBOX
-      const vy = ((y + 0.5) / SIZE) * VIEWBOX
-      const block = fillAlpha(roundedRectSdf(vx, vy, 2, 2, 60, 60, 14))
-      paint(raw, SIZE, x, y, PRIMARY, Math.round(block * 255))
-      const alpha = markAlpha(scaledMarkCoord(vx), scaledMarkCoord(vy))
-      paintOver(raw, SIZE, x, y, WHITE, Math.round(alpha * 255))
+      const src = (y * SIZE + x) * 4
+      paint(raw, SIZE, x, y, [BASE_COLOR_RGBA[src], BASE_COLOR_RGBA[src + 1], BASE_COLOR_RGBA[src + 2]], BASE_COLOR_RGBA[src + 3])
     }
   }
   drawBadge(raw, SIZE, unreadBadgeText(count))
@@ -200,47 +137,47 @@ function paint(raw: Buffer, size: number, x: number, y: number, color: readonly 
 function paintOver(raw: Buffer, size: number, x: number, y: number, color: readonly number[], alpha: number): void {
   if (x < 0 || y < 0 || x >= size || y >= size || alpha <= 0) return
   const offset = y * (1 + size * 4) + 1 + x * 4
-  const dstAlpha = raw[offset + 3] / 255
-  const srcAlpha = alpha / 255
-  const outAlpha = srcAlpha + dstAlpha * (1 - srcAlpha)
-  if (outAlpha <= 0) return
-  raw[offset] = Math.round((color[0] * srcAlpha + raw[offset] * dstAlpha * (1 - srcAlpha)) / outAlpha)
-  raw[offset + 1] = Math.round((color[1] * srcAlpha + raw[offset + 1] * dstAlpha * (1 - srcAlpha)) / outAlpha)
-  raw[offset + 2] = Math.round((color[2] * srcAlpha + raw[offset + 2] * dstAlpha * (1 - srcAlpha)) / outAlpha)
-  raw[offset + 3] = Math.round(outAlpha * 255)
+  const dstA = raw[offset + 3] / 255
+  const srcA = alpha / 255
+  const outA = srcA + dstA * (1 - srcA)
+  if (outA <= 0) return
+  raw[offset] = Math.round((color[0] * srcA + raw[offset] * dstA * (1 - srcA)) / outA)
+  raw[offset + 1] = Math.round((color[1] * srcA + raw[offset + 1] * dstA * (1 - srcA)) / outA)
+  raw[offset + 2] = Math.round((color[2] * srcA + raw[offset + 2] * dstA * (1 - srcA)) / outA)
+  raw[offset + 3] = Math.round(outA * 255)
 }
 
-const CRC_TABLE = new Int32Array(256).map((_, n) => {
-  let c = n
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-  return c
-})
-
 function crc32(buf: Buffer): number {
-  let c = -1
-  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8)
-  return (c ^ -1) >>> 0
+  let c = 0xffffffff
+  for (const b of buf) {
+    c ^= b
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+  }
+  return (c ^ 0xffffffff) >>> 0
 }
 
 function chunk(type: string, data: Buffer): Buffer {
-  const len = Buffer.alloc(4)
-  len.writeUInt32BE(data.length)
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
-  const crc = Buffer.alloc(4)
-  crc.writeUInt32BE(crc32(body))
-  return Buffer.concat([len, body, crc])
+  const out = Buffer.alloc(12 + data.length)
+  out.writeUInt32BE(data.length, 0)
+  out.write(type, 4, 4, 'ascii')
+  data.copy(out, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
+  return out
 }
 
-function encodePng(bitmap: { size: number; raw: Buffer }): Buffer {
+function encodePng(image: { size: number; raw: Buffer }): Buffer {
   const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(bitmap.size, 0)
-  ihdr.writeUInt32BE(bitmap.size, 4)
-  ihdr[8] = 8
-  ihdr[9] = 6
+  ihdr.writeUInt32BE(image.size, 0)
+  ihdr.writeUInt32BE(image.size, 4)
+  ihdr[8] = 8 // bit depth
+  ihdr[9] = 6 // RGBA
+  ihdr[10] = 0
+  ihdr[11] = 0
+  ihdr[12] = 0
   return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('89504e470d0a1a0a', 'hex'),
     chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(bitmap.raw)),
+    chunk('IDAT', deflateSync(image.raw)),
     chunk('IEND', Buffer.alloc(0))
   ])
 }
