@@ -76,6 +76,44 @@ withDefaults(
       <path d="m6.8 16 4-4 3 3 2-2 3 3" />
       <circle cx="15.8" cy="9.2" r="1" />
     </g>
+    <g v-else-if="name === 'zoom-in'">
+      <circle cx="10.6" cy="10.6" r="5.5" />
+      <path d="m14.6 14.6 4 4" />
+      <path d="M10.6 8.1v5" />
+      <path d="M8.1 10.6h5" />
+    </g>
+    <g v-else-if="name === 'zoom-out'">
+      <circle cx="10.6" cy="10.6" r="5.5" />
+      <path d="m14.6 14.6 4 4" />
+      <path d="M8.1 10.6h5" />
+    </g>
+    <g v-else-if="name === 'fit-screen'">
+      <path d="M5.5 9V5.5H9" />
+      <path d="M18.5 9V5.5H15" />
+      <path d="M5.5 15v3.5H9" />
+      <path d="M18.5 15v3.5H15" />
+      <rect x="8" y="8" width="8" height="8" rx="1.5" />
+    </g>
+    <g v-else-if="name === 'actual-size'">
+      <rect x="5.5" y="5.5" width="13" height="13" rx="2" />
+      <path d="M8.4 9.2h2.2v5.6" />
+      <path d="M8.4 14.8h4.4" />
+      <path d="M15.4 9.2h.1" />
+      <path d="M15.4 14.8h.1" />
+    </g>
+    <g v-else-if="name === 'rotate-left'">
+      <path d="M7.2 8.2H4.5V5.5" />
+      <path d="M4.8 8.1A7.1 7.1 0 1 1 5 16.2" />
+    </g>
+    <g v-else-if="name === 'rotate-right'">
+      <path d="M16.8 8.2h2.7V5.5" />
+      <path d="M19.2 8.1A7.1 7.1 0 1 0 19 16.2" />
+    </g>
+    <g v-else-if="name === 'save'">
+      <path d="M12 4.8v8.4" />
+      <path d="m8.8 10.2 3.2 3.2 3.2-3.2" />
+      <path d="M5.5 14.6v3.9h13v-3.9" />
+    </g>
     <g v-else-if="name === 'file' || name === 'document'">
       <path d="M7 4.5h6.5L17 8v11.5H7V4.5Z" />
       <path d="M13.5 4.5V8H17" />
