@@ -34,6 +34,8 @@ export interface GroupsDeps {
   getSelfIp?: () => string
   /** 时钟偏移矫正（决议 #65）：把群成员消息显示时间换算到本机钟 */
   peerClock?: PeerClock
+  /** 本地显示名解析：群系统提示优先用备注，其次昵称（决议 #87） */
+  resolveDisplayName?: (nodeId: string) => string
 }
 
 type GroupPatch = { name?: string; add?: string[]; remove?: string[]; adminPassword?: string }
@@ -125,6 +127,9 @@ export class GroupsService extends EventEmitter {
       updatedTs: Date.now()
     }
     this.deps.groupRepo.save(next)
+    if (next.name !== meta.name) {
+      this.insertGroupRenameTip(next, meta.name, next.name, this.deps.selfId, next.updatedTs, false)
+    }
     // 新旧成员全集都要收到 info：被移出者借此得知（§7.4）
     this.broadcastInfo(next, [...new Set([...oldMembers, ...members])])
     this.emitConvs()
@@ -248,6 +253,16 @@ export class GroupsService extends EventEmitter {
       const applied = this.deps.groupRepo.applyRemote(incoming)
       if (applied) {
         this.deps.convRepo.ensureGroup(incoming.groupId)
+        if (local && incoming.name !== local.name) {
+          this.insertGroupRenameTip(
+            incoming,
+            local.name,
+            incoming.name,
+            incoming.updatedBy,
+            incoming.updatedTs,
+            incoming.members.includes(this.deps.selfId)
+          )
+        }
         this.emitConvs()
         this.emit('group', this.toView(incoming))
       }
@@ -281,6 +296,44 @@ export class GroupsService extends EventEmitter {
 
   private emitConvs(): void {
     this.emit('convs', this.deps.convRepo.list().map(convRowToView))
+  }
+
+  private insertGroupRenameTip(
+    meta: GroupMeta,
+    oldName: string,
+    newName: string,
+    actorId: string,
+    ts: number,
+    countUnread: boolean
+  ): void {
+    const convId = this.deps.convRepo.ensureGroup(meta.groupId)
+    const actor = this.renameActorLabel(actorId)
+    const content =
+      actor === '你'
+        ? `你把群名「${oldName}」改成了「${newName}」`
+        : `${actor}把群名「${oldName}」改成了「${newName}」`
+    const id = `group:${meta.groupId}:rename:${meta.rev}`
+    const inserted = this.deps.msgRepo.insert({
+      id,
+      convId,
+      senderId: actorId,
+      isMine: false,
+      kind: 'system',
+      content,
+      ts,
+      status: 'sent'
+    })
+    if (!inserted) return
+    this.deps.convRepo.bump(convId, ts)
+    if (countUnread) this.deps.convRepo.incUnread(convId)
+    const row = this.deps.msgRepo.get(id)
+    if (row) this.emit('message', msgRowToView(row))
+  }
+
+  private renameActorLabel(actorId: string): string {
+    if (actorId === this.deps.selfId) return '你'
+    const resolved = this.deps.resolveDisplayName?.(actorId).trim()
+    return resolved || '有人'
   }
 
   private selfIp(): string {

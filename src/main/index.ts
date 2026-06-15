@@ -318,6 +318,12 @@ if (!gotLock) {
     }
   }
 
+  function resolvePeerDisplayName(nodeId: string): string {
+    const remark = remarks.get(nodeId)?.trim()
+    if (remark) return remark
+    return registry?.get(nodeId)?.profile.nick.trim() ?? ''
+  }
+
   function peerViews(): PeerView[] {
     return registry ? registry.list().map(toPeerView) : []
   }
@@ -420,7 +426,8 @@ if (!gotLock) {
         msgRepo: new MsgRepo(db),
         groupRepo: new GroupRepo(db),
         getSelfIp: currentLocalIpv4,
-        peerClock
+        peerClock,
+        resolveDisplayName: resolvePeerDisplayName
       })
       groups.on('message', onMessage)
       groups.on('convs', onConvs)

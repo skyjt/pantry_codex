@@ -24,6 +24,8 @@ class FakeMessenger extends EventEmitter {
 }
 
 class FakeConvRepo {
+  bump(): void {}
+  incUnread(): void {}
   ensureGroup(groupId: string): string {
     return `group:${groupId}`
   }
@@ -70,7 +72,7 @@ function service(opts: {
     selfId: 'node-self',
     messenger: (opts.messenger ?? new FakeMessenger()) as unknown as Messenger,
     convRepo: new FakeConvRepo() as unknown as ConvRepo,
-    msgRepo: {} as MsgRepo,
+    msgRepo: { insert: () => false, get: () => undefined } as unknown as MsgRepo,
     groupRepo: (opts.groupRepo ?? new FakeGroupRepo()) as unknown as GroupRepo,
     getSelfIp: () => opts.selfIp
   })
@@ -147,5 +149,82 @@ describe('GroupsService 群管理权限', () => {
     })
     messenger.emit('incoming', leave, { address: '10.0.0.2' })
     expect(repo.get('g-1')?.members).toEqual(['node-self'])
+  })
+})
+
+class FakeMsgRepo {
+  inserted: Array<{ id: string; kind: string; content: string; convId: string }> = []
+  insert(m: { id: string; kind: string; content: string; convId: string }): boolean {
+    if (this.inserted.some((x) => x.id === m.id)) return false
+    this.inserted.push(m)
+    return true
+  }
+  get(id: string): { id: string; kind: string; content: string; convId: string } | undefined {
+    return this.inserted.find((x) => x.id === id)
+  }
+}
+
+function groupInfos(messenger: FakeMessenger): Envelope[] {
+  return messenger.sent
+    .filter((s) => s.env.type === 'group' && (s.env.payload as GroupPayload).op === 'info')
+    .map((s) => s.env)
+}
+
+describe('GroupsService 群改名系统提示（决议 #87）', () => {
+  function member(selfId: string, selfIp: string, displayName?: string) {
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const svc = new GroupsService({
+      selfId,
+      messenger: messenger as unknown as Messenger,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      getSelfIp: () => selfIp,
+      resolveDisplayName: displayName ? () => displayName : undefined
+    })
+    return { svc, messenger, msgRepo }
+  }
+
+  it('改名人自己看到“你把群名…”系统提示', () => {
+    const a = member('node-a', '10.0.0.1')
+    const g = a.svc.createGroup('茶水间', ['node-b'])!
+    a.svc.updateGroup(g.groupId, { name: '午餐群' })
+    const sys = a.msgRepo.inserted.filter((m) => m.kind === 'system')
+    expect(sys).toHaveLength(1)
+    expect(sys[0].content).toBe('你把群名「茶水间」改成了「午餐群」')
+    expect(sys[0].convId).toBe(`group:${g.groupId}`)
+  })
+
+  it('远端成员收到改名 info 后本地生成系统提示并幂等', () => {
+    const a = member('node-a', '10.0.0.1')
+    const g = a.svc.createGroup('茶水间', ['node-b'])!
+    a.svc.updateGroup(g.groupId, { name: '午餐群' })
+
+    const b = member('node-b', '10.0.0.2', '阿明')
+    const infos = groupInfos(a.messenger)
+    // 依次投递建群(rev1)与改名(rev2)：首条让 B 认识群，第二条触发改名提示
+    for (const env of infos) {
+      b.messenger.emit('incoming', env, { address: '10.0.0.1' })
+    }
+    const sysB = b.msgRepo.inserted.filter((m) => m.kind === 'system')
+    expect(sysB).toHaveLength(1)
+    expect(sysB[0].content).toBe('阿明把群名「茶水间」改成了「午餐群」')
+
+    // 幂等：重复投递改名 info 不再追加系统提示
+    const renameInfo = infos[infos.length - 1]
+    b.messenger.emit('incoming', renameInfo, { address: '10.0.0.1' })
+    expect(b.msgRepo.inserted.filter((m) => m.kind === 'system')).toHaveLength(1)
+  })
+
+  it('首次入群（本地无该群）不误报改名提示', () => {
+    const a = member('node-a', '10.0.0.1')
+    a.svc.createGroup('研发组', ['node-b'])!
+    const b = member('node-b', '10.0.0.2', '阿明')
+    // 只投递建群 info（rev1）：B 首次认识该群，不应产生改名系统提示
+    for (const env of groupInfos(a.messenger)) {
+      b.messenger.emit('incoming', env, { address: '10.0.0.1' })
+    }
+    expect(b.msgRepo.inserted.filter((m) => m.kind === 'system')).toHaveLength(0)
   })
 })
