@@ -1981,12 +1981,13 @@ async function onDrop(event: DragEvent): Promise<void> {
 .peer-profile-scope {
   position: relative;
   min-width: 0;
-  /* 容纳「头像 + 名字 / 在线·完整 IP」两行，避免 IP 被 ellipsis 截掉（决议 #82） */
-  max-width: 460px;
-  flex: 0 1 auto;
+  /* 容纳「头像 + 名字 / 在线·完整 IP」两行，避免 IP 被截断（决议 #88） */
+  flex: 1 1 560px;
+  max-width: 680px;
 }
 .title-button {
   min-width: 0;
+  width: 100%;
   max-width: 100%;
   border: none;
   background: transparent;
@@ -2015,17 +2016,19 @@ async function onDrop(event: DragEvent): Promise<void> {
   flex-direction: column;
   gap: 2px;
 }
-.title-button:hover,
-.title-button.active {
-  background: var(--line);
+.title-button:hover .title,
+.title-button.active .title {
+  color: var(--primary);
+}
+.title-button:focus-visible {
+  outline: 1px solid var(--primary);
+  outline-offset: 2px;
 }
 .subtitle {
   font-size: 11px;
   line-height: 1.2;
   color: var(--text-3);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* 顶部在线状态融入副标题（决议 #81）：在线茶绿、离线灰，不再用孤立的「● 在线」标签 */
