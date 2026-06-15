@@ -22,6 +22,7 @@ import {
 } from './utils/avatar'
 import AvatarGlyph from './components/AvatarGlyph.vue'
 import AvatarMark from './components/AvatarMark.vue'
+import PantryBrandLogo from './components/PantryBrandLogo.vue'
 import PantryIcon from './components/PantryIcon.vue'
 import WindowControls from './components/WindowControls.vue'
 import WindowDragStrip from './components/WindowDragStrip.vue'
@@ -103,6 +104,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopSettings?.()
+  Object.values(saveFlashTimers).forEach((t) => clearTimeout(t))
 })
 
 async function reload(): Promise<void> {
@@ -132,6 +134,17 @@ function flashSaved(text = '已保存'): void {
   setTimeout(() => (savedTip.value = ''), 1500)
 }
 
+// 保存按钮成功态（用户反馈）：保存成功后按钮就地变「保存成功！」并打勾，3 秒后自动恢复
+const savedFlash = ref<Record<string, boolean>>({})
+const saveFlashTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+function flashSaveButton(key: string): void {
+  savedFlash.value = { ...savedFlash.value, [key]: true }
+  if (saveFlashTimers[key]) clearTimeout(saveFlashTimers[key])
+  saveFlashTimers[key] = setTimeout(() => {
+    savedFlash.value = { ...savedFlash.value, [key]: false }
+  }, 3000)
+}
+
 // 关于页源码链接（决议 #90）：交系统浏览器打开，非 app 内加载远程内容，不违反纯内网红线
 async function openUrl(url: string): Promise<void> {
   await window.pantry.openUrl(url)
@@ -155,6 +168,7 @@ async function saveProfile(): Promise<void> {
   })
   if (settings.value) syncForm(settings.value)
   flashSaved('已保存，全网通讯录将自动刷新')
+  flashSaveButton('profile')
 }
 
 function chooseInitialAvatar(): void {
@@ -261,6 +275,7 @@ async function saveShortcuts(): Promise<void> {
     },
     '快捷键已保存'
   )
+  flashSaveButton('shortcuts')
 }
 
 async function resetShortcuts(): Promise<void> {
@@ -332,6 +347,7 @@ async function savePorts(): Promise<void> {
     return
   }
   await saveApp({ udpPort, tcpPort }, '端口已保存，重启后生效')
+  flashSaveButton('ports')
 }
 
 function parsePort(value: string): number | null {
@@ -578,7 +594,15 @@ async function removeRange(cidr: string): Promise<void> {
               </label>
             </div>
             <div class="panel-actions">
-              <button class="primary" :disabled="!nick.trim()" @click="saveProfile">保存资料</button>
+              <button
+                class="primary save-btn"
+                :class="{ 'is-saved': savedFlash.profile }"
+                :disabled="!nick.trim()"
+                @click="saveProfile"
+              >
+                <PantryIcon v-if="savedFlash.profile" name="check" :size="15" class="save-check" />
+                <span>{{ savedFlash.profile ? '保存成功！' : '保存资料' }}</span>
+              </button>
             </div>
           </div>
         </section>
@@ -727,7 +751,14 @@ async function removeRange(cidr: string): Promise<void> {
               </div>
               <div class="button-row">
                 <button class="ghost" @click="pickFileDir">更改</button>
-                <button class="primary subtle" @click="saveProfile">保存</button>
+                <button
+                  class="primary subtle save-btn"
+                  :class="{ 'is-saved': savedFlash.profile }"
+                  @click="saveProfile"
+                >
+                  <PantryIcon v-if="savedFlash.profile" name="check" :size="15" class="save-check" />
+                  <span>{{ savedFlash.profile ? '保存成功！' : '保存' }}</span>
+                </button>
               </div>
             </div>
           </div>
@@ -893,7 +924,14 @@ async function removeRange(cidr: string): Promise<void> {
             </div>
             <div class="panel-actions">
               <button class="ghost" @click="resetShortcuts">恢复默认</button>
-              <button class="primary" @click="saveShortcuts">保存快捷键</button>
+              <button
+                class="primary save-btn"
+                :class="{ 'is-saved': savedFlash.shortcuts }"
+                @click="saveShortcuts"
+              >
+                <PantryIcon v-if="savedFlash.shortcuts" name="check" :size="15" class="save-check" />
+                <span>{{ savedFlash.shortcuts ? '保存成功！' : '保存快捷键' }}</span>
+              </button>
             </div>
           </div>
         </section>
@@ -915,7 +953,14 @@ async function removeRange(cidr: string): Promise<void> {
               </label>
             </div>
             <div class="panel-actions">
-              <button class="primary" @click="savePorts">保存端口</button>
+              <button
+                class="primary save-btn"
+                :class="{ 'is-saved': savedFlash.ports }"
+                @click="savePorts"
+              >
+                <PantryIcon v-if="savedFlash.ports" name="check" :size="15" class="save-check" />
+                <span>{{ savedFlash.ports ? '保存成功！' : '保存端口' }}</span>
+              </button>
             </div>
           </div>
 
@@ -954,7 +999,7 @@ async function removeRange(cidr: string): Promise<void> {
           <div class="about-panel">
             <!-- 品牌标识区（决议 #90 重设计）：居中圆标 + 中英文名 + 定位 + 纯内网信任徽条 -->
             <div class="about-hero">
-              <div class="about-mark">茶</div>
+              <PantryBrandLogo variant="icon" :size="60" class="about-logo" />
               <h2>茶话间<span class="about-latin">Pantry</span></h2>
               <p class="about-tagline">纯内网即时通讯与文件传输</p>
               <div class="about-trust">
@@ -1053,8 +1098,7 @@ async function removeRange(cidr: string): Promise<void> {
   background: var(--bg-list);
 }
 
-.account-avatar,
-.about-mark {
+.account-avatar {
   width: 36px;
   height: 36px;
   flex: 0 0 auto;
@@ -1582,6 +1626,62 @@ async function removeRange(cidr: string): Promise<void> {
   cursor: default;
 }
 
+/* 保存按钮成功态（用户反馈）：保存成功就地变「✓ 保存成功！」+ 确认弹动，3 秒后恢复 */
+.save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.save-btn.is-saved {
+  box-shadow: 0 0 0 3px var(--primary-weak);
+  animation: save-pop 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 次要保存按钮（茶青弱底）成功时提升为实心茶青 + 白字，让对勾与文案有足够对比 */
+.primary.subtle.save-btn.is-saved {
+  background: var(--primary);
+  color: #fff;
+}
+
+.save-check {
+  animation: save-check-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes save-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes save-check-in {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-btn.is-saved,
+  .save-check {
+    animation: none;
+  }
+}
+
 .compact {
   height: 28px;
   padding: 0 10px;
@@ -1728,16 +1828,10 @@ async function removeRange(cidr: string): Promise<void> {
   border-bottom: 1px solid var(--line);
 }
 
-.about-mark {
-  width: 56px;
-  height: 56px;
+.about-logo {
   margin-bottom: 14px;
-  background: var(--primary);
-  color: #fff;
-  font-size: 26px;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
-    0 8px 20px var(--primary-weak);
+  /* drop-shadow 跟随 logo 圆角方块的真实轮廓（box-shadow 只会按矩形包围盒） */
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.12));
 }
 
 .about-hero h2 {
