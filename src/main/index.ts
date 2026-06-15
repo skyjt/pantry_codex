@@ -29,6 +29,7 @@ import {
   type DataImportResult,
   type ExportFormat,
   type ForwardTarget,
+  type ImageOcrSource,
   type MessageView,
   type NetState,
   type PeerView,
@@ -108,6 +109,7 @@ if (!gotLock) {
     })
 
   const netState: NetState = { ok: false, udpPort, error: '' }
+  const OCR_SOURCE_MAX_BYTES = 25 * 1024 * 1024
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
   const remarks = new Map<string, string>()
@@ -1147,6 +1149,22 @@ if (!gotLock) {
     viewerWindow.setContentSize(contentWidth, contentHeight)
     viewerWindow.center()
     return scale
+  })
+
+  ipcMain.handle(IpcChannels.imgOcrSource, (event, transferId: unknown): ImageOcrSource | null => {
+    if (typeof transferId !== 'string' || transferId.length === 0 || transferId.length > 64) return null
+    if (!event.sender.getURL().includes('#/image-viewer?')) return null
+    const view = files?.transferView(transferId)
+    if (!view?.savedPath || view.status !== 'done') return null
+    if (view.totalSize <= 0 || view.totalSize > OCR_SOURCE_MAX_BYTES) return null
+    try {
+      const buf = readFileSync(view.savedPath)
+      if (buf.length === 0 || buf.length > OCR_SOURCE_MAX_BYTES) return null
+      const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+      return { name: view.name, size: buf.length, bytes }
+    } catch {
+      return null
+    }
   })
 
   ipcMain.handle(

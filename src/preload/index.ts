@@ -14,6 +14,7 @@ import {
   type ForwardTarget,
   type GroupPatch,
   type GroupView,
+  type ImageOcrSource,
   type MessageView,
   type MsgStatusEvent,
   type NetState,
@@ -101,6 +102,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.imgOpenViewer, transferId),
   fitImageViewerWindow: (width: number, height: number): Promise<number> =>
     ipcRenderer.invoke(IpcChannels.imgFitViewerWindow, width, height),
+  getImageOcrSource: (transferId: string): Promise<ImageOcrSource | null> =>
+    ipcRenderer.invoke(IpcChannels.imgOcrSource, transferId),
   saveImageAs: (transferId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.imgSaveAs, transferId),
   search: (query: string): Promise<SearchResult> =>

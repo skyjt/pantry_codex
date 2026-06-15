@@ -4,6 +4,7 @@ out/
 dist/
 release/
 *.tsbuildinfo
+src/renderer/public/ocr/
 
 # 日志与本地数据
 logs/

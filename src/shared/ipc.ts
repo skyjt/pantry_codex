@@ -40,6 +40,7 @@ export const IpcChannels = {
   groupImgOfferPath: 'group-img:offer-path',
   imgOpenViewer: 'img:open-viewer',
   imgFitViewerWindow: 'img:fit-viewer-window',
+  imgOcrSource: 'img:ocr-source',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
   msgSearch: 'msg:search',
@@ -187,6 +188,13 @@ export interface TransferView {
   name: string
   /** 完成后：接收侧的落盘根路径（用于"打开所在文件夹"） */
   savedPath: string
+}
+
+/** 图片 OCR 只读源：主进程按 transferId 返回受限字节，不向渲染层暴露本地路径 */
+export interface ImageOcrSource {
+  name: string
+  size: number
+  bytes: ArrayBuffer
 }
 
 export interface MsgStatusEvent {
@@ -417,6 +425,8 @@ export interface PantryApi {
   openImageViewer(transferId: string): Promise<boolean>
   /** 独立图片窗口按图片自然尺寸适配内容区，返回初始缩放比例 */
   fitImageViewerWindow(width: number, height: number): Promise<number>
+  /** 图片窗口 OCR：读取已完成图片的受限字节源，不暴露路径 */
+  getImageOcrSource(transferId: string): Promise<ImageOcrSource | null>
   /** 大图查看器"另存为" */
   saveImageAs(transferId: string): Promise<boolean>
   /** 全局搜索（防抖在渲染层做） */

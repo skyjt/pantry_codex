@@ -114,6 +114,19 @@ withDefaults(
       <path d="m8.8 10.2 3.2 3.2 3.2-3.2" />
       <path d="M5.5 14.6v3.9h13v-3.9" />
     </g>
+    <g v-else-if="name === 'text-select'">
+      <path d="M5.5 5.5h13" />
+      <path d="M12 5.5v13" />
+      <path d="M9.2 18.5h5.6" />
+      <path d="M6.2 9.2h2" />
+      <path d="M15.8 9.2h2" />
+      <path d="M6.2 14.8h2" />
+      <path d="M15.8 14.8h2" />
+    </g>
+    <g v-else-if="name === 'copy'">
+      <rect x="8" y="8" width="10.5" height="10.5" rx="2" />
+      <path d="M5.5 14.5V7a1.5 1.5 0 0 1 1.5-1.5h7.5" />
+    </g>
     <g v-else-if="name === 'file' || name === 'document'">
       <path d="M7 4.5h6.5L17 8v11.5H7V4.5Z" />
       <path d="M13.5 4.5V8H17" />
