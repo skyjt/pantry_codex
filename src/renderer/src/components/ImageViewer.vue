@@ -27,8 +27,6 @@ const isDragging = ref(false)
 const viewMode = ref<'fit' | 'free'>('fit')
 
 let dragStart: DragStart | null = null
-let didDrag = false
-let clearDragTimer: number | undefined
 
 const canUseImage = computed(() => !loading.value && !broken.value)
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
@@ -132,9 +130,7 @@ function onPointerDown(event: PointerEvent): void {
   if (!canUseImage.value || event.button !== 0) return
   const target = event.currentTarget as HTMLElement
   target.setPointerCapture(event.pointerId)
-  if (clearDragTimer !== undefined) window.clearTimeout(clearDragTimer)
   isDragging.value = true
-  didDrag = false
   dragStart = {
     x: event.clientX,
     y: event.clientY,
@@ -147,7 +143,6 @@ function onPointerMove(event: PointerEvent): void {
   if (!isDragging.value || !dragStart) return
   const dx = event.clientX - dragStart.x
   const dy = event.clientY - dragStart.y
-  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true
   offset.value = {
     x: dragStart.offsetX + dx,
     y: dragStart.offsetY + dy
@@ -161,15 +156,6 @@ function finishDrag(event: PointerEvent): void {
   if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
   isDragging.value = false
   dragStart = null
-  clearDragTimer = window.setTimeout(() => {
-    didDrag = false
-    clearDragTimer = undefined
-  }, 0)
-}
-
-function onStageClick(event: MouseEvent): void {
-  if (didDrag) return
-  if (event.target === event.currentTarget) emit('close')
 }
 
 function panBy(dx: number, dy: number): void {
@@ -235,7 +221,6 @@ function resetState(): void {
   isDragging.value = false
   viewMode.value = 'fit'
   dragStart = null
-  didDrag = false
 }
 
 watch(() => props.src, resetState)
@@ -248,7 +233,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('resize', onResize)
-  if (clearDragTimer !== undefined) window.clearTimeout(clearDragTimer)
 })
 </script>
 
@@ -300,7 +284,6 @@ onBeforeUnmount(() => {
     <main
       class="viewer-stage"
       :class="{ grabbing: isDragging }"
-      @click="onStageClick"
       @wheel.prevent="onWheel"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"

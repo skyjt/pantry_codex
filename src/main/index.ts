@@ -40,6 +40,7 @@ import { loadAppState, saveAppSettings, saveProfile, type AppState } from './sto
 import { setupTray, stopTrayUnreadFlash, updateTrayUnread } from './windows/tray'
 import { openSettingsWindow } from './windows/settings-window'
 import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
+import { openImageViewerWindow } from './windows/image-viewer-window'
 import { StickerRepo } from './store/sticker-repo'
 import { parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
@@ -1114,6 +1115,14 @@ if (!gotLock) {
     openSettingsWindow(mainWindow)
   })
 
+  ipcMain.handle(IpcChannels.imgOpenViewer, (_event, transferId: unknown): boolean => {
+    if (typeof transferId !== 'string' || transferId.length > 64) return false
+    const view = files?.transferView(transferId)
+    if (!view?.savedPath) return false
+    openImageViewerWindow(transferId, view.name)
+    return true
+  })
+
   ipcMain.handle(
     IpcChannels.groupCreate,
     (
@@ -1278,14 +1287,18 @@ if (!gotLock) {
     return msgRepoRef.around(convId, seq, 25).map(msgRowToView)
   })
 
-  ipcMain.handle(IpcChannels.imgSaveAs, async (_event, transferId: unknown): Promise<boolean> => {
-    if (typeof transferId !== 'string' || transferId.length > 64 || !mainWindow) return false
+  ipcMain.handle(IpcChannels.imgSaveAs, async (event, transferId: unknown): Promise<boolean> => {
+    if (typeof transferId !== 'string' || transferId.length > 64) return false
     const view = files?.transferView(transferId)
     if (!view?.savedPath) return false
-    const result = await dialog.showSaveDialog(mainWindow, {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined
+    const options = {
       title: '图片另存为',
       defaultPath: basename(view.savedPath)
-    })
+    }
+    const result = owner
+      ? await dialog.showSaveDialog(owner, options)
+      : await dialog.showSaveDialog(options)
     if (result.canceled || !result.filePath) return false
     try {
       copyFileSync(view.savedPath, result.filePath)

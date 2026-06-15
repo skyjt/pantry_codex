@@ -3,7 +3,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { MessageView } from '../../../shared/ipc'
 import { useTransfersStore } from '../stores/transfers'
 import { useStickersStore } from '../stores/stickers'
-import ImageViewer from './ImageViewer.vue'
 import PantryIcon from './PantryIcon.vue'
 
 // 图片/表情消息气泡（ui-design §5）：图片 ≤280px 可看大图；表情固定 120px。
@@ -13,7 +12,6 @@ const emit = defineEmits<{ forward: [] }>()
 const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
 const stickersStore = useStickersStore()
-const viewing = ref(false)
 const broken = ref(false)
 const menuAt = ref<{ x: number; y: number } | null>(null)
 const addTip = ref('')
@@ -52,6 +50,11 @@ function forwardImage(): void {
   emit('forward')
 }
 
+function openImageViewer(): void {
+  if (isSticker.value || !transferId.value) return
+  void window.pantry.openImageViewer(transferId.value)
+}
+
 function clearAddTipTimer(): void {
   if (addTipTimer !== undefined) {
     window.clearTimeout(addTipTimer)
@@ -88,7 +91,7 @@ onUnmounted(clearAddTipTimer)
       class="thumb"
       :class="{ sticker: isSticker }"
       alt="[图片]"
-      @click="!isSticker && (viewing = true)"
+      @click="openImageViewer"
       @error="broken = true"
       @contextmenu.prevent.stop="onContextMenu"
     />
@@ -116,12 +119,6 @@ onUnmounted(clearAddTipTimer)
       <span v-else class="tip-mark">!</span>
       <span>{{ addTip }}</span>
     </span>
-    <ImageViewer
-      v-if="viewing"
-      :src="src"
-      :transfer-id="transferId"
-      @close="viewing = false"
-    />
   </div>
 </template>
 

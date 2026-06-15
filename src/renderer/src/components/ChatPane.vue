@@ -12,7 +12,6 @@ import AvatarMark from './AvatarMark.vue'
 import CompatEmoji from './CompatEmoji.vue'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
-import ImageViewer from './ImageViewer.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import ForwardDialog from './ForwardDialog.vue'
@@ -81,8 +80,6 @@ const historyTo = ref('')
 const historyCalendarMonth = ref(monthKey(new Date()))
 const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
-/** 搜索结果内点击图片放大查看（浮于搜索面板之上，不离开，决议 #74） */
-const historyViewer = ref<{ src: string; transferId: string } | null>(null)
 const historyBrokenImages = ref<Record<string, boolean>>({})
 const showPeerProfile = ref(false)
 const peerProfileRemark = ref('')
@@ -343,7 +340,6 @@ function resetHistorySearch(): void {
   historyHits.value = []
   historySearching.value = false
   historyBrokenImages.value = {}
-  historyViewer.value = null
 }
 
 function closePeerProfile(): void {
@@ -544,9 +540,9 @@ function historyIcon(hit: ConversationMessageHit): string {
 }
 
 function openHistoryViewer(hit: ConversationMessageHit): void {
-  const src = historyImageSrc(hit)
-  if (!src) return
-  historyViewer.value = { src, transferId: hit.fileRef?.transferId ?? '' }
+  const transferId = hit.fileRef?.transferId ?? ''
+  if (!transferId || !historyImageSrc(hit)) return
+  void window.pantry.openImageViewer(transferId)
 }
 
 function historySecondary(hit: ConversationMessageHit): string {
@@ -1054,12 +1050,6 @@ async function onDrop(event: DragEvent): Promise<void> {
         </div>
       </section>
     </div>
-    <ImageViewer
-      v-if="historyViewer"
-      :src="historyViewer.src"
-      :transfer-id="historyViewer.transferId"
-      @close="historyViewer = null"
-    />
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
       <div v-if="!isGroup && peer" ref="peerProfileScope" class="peer-profile-scope">
