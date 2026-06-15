@@ -285,7 +285,7 @@ export interface GroupView {
   creatorIp: string
   hasAdminPassword: boolean
   adminHint: string
-  /** 当前本机是否可不输入密码直接管理（无密码组的创建 IP） */
+  /** 当前本机是否可不输入密码直接管理（无密码组的创建者/IP 兼容规则） */
   canManage: boolean
 }
 

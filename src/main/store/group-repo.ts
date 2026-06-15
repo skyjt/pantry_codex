@@ -11,6 +11,7 @@ interface GroupRow {
   updated_by: string
   updated_ts: number
   creator_ip?: string
+  creator_id?: string
   admin_secret_hash?: string
   admin_hint?: string
 }
@@ -31,6 +32,7 @@ function rowToMeta(row: GroupRow): GroupMeta {
     updatedBy: row.updated_by,
     updatedTs: row.updated_ts,
     creatorIp: row.creator_ip ?? '',
+    creatorId: row.creator_id ?? '',
     adminSecretHash: row.admin_secret_hash ?? '',
     adminHint: row.admin_hint ?? ''
   }
@@ -42,6 +44,7 @@ function normalizeMeta(meta: GroupMeta): GroupMeta {
     name: meta.name.slice(0, 64),
     members: [...new Set(meta.members)].filter((id) => id.length > 0),
     creatorIp: meta.creatorIp ?? '',
+    creatorId: meta.creatorId ?? '',
     adminSecretHash: meta.adminSecretHash ?? '',
     adminHint: meta.adminSecretHash ? (meta.adminHint ?? '').slice(0, 40) : ''
   }
@@ -56,16 +59,17 @@ export class GroupRepo {
     this.upsertStmt = db.prepare(`
       INSERT INTO groups (
         group_id, name, members, rev, updated_by, updated_ts,
-        creator_ip, admin_secret_hash, admin_hint
+        creator_ip, creator_id, admin_secret_hash, admin_hint
       )
       VALUES (
         @groupId, @name, @members, @rev, @updatedBy, @updatedTs,
-        @creatorIp, @adminSecretHash, @adminHint
+        @creatorIp, @creatorId, @adminSecretHash, @adminHint
       )
       ON CONFLICT(group_id) DO UPDATE SET
         name = excluded.name, members = excluded.members, rev = excluded.rev,
         updated_by = excluded.updated_by, updated_ts = excluded.updated_ts,
-        creator_ip = excluded.creator_ip, admin_secret_hash = excluded.admin_secret_hash,
+        creator_ip = excluded.creator_ip, creator_id = excluded.creator_id,
+        admin_secret_hash = excluded.admin_secret_hash,
         admin_hint = excluded.admin_hint
     `)
     this.getStmt = db.prepare('SELECT * FROM groups WHERE group_id = ?')

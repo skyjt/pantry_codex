@@ -65,11 +65,12 @@ class FakeGroupRepo {
 
 function service(opts: {
   selfIp: string
+  selfId?: string
   groupRepo?: FakeGroupRepo
   messenger?: FakeMessenger
 }): GroupsService {
   return new GroupsService({
-    selfId: 'node-self',
+    selfId: opts.selfId ?? 'node-self',
     messenger: (opts.messenger ?? new FakeMessenger()) as unknown as Messenger,
     convRepo: new FakeConvRepo() as unknown as ConvRepo,
     msgRepo: { insert: () => false, get: () => undefined } as unknown as MsgRepo,
@@ -79,19 +80,25 @@ function service(opts: {
 }
 
 describe('GroupsService 群管理权限', () => {
-  it('无密码组只允许创建 IP 直接管理', () => {
+  it('无密码组允许创建者直接管理，其他成员不能管理', () => {
     const repo = new FakeGroupRepo()
     const owner = service({ selfIp: '10.0.0.1', groupRepo: repo })
     const group = owner.createGroup('项目组', ['node-bob'])
     expect(group?.creatorIp).toBe('10.0.0.1')
+    expect(repo.get(group!.groupId)?.creatorId).toBe('node-self')
     expect(group?.hasAdminPassword).toBe(false)
     expect(group?.canManage).toBe(true)
 
     expect(owner.updateGroup(group!.groupId, { name: '项目组-改名' })?.name).toBe('项目组-改名')
 
     const movedIp = service({ selfIp: '10.0.0.2', groupRepo: repo })
-    expect(movedIp.updateGroup(group!.groupId, { name: '不应改名' })).toBeNull()
-    expect(repo.get(group!.groupId)?.name).toBe('项目组-改名')
+    expect(movedIp.updateGroup(group!.groupId, { name: '换 IP 后仍可改名' })?.name).toBe(
+      '换 IP 后仍可改名'
+    )
+
+    const otherMember = service({ selfId: 'node-bob', selfIp: '10.0.0.2', groupRepo: repo })
+    expect(otherMember.updateGroup(group!.groupId, { name: '不应改名' })).toBeNull()
+    expect(repo.get(group!.groupId)?.name).toBe('换 IP 后仍可改名')
   })
 
   it('有密码组必须输入正确密码才能管理，且不保存明文', () => {
@@ -125,6 +132,7 @@ describe('GroupsService 群管理权限', () => {
       updatedBy: 'node-self',
       updatedTs: 1000,
       creatorIp: '10.0.0.1',
+      creatorId: 'node-self',
       adminSecretHash: '',
       adminHint: ''
     }
@@ -149,6 +157,32 @@ describe('GroupsService 群管理权限', () => {
     })
     messenger.emit('incoming', leave, { address: '10.0.0.2' })
     expect(repo.get('g-1')?.members).toEqual(['node-self'])
+  })
+
+  it('远端 group.info 源 IP 不匹配时，创建者 nodeId 匹配仍可改名', () => {
+    const repo = new FakeGroupRepo()
+    const messenger = new FakeMessenger()
+    service({ selfId: 'node-b', selfIp: '10.0.0.8', groupRepo: repo, messenger })
+    const local: GroupMeta = {
+      groupId: 'g-vm',
+      name: '项目组',
+      members: ['node-a', 'node-b'],
+      rev: 1,
+      updatedBy: 'node-a',
+      updatedTs: 1000,
+      creatorIp: '192.168.1.10',
+      creatorId: 'node-a',
+      adminSecretHash: '',
+      adminHint: ''
+    }
+    repo.save(local)
+
+    const rename = makeEnvelope<GroupPayload>(MSG_TYPES.group, 'node-a', {
+      op: 'info',
+      group: { ...local, name: '新群名', rev: 2, updatedBy: 'node-a', updatedTs: 2000 }
+    })
+    messenger.emit('incoming', rename, { address: '172.16.56.1' })
+    expect(repo.get('g-vm')?.name).toBe('新群名')
   })
 })
 

@@ -94,6 +94,7 @@ export class GroupsService extends EventEmitter {
       updatedBy: this.deps.selfId,
       updatedTs: Date.now(),
       creatorIp: this.selfIp(),
+      creatorId: this.deps.selfId,
       adminSecretHash: secret ? groupAdminSecretHash(groupId, secret) : '',
       adminHint: secret ? normalizeAdminHint(adminHint) : ''
     }
@@ -247,9 +248,9 @@ export class GroupsService extends EventEmitter {
   private onGroupCtl(env: Envelope, rinfo?: RemoteInfo): void {
     const payload = env.payload as GroupPayload
     if (payload.op === 'info') {
-      const incoming = normalizeGroupMeta(payload.group)
-      const local = this.deps.groupRepo.get(incoming.groupId)
-      if (!this.canApplyRemoteInfo(local, incoming, rinfo?.address)) return
+      const local = this.deps.groupRepo.get(payload.group.groupId)
+      const incoming = normalizeGroupMeta(payload.group, local)
+      if (!this.canApplyRemoteInfo(local, incoming, env.from, rinfo?.address)) return
       const applied = this.deps.groupRepo.applyRemote(incoming)
       if (applied) {
         this.deps.convRepo.ensureGroup(incoming.groupId)
@@ -343,12 +344,13 @@ export class GroupsService extends EventEmitter {
   private canManageWithoutPassword(meta: GroupMeta): boolean {
     if (!meta.members.includes(this.deps.selfId)) return false
     if (meta.adminSecretHash) return false
+    if (meta.creatorId) return meta.creatorId === this.deps.selfId
     return !meta.creatorIp || meta.creatorIp === this.selfIp()
   }
 
   private canManage(meta: GroupMeta, adminPassword?: string): boolean {
     if (!meta.members.includes(this.deps.selfId)) return false
-    if (!meta.adminSecretHash) return !meta.creatorIp || meta.creatorIp === this.selfIp()
+    if (!meta.adminSecretHash) return this.canManageWithoutPassword(meta)
     const secret = normalizeAdminPassword(adminPassword ?? '')
     return secret.length > 0 && groupAdminSecretHash(meta.groupId, secret) === meta.adminSecretHash
   }
@@ -356,13 +358,18 @@ export class GroupsService extends EventEmitter {
   private canApplyRemoteInfo(
     local: GroupMeta | undefined,
     incoming: GroupMeta,
+    senderId: string,
     sourceIp: string | undefined
   ): boolean {
     if (!local) return true
     if (isSelfLeave(local, incoming)) return true
     if (local.adminSecretHash) return incoming.adminSecretHash === local.adminSecretHash
-    if (!local.creatorIp) return true // 兼容 v7 前创建的旧组
-    return sourceIp === local.creatorIp
+    if (local.creatorId && incoming.creatorId && incoming.creatorId !== local.creatorId) return false
+    if (local.creatorIp && sourceIp === local.creatorIp) return true
+    if (local.creatorId && senderId === local.creatorId && incoming.updatedBy === local.creatorId) {
+      return true
+    }
+    return !local.creatorIp && !local.creatorId // 兼容 v7/v8 前创建且无法回填的旧组
   }
 }
 
@@ -378,16 +385,25 @@ function groupAdminSecretHash(groupId: string, password: string): string {
   return createHash('sha256').update(`${groupId}\n${password}`).digest('hex')
 }
 
-function normalizeGroupMeta(meta: GroupMeta): GroupMeta {
+function normalizeGroupMeta(meta: GroupMeta, local?: GroupMeta): GroupMeta {
   const raw = meta as GroupMeta & {
     creatorIp?: unknown
+    creatorId?: unknown
     adminSecretHash?: unknown
     adminHint?: unknown
   }
   const adminSecretHash = typeof raw.adminSecretHash === 'string' ? raw.adminSecretHash : ''
+  const creatorId =
+    typeof raw.creatorId === 'string' && raw.creatorId.length > 0
+      ? raw.creatorId
+      : local?.creatorId || (adminSecretHash ? '' : meta.updatedBy)
   return {
     ...meta,
-    creatorIp: typeof raw.creatorIp === 'string' ? raw.creatorIp : '',
+    creatorIp:
+      typeof raw.creatorIp === 'string' && raw.creatorIp.length > 0
+        ? raw.creatorIp
+        : local?.creatorIp ?? '',
+    creatorId,
     adminSecretHash,
     adminHint:
       adminSecretHash && typeof raw.adminHint === 'string'
@@ -405,6 +421,7 @@ function isSelfLeave(local: GroupMeta, incoming: GroupMeta): boolean {
     added.length === 0 &&
     incoming.name === local.name &&
     incoming.creatorIp === local.creatorIp &&
+    incoming.creatorId === local.creatorId &&
     incoming.adminSecretHash === local.adminSecretHash &&
     incoming.adminHint === local.adminHint
   )

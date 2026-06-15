@@ -5,6 +5,7 @@ import {
   MSG_TYPES,
   UDP_MAX_INBOUND,
   type FileCtlPayload,
+  type GroupPayload,
   type MsgPayload,
   type Profile,
   type ProfilePayload
@@ -138,6 +139,41 @@ describe('codec', () => {
 
     const resend = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'nudge', resend: true })
     expect(decode(encode(resend))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
+  it('group.info 支持 creatorId，旧包缺 creatorId 仍兼容', () => {
+    const group = {
+      groupId: 'group-1',
+      name: '项目组',
+      members: ['node-aaaa', 'node-bbbb'],
+      rev: 1,
+      updatedBy: 'node-aaaa',
+      updatedTs: Date.now(),
+      creatorIp: '10.0.0.1',
+      creatorId: 'node-aaaa',
+      adminSecretHash: '',
+      adminHint: ''
+    }
+    const ok = makeEnvelope<GroupPayload>(MSG_TYPES.group, 'node-aaaa', {
+      op: 'info',
+      group
+    })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const legacy = makeEnvelope(MSG_TYPES.group, 'node-aaaa', {
+      op: 'info',
+      group: { ...group, creatorId: undefined }
+    })
+    expect(decode(encode(legacy))).toMatchObject({ ok: true, known: true })
+
+    const badCreator = makeEnvelope(MSG_TYPES.group, 'node-aaaa', {
+      op: 'info',
+      group: { ...group, creatorId: 'x'.repeat(65) }
+    })
+    expect(decode(encode(badCreator))).toEqual({
+      ok: false,
+      reason: 'bad-payload:group'
+    })
   })
 
   it('file-ctl 群聊媒体 offer 要求 groupId/groupRev 成对出现', () => {

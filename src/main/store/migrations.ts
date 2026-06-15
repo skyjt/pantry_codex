@@ -146,6 +146,14 @@ export const MIGRATIONS: ReadonlyArray<string> = [
   // v8：讨论组管理密码提示（决议 #30）：仅展示，不参与鉴权
   `
   ALTER TABLE groups ADD COLUMN admin_hint TEXT NOT NULL DEFAULT '';
+  `,
+
+  // v9：无密码群多网卡管理校验（决议 #113）：记录创建者 nodeId
+  `
+  ALTER TABLE groups ADD COLUMN creator_id TEXT NOT NULL DEFAULT '';
+  UPDATE groups
+    SET creator_id = updated_by
+    WHERE admin_secret_hash = '' AND creator_id = '' AND updated_by <> '';
   `
 ]
 

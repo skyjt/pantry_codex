@@ -81,6 +81,7 @@ class FakeConvRepo {
   bumped: Array<{ convId: string; ts: number }> = []
   unread: string[] = []
   ensured: string[] = []
+  muted = new Set<string>()
 
   ensureSingle(peerId: string): string {
     this.ensured.push(peerId)
@@ -93,6 +94,10 @@ class FakeConvRepo {
 
   incUnread(convId: string): void {
     this.unread.push(convId)
+  }
+
+  get(convId: string): { muted: number } | undefined {
+    return { muted: this.muted.has(convId) ? 1 : 0 }
   }
 
   list(): ConversationView[] {
@@ -241,6 +246,42 @@ describe('ChatService 私聊窗口震动', () => {
       convId: 'single:node-peer'
     })
     expect(convRepo.bumped).toHaveLength(1)
+    expect(convRepo.unread).toHaveLength(0)
+  })
+
+  it('免打扰会话收到震动只写提示，不触发窗口震动事件', () => {
+    const msgRepo = new FakeMsgRepo()
+    const messenger = new FakeMessenger()
+    const convRepo = new FakeConvRepo()
+    convRepo.muted.add('single:node-peer')
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: convRepo as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger
+    })
+    const nudges: Array<{ peerId: string; convId: string }> = []
+    chat.on('nudge', (event: { peerId: string; convId: string }) => nudges.push(event))
+
+    const env: Envelope<MsgPayload> = {
+      v: 1,
+      type: 'msg',
+      id: 'nudge-muted',
+      from: 'node-peer',
+      ts: Date.now(),
+      payload: { kind: 'nudge' }
+    }
+    messenger.emit('incoming', env)
+
+    expect(nudges).toHaveLength(0)
+    expect(msgRepo.inserted).toHaveLength(1)
+    expect(msgRepo.inserted[0]).toMatchObject({
+      id: 'nudge-muted',
+      convId: 'single:node-peer',
+      kind: 'system',
+      content: '对方发来一次窗口震动'
+    })
     expect(convRepo.unread).toHaveLength(0)
   })
 })

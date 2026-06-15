@@ -51,7 +51,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 8, '迁移版本应为 8')
+  assert.equal(db.pragma('user_version', { simple: true }), 9, '迁移版本应为 9')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -317,6 +317,7 @@ try {
     updatedBy: 'node-self',
     updatedTs: 1000,
     creatorIp: '10.0.0.8',
+    creatorId: 'node-self',
     adminSecretHash: 'a'.repeat(64),
     adminHint: '项目代号'
   }
@@ -399,6 +400,7 @@ try {
     const importedGroup = new GroupRepo(db2).get('g-1')
     assert.equal(importedGroup?.name, '新名')
     assert.equal(importedGroup?.creatorIp, '10.0.0.8')
+    assert.equal(importedGroup?.creatorId, 'node-new')
     assert.equal(importedGroup?.adminSecretHash, 'a'.repeat(64))
     assert.equal(importedGroup?.adminHint, '项目代号')
   } finally {

@@ -184,6 +184,8 @@ export interface GroupMeta {
   updatedTs: number
   /** 建群时记录的创建端 IPv4；无管理密码时仅该来源 IP 可管理群 */
   creatorIp: string
+  /** 建群者 nodeId；v0.16.3 起用于多网卡环境下的无密码群管理校验 */
+  creatorId: string
   /** 管理密码摘要；空串表示无密码，密码明文不入库、不入协议 */
   adminSecretHash: string
   /** 管理密码提示；仅用于 UI 展示，不参与鉴权 */

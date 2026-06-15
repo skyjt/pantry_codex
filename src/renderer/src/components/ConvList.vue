@@ -85,7 +85,7 @@ async function removeConv(): Promise<void> {
                 <span v-else>{{ part.text }}</span>
               </template>
             </span>
-            <span v-if="conv.unread > 0" class="badge">{{
+            <span v-if="conv.unread > 0" class="badge" :class="{ muted: conv.muted }">{{
               conv.unread > 99 ? '99+' : conv.unread
             }}</span>
           </span>
@@ -161,6 +161,9 @@ async function removeConv(): Promise<void> {
 .conv.active .badge {
   background: #fff;
   color: var(--primary);
+}
+.conv.active .badge.muted {
+  color: var(--text-2);
 }
 .conv-avatar {
   width: 38px;
@@ -238,6 +241,10 @@ async function removeConv(): Promise<void> {
   place-items: center;
   padding: 0 5px;
   flex-shrink: 0;
+}
+.badge.muted {
+  background: var(--offline);
+  color: #fff;
 }
 .conv-menu {
   position: fixed;

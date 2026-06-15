@@ -275,6 +275,7 @@ export class ChatService extends EventEmitter {
       false
     )
     if (!inserted) return
+    if (this.isConversationMuted(convId)) return
     const event: NudgeEvent = {
       peerId: env.from,
       convId,
@@ -395,6 +396,10 @@ export class ChatService extends EventEmitter {
 
   private emitConvs(): void {
     this.emit('convs', this.listConversations())
+  }
+
+  private isConversationMuted(convId: string): boolean {
+    return (this.deps.convRepo.get(convId)?.muted ?? 0) !== 0
   }
 
   private consumeNudgeLimit(

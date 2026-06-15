@@ -139,6 +139,7 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       if (!isStr(meta.updatedBy, LIMITS.from)) return false
       if (!isInt(meta.updatedTs) || meta.updatedTs <= 0) return false
       if (meta.creatorIp !== undefined && !isStrAllowEmpty(meta.creatorIp, LIMITS.ip)) return false
+      if (meta.creatorId !== undefined && !isStrAllowEmpty(meta.creatorId, LIMITS.from)) return false
       if (
         meta.adminSecretHash !== undefined &&
         !(

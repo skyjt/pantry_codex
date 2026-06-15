@@ -177,6 +177,7 @@ describe('FilesService 群聊媒体', () => {
       updatedBy: 'node-self',
       updatedTs: 1000,
       creatorIp: '127.0.0.1',
+      creatorId: 'node-self',
       adminSecretHash: '',
       adminHint: ''
     }
@@ -231,6 +232,7 @@ describe('FilesService 群聊媒体', () => {
       updatedBy: 'node-self',
       updatedTs: 1000,
       creatorIp: '127.0.0.1',
+      creatorId: 'node-self',
       adminSecretHash: '',
       adminHint: ''
     }
@@ -277,6 +279,7 @@ describe('FilesService 群聊媒体', () => {
       updatedBy: 'node-self',
       updatedTs: 1000,
       creatorIp: '127.0.0.1',
+      creatorId: 'node-self',
       adminSecretHash: '',
       adminHint: ''
     }

@@ -33,7 +33,7 @@ const adminTip = computed(() => {
       : '群管理需要管理密码'
   }
   if (props.group.canManage) return '当前 IP 可管理此群'
-  return `仅创建 IP ${props.group.creatorIp || '未知'} 可管理此群`
+  return `仅创建者或创建 IP ${props.group.creatorIp || '未知'} 可管理此群`
 })
 
 function nameOf(id: string): string {

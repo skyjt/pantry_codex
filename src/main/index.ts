@@ -176,11 +176,24 @@ if (!gotLock) {
     return icon && existsSync(icon) ? icon : undefined
   }
 
-  function showMainWindow(): void {
+  function showMainWindow(options: { forceForeground?: boolean } = {}): void {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+    if (options.forceForeground && process.platform === 'win32') {
+      try {
+        const win = mainWindow
+        win.setAlwaysOnTop(true, 'screen-saver')
+        win.focus()
+        const timer = setTimeout(() => {
+          if (!win.isDestroyed()) win.setAlwaysOnTop(false)
+        }, 180)
+        timer.unref?.()
+      } catch {
+        // Windows 前台限制兜底失败不影响消息入库；任务栏闪烁仍会提示用户。
+      }
+    }
   }
 
   function clearNudgeShake(restore: boolean): void {
@@ -203,7 +216,7 @@ if (!gotLock) {
 
   function shakeMainWindowForNudge(): void {
     if (!mainWindow || mainWindow.isDestroyed()) return
-    showMainWindow()
+    showMainWindow({ forceForeground: true })
     const win = mainWindow
     if (win.isMaximized() || win.isFullScreen()) {
       fallbackNudgeAttention(win)
