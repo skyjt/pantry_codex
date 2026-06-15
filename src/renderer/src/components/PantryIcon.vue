@@ -124,6 +124,16 @@ withDefaults(
     <g v-else-if="name === 'chevron-right'">
       <path d="m10 7 5 5-5 5" />
     </g>
+    <g v-else-if="name === 'info'">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 11.2v4.6" />
+      <path d="M12 8.4h.01" />
+    </g>
+    <g v-else-if="name === 'external'">
+      <path d="M13.5 5.5h5v5" />
+      <path d="M18.5 5.5 11 13" />
+      <path d="M17.5 13.8V17a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 17V8A1.5 1.5 0 0 1 7 6.5h3.2" />
+    </g>
     <g v-else>
       <circle cx="12" cy="12" r="7" />
     </g>

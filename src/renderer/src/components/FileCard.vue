@@ -4,9 +4,11 @@ import type { MessageView, TransferView } from '../../../shared/ipc'
 import { fmtBytes, useTransfersStore } from '../stores/transfers'
 import { usePeersStore } from '../stores/peers'
 import FileTypeIcon from './FileTypeIcon.vue'
+import PantryIcon from './PantryIcon.vue'
 
-// 文件消息卡片（ui-design §5）：等待对方接收 → 传输中（进度+速率+取消）
-// → 已完成（打开所在文件夹）→ 已取消 / 已拒收 / 失败
+// 文件消息卡片（ui-design §5，决议 #89「左信息 · 右状态」）：
+// 左侧文件名 + 大小/进度；右侧二选一——有操作显示按钮、无操作显示状态徽标，
+// 状态文字不再单独占左侧一行。
 
 const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
@@ -45,6 +47,25 @@ const percent = computed(() => {
 const speed = computed(() =>
   transferIds.value.reduce((sum, id) => sum + (transfers.speed[id] ?? 0), 0)
 )
+
+// 单发传输中：左侧显示进度条 + 进度文字（x/y · 速率）
+const inProgress = computed(() => !multiOut.value && transfer.value?.status === 'accepted')
+
+// meta 行（决议 #89）：单发传输中显示「已传 / 总量 · 速率」，否则显示大小（+ 文件数）
+const metaText = computed(() => {
+  const t = transfer.value
+  if (inProgress.value && t) {
+    return `${fmtBytes(t.bytesDone)} / ${fmtBytes(t.totalSize)} · ${fmtBytes(speed.value)}/s`
+  }
+  const r = ref_.value
+  if (!r) return ''
+  const base = r.count > 1 ? `${fmtBytes(r.size)} · ${r.count} 个文件` : fmtBytes(r.size)
+  // 群发传输中：大小后附整体速率（群聊用「已接收 x/x」计数代替进度条，决议 #75）
+  if (multiActive.value && speed.value > 0) return `${base} · ${fmtBytes(speed.value)}/s`
+  return base
+})
+
+// 右侧状态徽标文字（仅在无操作按钮时显示）
 const statusText = computed(() => {
   if (multiOut.value) {
     const total = transferIds.value.length
@@ -53,9 +74,7 @@ const statusText = computed(() => {
     const failed = list.filter((t) =>
       t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
     ).length
-    const active = list.some((t) => t.status === 'accepted')
     if (done === total) return '已全部送达'
-    if (active) return `传输中 · ${fmtBytes(speed.value)}/s`
     if (failed === total && total > 0) return '传输失败'
     if (failed > 0) return `${failed} 位未完成`
     return `等待 ${total} 位成员接收`
@@ -63,10 +82,6 @@ const statusText = computed(() => {
   const t = transfer.value
   if (!t) return ''
   switch (t.status) {
-    case 'offering':
-      return t.direction === 'out' ? '等待对方接收' : '等待你接收'
-    case 'accepted':
-      return `${fmtBytes(t.bytesDone)} / ${fmtBytes(t.totalSize)} · ${fmtBytes(speed.value)}/s`
     case 'done':
       return '已完成'
     case 'declined':
@@ -76,6 +91,46 @@ const statusText = computed(() => {
     default:
       return '传输失败'
   }
+})
+
+// 右侧操作判定（决议 #89）：有操作显示按钮，否则显示状态徽标
+const showRecvActions = computed(
+  () => !multiOut.value && transfer.value?.status === 'offering' && transfer.value.direction === 'in'
+)
+const showCancel = computed(
+  () =>
+    multiActive.value ||
+    (!multiOut.value &&
+      (transfer.value?.status === 'offering' || transfer.value?.status === 'accepted'))
+)
+// 单发等待对方接收：取消按钮上方加「等待接收」小字
+const waitingOut = computed(
+  () => !multiOut.value && transfer.value?.status === 'offering' && transfer.value.direction === 'out'
+)
+const showReveal = computed(
+  () => !multiOut.value && transfer.value?.status === 'done' && transfer.value.direction === 'in'
+)
+const showRetry = computed(
+  () => !multiOut.value && transfer.value?.status === 'failed' && transfer.value.direction === 'in'
+)
+const showBadge = computed(
+  () => !showRecvActions.value && !showCancel.value && !showReveal.value && !showRetry.value
+)
+// 徽标配色：完成绿（带对勾）、取消灰、拒收/失败红
+const badgeTone = computed(() => {
+  if (multiOut.value) {
+    const list = transferList.value
+    const done = list.filter((t) => t.status === 'done').length
+    if (list.length > 0 && done === list.length) return 'done'
+    const failed = list.filter(
+      (t) => t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
+    ).length
+    return failed > 0 ? 'failed' : 'muted'
+  }
+  const s = transfer.value?.status
+  if (s === 'done') return 'done'
+  if (s === 'failed' || s === 'declined') return 'failed'
+  return 'muted'
 })
 
 onMounted(() => {
@@ -88,16 +143,14 @@ function cancelActiveTransfers(): void {
 </script>
 
 <template>
-  <div v-if="ref_" class="card" :class="transfer?.status">
+  <div v-if="ref_" class="card">
     <div class="icon">
       <FileTypeIcon :name="ref_.name" :dir="ref_.dir" :size="36" />
     </div>
     <div class="info">
       <div class="name" :title="ref_.name">{{ ref_.name }}</div>
-      <div class="meta">
-        {{ fmtBytes(ref_.size) }}<span v-if="ref_.count > 1"> · {{ ref_.count }} 个文件</span>
-      </div>
-      <div v-if="transfer?.status === 'accepted' && !multiOut" class="bar">
+      <div class="meta">{{ metaText }}</div>
+      <div v-if="inProgress" class="bar">
         <div class="fill" :style="{ width: `${percent}%` }"></div>
       </div>
       <div v-if="multiOut" class="recv">
@@ -107,39 +160,27 @@ function cancelActiveTransfers(): void {
           <template v-else>还没有人接收</template>
         </span>
       </div>
-      <div class="state" :class="transfer?.status">{{ statusText }}</div>
     </div>
-    <div class="actions">
-      <template v-if="transfer?.status === 'offering' && transfer.direction === 'in'">
+    <div class="tail">
+      <template v-if="showRecvActions">
         <button class="act primary" @click="transfers.accept(ref_.transferId)">接收</button>
         <button class="act" @click="transfers.accept(ref_.transferId, true)">另存为</button>
         <button class="act danger" @click="transfers.decline(ref_.transferId)">拒绝</button>
       </template>
-      <button
-        v-else-if="
-          multiActive ||
-          transfer?.status === 'offering' ||
-          transfer?.status === 'accepted'
-        "
-        class="act danger"
-        @click="cancelActiveTransfers"
-      >
-        取消
-      </button>
-      <button
-        v-else-if="transfer?.status === 'done' && transfer.direction === 'in'"
-        class="act"
-        @click="transfers.reveal(ref_.transferId)"
-      >
+      <template v-else-if="showCancel">
+        <span v-if="waitingOut" class="hint">等待接收</span>
+        <button class="act danger" @click="cancelActiveTransfers">取消</button>
+      </template>
+      <button v-else-if="showReveal" class="act" @click="transfers.reveal(ref_.transferId)">
         打开所在文件夹
       </button>
-      <button
-        v-else-if="transfer?.status === 'failed' && transfer.direction === 'in'"
-        class="act primary"
-        @click="transfers.accept(ref_.transferId)"
-      >
+      <button v-else-if="showRetry" class="act primary" @click="transfers.accept(ref_.transferId)">
         继续
       </button>
+      <span v-else-if="showBadge" class="badge" :class="badgeTone">
+        <PantryIcon v-if="badgeTone === 'done'" name="check" :size="13" />
+        {{ statusText }}
+      </span>
     </div>
   </div>
 </template>
@@ -189,11 +230,6 @@ function cancelActiveTransfers(): void {
   background: var(--primary);
   transition: width 0.2s;
 }
-.state {
-  font-size: 11px;
-  color: var(--text-3);
-  margin-top: 4px;
-}
 .recv {
   position: relative;
   display: inline-block;
@@ -227,14 +263,8 @@ function cancelActiveTransfers(): void {
 .recv:hover .recv-pop {
   display: block;
 }
-.state.done {
-  color: var(--online);
-}
-.state.failed,
-.state.declined {
-  color: var(--danger);
-}
-.actions {
+/* 右侧操作 / 状态区（决议 #89）：垂直居中；按钮组等宽，状态徽标靠右 */
+.tail {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -249,6 +279,7 @@ function cancelActiveTransfers(): void {
   padding: 3px 8px;
   cursor: pointer;
   color: var(--text-2);
+  white-space: nowrap;
 }
 .act.primary {
   background: var(--primary);
@@ -257,5 +288,29 @@ function cancelActiveTransfers(): void {
 }
 .act.danger {
   color: var(--danger);
+}
+.hint {
+  font-size: 10px;
+  color: var(--text-3);
+  text-align: center;
+}
+.badge {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.badge.done {
+  color: var(--online);
+}
+.badge.failed {
+  color: var(--danger);
+}
+.badge.muted {
+  color: var(--text-3);
 }
 </style>

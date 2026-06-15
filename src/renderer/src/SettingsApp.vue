@@ -53,6 +53,8 @@ const section = ref<Section>('profile')
 const settings = ref<SettingsView | null>(null)
 const info = ref<AppInfo | null>(null)
 const savedTip = ref('')
+// 关于页「更多信息」折叠（决议 #90）：默认收起开发者向运行时信息
+const showAboutDetails = ref(false)
 
 // 我的资料表单
 const nick = ref('')
@@ -128,6 +130,11 @@ function syncForm(s: SettingsView): void {
 function flashSaved(text = '已保存'): void {
   savedTip.value = text
   setTimeout(() => (savedTip.value = ''), 1500)
+}
+
+// 关于页源码链接（决议 #90）：交系统浏览器打开，非 app 内加载远程内容，不违反纯内网红线
+async function openUrl(url: string): Promise<void> {
+  await window.pantry.openUrl(url)
 }
 
 async function saveApp(patch: AppSettingsPatch, tip = '已保存'): Promise<void> {
@@ -952,9 +959,24 @@ async function removeRange(cidr: string): Promise<void> {
             </div>
           </div>
           <div class="panel">
+            <!-- 默认只露版本 / 许可 / 源码（决议 #90）：面向普通用户的核心信息 -->
             <div class="info-grid">
-              <span>应用版本</span>
+              <span>版本</span>
               <strong>{{ info?.version ?? '-' }}</strong>
+              <span>许可</span>
+              <strong>MIT 许可证</strong>
+              <span>源码</span>
+              <a class="about-link" @click="openUrl('https://github.com/skyjt/pantry')">
+                github.com/skyjt/pantry
+                <PantryIcon name="external" :size="13" />
+              </a>
+            </div>
+            <!-- 开发者向运行时信息收进折叠区（决议 #90）：ⓘ 就地展开，Chrome 108 无原生 popover -->
+            <button class="about-more" @click="showAboutDetails = !showAboutDetails">
+              <PantryIcon :name="showAboutDetails ? 'chevron-up' : 'info'" :size="14" />
+              {{ showAboutDetails ? '收起详细信息' : '更多信息' }}
+            </button>
+            <div v-if="showAboutDetails" class="info-grid about-detail">
               <span>Electron</span>
               <strong>{{ info?.electron ?? '-' }}</strong>
               <span>Chromium</span>
@@ -963,8 +985,6 @@ async function removeRange(cidr: string): Promise<void> {
               <strong>{{ info?.node ?? '-' }}</strong>
               <span>本机节点</span>
               <strong>{{ info?.nodeId ?? '-' }}</strong>
-              <span>许可</span>
-              <strong>MIT（暂定）</strong>
               <span>Emoji 图形</span>
               <strong>Twemoji（本地打包，CC-BY 4.0）</strong>
             </div>
