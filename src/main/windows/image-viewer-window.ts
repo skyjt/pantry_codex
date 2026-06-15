@@ -37,8 +37,8 @@ export function openImageViewerWindow(transferId: string, name: string): void {
   win = new BrowserWindow({
     width: 640,
     height: 480,
-    minWidth: 280,
-    minHeight: 180,
+    minWidth: 1,
+    minHeight: 1,
     show: false,
     title,
     backgroundColor: '#111412',

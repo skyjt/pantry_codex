@@ -29,10 +29,15 @@ let loadToken = 0
 
 const canUseImage = computed(() => !loading.value && !broken.value)
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
-const imageTransform = computed(
-  () =>
-    `translate3d(${offset.value.x}px, ${offset.value.y}px, 0) rotate(${rotation.value}deg) scale(${zoom.value})`
-)
+const imageStyle = computed(() => {
+  const width = Math.max(1, Math.round(natural.value.width * zoom.value))
+  const height = Math.max(1, Math.round(natural.value.height * zoom.value))
+  return {
+    width: `${width}px`,
+    height: `${height}px`,
+    transform: `translate3d(${offset.value.x}px, ${offset.value.y}px, 0) rotate(${rotation.value}deg)`
+  }
+})
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -266,7 +271,7 @@ onBeforeUnmount(() => {
         :src="src"
         class="full"
         :class="{ pending: loading || broken }"
-        :style="{ transform: imageTransform }"
+        :style="imageStyle"
         alt="[图片]"
         draggable="false"
         @load="onImageLoad"
