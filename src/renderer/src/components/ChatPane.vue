@@ -23,7 +23,12 @@ import type {
   PeerView,
   SettingsView
 } from '../../../shared/ipc'
-import { RECALL_WINDOW_MS, TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
+import {
+  NUDGE_MIN_INTERVAL_MS,
+  RECALL_WINDOW_MS,
+  TEXT_TCP_LIMIT,
+  TEXT_UDP_LIMIT
+} from '../../../shared/protocol'
 
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
@@ -85,6 +90,12 @@ const showPeerProfile = ref(false)
 const peerProfileRemark = ref('')
 const peerProfileSaving = ref(false)
 const peerProfileSaved = ref(false)
+const nudgeSending = ref(false)
+const nudgeRetryUntil = ref(0)
+const nudgeNow = ref(Date.now())
+const nudgeFeedback = ref<{ text: string; kind: 'ok' | 'warn' } | null>(null)
+let nudgeFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+let nudgeRetryTimer: ReturnType<typeof setInterval> | null = null
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -115,6 +126,23 @@ const onlineGroupRecipientCount = computed(() => {
 const canSendMedia = computed(() =>
   isGroup.value ? canSend.value && onlineGroupRecipientCount.value > 0 : peerOnline.value
 )
+const nudgeRetryRemainingMs = computed(() => Math.max(0, nudgeRetryUntil.value - nudgeNow.value))
+const canSendNudge = computed(
+  () => !isGroup.value && peerOnline.value && !nudgeSending.value && nudgeRetryRemainingMs.value <= 0
+)
+const nudgeToolTip = computed(() => {
+  if (isGroup.value) return '窗口震动仅支持私聊'
+  if (!peerOnline.value) return '对方离线，无法震动'
+  if (nudgeRetryRemainingMs.value > 0) {
+    return `${Math.ceil(nudgeRetryRemainingMs.value / 1000)} 秒后可再震动`
+  }
+  return '窗口震动'
+})
+const incomingNudgeNotice = computed(() => {
+  const event = chatStore.lastNudge
+  if (!event || event.convId !== chatStore.activeConvId || isGroup.value) return ''
+  return `${peerName.value} 发来窗口震动`
+})
 const mentionMembers = computed(() =>
   group.value ? group.value.members.filter((id) => id !== chatStore.selfId) : []
 )
@@ -226,6 +254,8 @@ onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentPointerDown)
   if (historySearchTimer) clearTimeout(historySearchTimer)
   if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
+  if (nudgeFeedbackTimer) clearTimeout(nudgeFeedbackTimer)
+  if (nudgeRetryTimer) clearInterval(nudgeRetryTimer)
   if (recallCountdownTimer) clearInterval(recallCountdownTimer)
   historySearchRun += 1
   stopSettings?.()
@@ -239,6 +269,7 @@ watch(
     showHistorySearch.value = false
     closePeerProfile()
     mentionIds.value = []
+    nudgeFeedback.value = null
     resetHistorySearch()
     if (isGroup.value && id) void groupsStore.ensure(id)
   },
@@ -638,6 +669,55 @@ async function send(): Promise<void> {
   mentionIds.value = []
   showMentionPicker.value = false
   await chatStore.send(text, mentions)
+}
+
+function setNudgeFeedback(text: string, kind: 'ok' | 'warn' = 'ok'): void {
+  nudgeFeedback.value = { text, kind }
+  if (nudgeFeedbackTimer) clearTimeout(nudgeFeedbackTimer)
+  nudgeFeedbackTimer = setTimeout(() => {
+    nudgeFeedback.value = null
+    nudgeFeedbackTimer = null
+  }, 3000)
+}
+
+function startNudgeRetry(ms: number): void {
+  nudgeRetryUntil.value = Date.now() + Math.max(0, ms)
+  nudgeNow.value = Date.now()
+  if (nudgeRetryTimer) clearInterval(nudgeRetryTimer)
+  nudgeRetryTimer = setInterval(() => {
+    nudgeNow.value = Date.now()
+    if (nudgeRetryRemainingMs.value <= 0 && nudgeRetryTimer) {
+      clearInterval(nudgeRetryTimer)
+      nudgeRetryTimer = null
+    }
+  }, 250)
+}
+
+async function sendNudge(): Promise<void> {
+  if (!canSendNudge.value) return
+  nudgeSending.value = true
+  try {
+    const result = await chatStore.sendNudge()
+    if (result.ok) {
+      startNudgeRetry(NUDGE_MIN_INTERVAL_MS)
+      setNudgeFeedback('已发送窗口震动')
+      return
+    }
+    if (result.reason === 'rate-limited') {
+      const wait = result.retryAfterMs ?? NUDGE_MIN_INTERVAL_MS
+      startNudgeRetry(wait)
+      setNudgeFeedback(`太频繁，${Math.ceil(wait / 1000)} 秒后再试`, 'warn')
+      return
+    }
+    if (result.reason === 'undelivered') {
+      startNudgeRetry(NUDGE_MIN_INTERVAL_MS)
+      setNudgeFeedback('对方暂时无响应', 'warn')
+      return
+    }
+    setNudgeFeedback('当前会话无法震动', 'warn')
+  } finally {
+    nudgeSending.value = false
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -1272,6 +1352,17 @@ async function onDrop(event: DragEvent): Promise<void> {
             </button>
           </span>
         </span>
+        <span v-if="!isGroup" class="tool-wrap" :data-tip="nudgeToolTip">
+          <button
+            class="tool"
+            type="button"
+            aria-label="窗口震动"
+            :disabled="!canSendNudge"
+            @click="sendNudge"
+          >
+            <PantryIcon name="nudge" :size="18" />
+          </button>
+        </span>
         <span class="tool-wrap" data-tip="截图">
           <button
             class="tool"
@@ -1320,6 +1411,13 @@ async function onDrop(event: DragEvent): Promise<void> {
         </span>
         <span v-else-if="isGroup" class="tool-hint">仅在线群成员可接收图片/文件</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
+        <span
+          v-if="nudgeFeedback || incomingNudgeNotice"
+          class="nudge-feedback"
+          :class="nudgeFeedback?.kind ?? 'ok'"
+        >
+          {{ nudgeFeedback?.text || incomingNudgeNotice }}
+        </span>
         <span class="toolbar-spacer"></span>
         <span class="history-search-scope">
           <span class="tool-wrap" data-tip="历史搜索">
@@ -1566,6 +1664,18 @@ async function onDrop(event: DragEvent): Promise<void> {
   white-space: nowrap;
   font-size: 11px;
   color: var(--text-3);
+}
+.nudge-feedback {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--primary);
+}
+.nudge-feedback.warn {
+  color: var(--danger);
 }
 .history-overlay {
   position: absolute;

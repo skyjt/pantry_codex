@@ -34,6 +34,11 @@ export const TIMINGS = {
   queueMaxPerPeer: 200,
   /** 自己消息可撤回窗口（决议 #23；#63 起 2→5 分钟） */
   recallWindow: 5 * 60_000,
+  /** 私聊窗口震动：同一对端两次至少间隔 15s（决议 #109） */
+  nudgeMinInterval: 15_000,
+  /** 私聊窗口震动：同一对端 60s 滑动窗口最多 2 次（决议 #109） */
+  nudgeRateWindow: 60_000,
+  nudgeMaxPerWindow: 2,
   /** 已收消息 ID 去重窗口（§7.2） */
   dedupTtl: 24 * 3_600_000,
   /** gossip 周期交换间隔（§6.3，另有"结识即交换"） */
@@ -132,14 +137,20 @@ export interface PeersPayload {
 export const GROUP_MAX_MEMBERS = 50
 
 export const RECALL_WINDOW_MS = TIMINGS.recallWindow
+export const NUDGE_MIN_INTERVAL_MS = TIMINGS.nudgeMinInterval
+export const NUDGE_RATE_WINDOW_MS = TIMINGS.nudgeRateWindow
+export const NUDGE_MAX_PER_WINDOW = TIMINGS.nudgeMaxPerWindow
 
-/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊；recall=撤回指令 */
+/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊；recall=撤回指令；nudge=私聊窗口震动 */
 export type MsgPayload =
   | {
       kind: 'text'
       text: string
       /** 补发标记：消息保持原 id/ts，落在历史正确位置 */
       resend?: boolean
+    }
+  | {
+      kind: 'nudge'
     }
   | {
       kind: 'group-text'

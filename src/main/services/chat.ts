@@ -2,12 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   MSG_TYPES,
+  NUDGE_MAX_PER_WINDOW,
+  NUDGE_MIN_INTERVAL_MS,
+  NUDGE_RATE_WINDOW_MS,
   RECALL_WINDOW_MS,
   TEXT_TCP_LIMIT,
   type Envelope,
   type MsgPayload
 } from '../../shared/protocol'
-import type { ConversationView, MessageView, MsgStatusEvent } from '../../shared/ipc'
+import type { ConversationView, MessageView, MsgStatusEvent, NudgeEvent, NudgeResult } from '../../shared/ipc'
 import { makeEnvelope } from '../net/codec'
 import type { Messenger } from '../net/messenger'
 import { ConvRepo, convRowToView, type ConvRow } from '../store/conv-repo'
@@ -39,6 +42,8 @@ export class ChatService extends EventEmitter {
     string,
     { env: Envelope<MsgPayload>; timer: ReturnType<typeof setTimeout> }
   >()
+  private readonly outgoingNudges = new Map<string, number[]>()
+  private readonly incomingNudges = new Map<string, number[]>()
 
   constructor(private readonly deps: ChatDeps) {
     super()
@@ -122,6 +127,17 @@ export class ChatService extends EventEmitter {
     return row ? toMsgView(row) : null
   }
 
+  /** 私聊窗口震动：即时动作，不落库、不离线补发；发送端按对端限流（决议 #109）。 */
+  async sendNudge(peerId: string): Promise<NudgeResult> {
+    if (!peerId || peerId.length > 64) return { ok: false, reason: 'invalid' }
+    const limit = this.consumeNudgeLimit(this.outgoingNudges, peerId, Date.now())
+    if (!limit.ok) return limit
+
+    const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, { kind: 'nudge' })
+    const delivered = await this.deps.messenger.sendReliable(peerId, env)
+    return delivered ? { ok: true } : { ok: false, reason: 'undelivered' }
+  }
+
   /** 手动重发（失败/排队中的自己的消息）：沿用原 id，对端凭 id 去重 */
   resend(msgId: string): boolean {
     const row = this.deps.msgRepo.get(msgId)
@@ -189,6 +205,10 @@ export class ChatService extends EventEmitter {
       this.onIncomingRecall(env as Envelope<MsgPayload>)
       return
     }
+    if (payload.kind === 'nudge') {
+      this.onIncomingNudge(env as Envelope<MsgPayload>)
+      return
+    }
     if (payload.kind === 'group-text') {
       this.deferPendingRecall(env.id)
       return
@@ -226,6 +246,19 @@ export class ChatService extends EventEmitter {
       return
     }
     this.applyIncomingRecall(env, target)
+  }
+
+  private onIncomingNudge(env: Envelope<MsgPayload>): void {
+    const payload = env.payload
+    if (payload.kind !== 'nudge') return
+    const limit = this.consumeNudgeLimit(this.incomingNudges, env.from, Date.now())
+    if (!limit.ok) return
+    const event: NudgeEvent = {
+      peerId: env.from,
+      convId: `single:${env.from}`,
+      ts: Date.now()
+    }
+    this.emit('nudge', event)
   }
 
   private rememberPendingRecall(targetId: string, env: Envelope<MsgPayload>): void {
@@ -313,6 +346,32 @@ export class ChatService extends EventEmitter {
 
   private emitConvs(): void {
     this.emit('convs', this.listConversations())
+  }
+
+  private consumeNudgeLimit(
+    bucket: Map<string, number[]>,
+    peerId: string,
+    now: number
+  ): NudgeResult {
+    const windowStart = now - NUDGE_RATE_WINDOW_MS
+    const recent = (bucket.get(peerId) ?? []).filter((ts) => ts > windowStart)
+    const last = recent[recent.length - 1]
+    let retryAfterMs = 0
+
+    if (last !== undefined && now - last < NUDGE_MIN_INTERVAL_MS) {
+      retryAfterMs = Math.max(retryAfterMs, NUDGE_MIN_INTERVAL_MS - (now - last))
+    }
+    if (recent.length >= NUDGE_MAX_PER_WINDOW) {
+      retryAfterMs = Math.max(retryAfterMs, NUDGE_RATE_WINDOW_MS - (now - recent[0]))
+    }
+    if (retryAfterMs > 0) {
+      bucket.set(peerId, recent)
+      return { ok: false, reason: 'rate-limited', retryAfterMs }
+    }
+
+    recent.push(now)
+    bucket.set(peerId, recent)
+    return { ok: true }
   }
 }
 

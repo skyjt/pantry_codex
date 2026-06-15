@@ -132,6 +132,14 @@ describe('codec', () => {
     expect(decode(encode(missingRev))).toEqual({ ok: false, reason: 'bad-payload:msg' })
   })
 
+  it('nudge 是无正文的私聊即时动作，不能带补发标记', () => {
+    const ok = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', { kind: 'nudge' })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const resend = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'nudge', resend: true })
+    expect(decode(encode(resend))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
   it('file-ctl 群聊媒体 offer 要求 groupId/groupRev 成对出现', () => {
     const ok = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
       op: 'offer',

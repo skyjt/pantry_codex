@@ -58,6 +58,15 @@ withDefaults(
       <path d="M15.1 10h.1" />
       <path d="M8.8 14.1c1.8 1.7 4.6 1.7 6.4 0" />
     </g>
+    <g v-else-if="name === 'nudge'">
+      <rect x="7" y="6.4" width="10" height="8.8" rx="1.8" />
+      <path d="M9.2 18h5.6" />
+      <path d="M12 15.2V18" />
+      <path d="M4.8 8.8 3.2 7.2" />
+      <path d="M4.3 12H2.6" />
+      <path d="m19.2 8.8 1.6-1.6" />
+      <path d="M19.7 12h1.7" />
+    </g>
     <g v-else-if="name === 'sticker'">
       <path d="M6 5h12v8.4L13.4 18H6V5Z" />
       <path d="M13.4 18v-4.6H18" />

@@ -1,7 +1,16 @@
 import { defineStore } from 'pinia'
-import type { ConversationView, ForwardResult, ForwardTarget, MessageView } from '../../../shared/ipc'
+import type {
+  ConversationView,
+  ForwardResult,
+  ForwardTarget,
+  MessageView,
+  NudgeEvent,
+  NudgeResult
+} from '../../../shared/ipc'
 
 // 主进程聊天数据的投影 + 乐观更新（tech-design §7 状态流）
+let nudgeClearTimer: ReturnType<typeof setTimeout> | null = null
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     convs: [] as ConversationView[],
@@ -15,6 +24,7 @@ export const useChatStore = defineStore('chat', {
     selfId: '',
     selfNick: '',
     selfAvatar: -1,
+    lastNudge: null as NudgeEvent | null,
     initialized: false
   }),
   getters: {
@@ -56,6 +66,15 @@ export const useChatStore = defineStore('chat', {
       window.pantry.onMsgStatus((event) => {
         const target = this.messages[event.convId]?.find((m) => m.id === event.id)
         if (target) target.status = event.status
+      })
+      window.pantry.onNudgeReceived((event) => {
+        this.lastNudge = event
+        if (nudgeClearTimer) clearTimeout(nudgeClearTimer)
+        nudgeClearTimer = setTimeout(() => {
+          if (this.lastNudge?.ts === event.ts && this.lastNudge.peerId === event.peerId) {
+            this.lastNudge = null
+          }
+        }, 3000)
       })
       // 点系统通知/托盘 → 直达对应会话（F-SYS-2），单聊群聊通用
       window.pantry.onOpenConv((convId) => {
@@ -172,6 +191,12 @@ export const useChatStore = defineStore('chat', {
 
     async recall(msgId: string): Promise<boolean> {
       return window.pantry.recallMessage(msgId)
+    },
+
+    async sendNudge(): Promise<NudgeResult> {
+      const conv = this.activeConv
+      if (!conv || conv.type !== 'single') return { ok: false, reason: 'invalid' }
+      return window.pantry.sendNudge(conv.peerId)
     },
 
     async forward(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> {

@@ -19,6 +19,8 @@ import {
   type MessageView,
   type MsgStatusEvent,
   type NetState,
+  type NudgeEvent,
+  type NudgeResult,
   type PantryApi,
   type PeerView,
   type ProfileSubmit,
@@ -60,6 +62,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.msgResend, msgId),
   recallMessage: (msgId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.msgRecall, msgId),
+  sendNudge: (peerNodeId: string): Promise<NudgeResult> =>
+    ipcRenderer.invoke(IpcChannels.msgNudge, peerNodeId),
   forwardMessage: (msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> =>
     ipcRenderer.invoke(IpcChannels.msgForward, msgId, targets),
   getSettings: (): Promise<SettingsView> => ipcRenderer.invoke(IpcChannels.settingsGet),
@@ -160,6 +164,7 @@ const api: PantryApi = {
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
+  onNudgeReceived: (listener) => subscribe<NudgeEvent>(IpcEvents.nudgeReceived, listener),
   onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener),
   onTransferUpdated: (listener) => subscribe<TransferView>(IpcEvents.transferUpdated, listener),
   onGroupUpdated: (listener) => subscribe<GroupView>(IpcEvents.groupUpdated, listener),

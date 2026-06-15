@@ -19,6 +19,7 @@ export const IpcChannels = {
   msgSend: 'msg:send',
   msgResend: 'msg:resend',
   msgRecall: 'msg:recall',
+  msgNudge: 'msg:nudge',
   msgForward: 'msg:forward',
   settingsGet: 'settings:get',
   settingsSaveProfile: 'settings:save-profile',
@@ -83,6 +84,7 @@ export const IpcEvents = {
   netState: 'net:state',
   msgNew: 'msg:new',
   msgStatus: 'msg:status',
+  nudgeReceived: 'msg:nudge-received',
   convsUpdated: 'convs:updated',
   transferUpdated: 'transfer:updated',
   groupUpdated: 'group:updated',
@@ -235,6 +237,18 @@ export interface MsgStatusEvent {
   id: string
   convId: string
   status: MessageView['status']
+}
+
+export interface NudgeResult {
+  ok: boolean
+  reason?: 'rate-limited' | 'undelivered' | 'invalid'
+  retryAfterMs?: number
+}
+
+export interface NudgeEvent {
+  peerId: string
+  convId: string
+  ts: number
 }
 
 export interface ForwardTarget {
@@ -426,6 +440,7 @@ export interface PantryApi {
   sendText(peerNodeId: string, text: string): Promise<MessageView | null>
   resendMessage(msgId: string): Promise<boolean>
   recallMessage(msgId: string): Promise<boolean>
+  sendNudge(peerNodeId: string): Promise<NudgeResult>
   forwardMessage(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult>
   getSettings(): Promise<SettingsView>
   /** 保存资料（向导/设置）：资料有变自动广播刷新全网 */
@@ -513,6 +528,7 @@ export interface PantryApi {
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void
   onMsgStatus(listener: (event: MsgStatusEvent) => void): () => void
+  onNudgeReceived(listener: (event: NudgeEvent) => void): () => void
   onConvsUpdated(listener: (convs: ConversationView[]) => void): () => void
   onTransferUpdated(listener: (transfer: TransferView) => void): () => void
   onGroupUpdated(listener: (group: GroupView) => void): () => void

@@ -33,6 +33,8 @@ import {
   type ImageOcrSource,
   type MessageView,
   type NetState,
+  type NudgeEvent,
+  type NudgeResult,
   type PeerView,
   type ProfileSubmit,
   type SettingsView
@@ -136,6 +138,8 @@ if (!gotLock) {
   let appState: AppState | null = null
   let tray: Tray | null = null
   let isQuitting = false
+  let nudgeShakeOrigin: [number, number] | null = null
+  let nudgeShakeTimers: Array<ReturnType<typeof setTimeout>> = []
 
   function parsePort(value: string | undefined): number | null {
     if (!value) return null
@@ -177,6 +181,59 @@ if (!gotLock) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  }
+
+  function clearNudgeShake(restore: boolean): void {
+    for (const timer of nudgeShakeTimers) clearTimeout(timer)
+    nudgeShakeTimers = []
+    if (restore && nudgeShakeOrigin && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.setPosition(nudgeShakeOrigin[0], nudgeShakeOrigin[1])
+      } catch {
+        // 窗口可能正在销毁或由系统接管位置；震动是提示，不影响主流程。
+      }
+    }
+    nudgeShakeOrigin = null
+  }
+
+  function fallbackNudgeAttention(win: BrowserWindow): void {
+    if (process.platform === 'darwin') app.dock?.bounce('informational')
+    else win.flashFrame(true)
+  }
+
+  function shakeMainWindowForNudge(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    showMainWindow()
+    const win = mainWindow
+    if (win.isMaximized() || win.isFullScreen()) {
+      fallbackNudgeAttention(win)
+      return
+    }
+
+    clearNudgeShake(true)
+    const [originX, originY] = win.getPosition()
+    nudgeShakeOrigin = [originX, originY]
+    const offsets = [0, 12, -10, 8, -6, 4, -2, 0]
+    nudgeShakeTimers = offsets.map((dx, index) => {
+      const timer = setTimeout(() => {
+        if (!mainWindow || win.isDestroyed()) {
+          clearNudgeShake(false)
+          return
+        }
+        try {
+          win.setPosition(originX + dx, originY)
+        } catch {
+          clearNudgeShake(false)
+          return
+        }
+        if (index === offsets.length - 1) {
+          nudgeShakeTimers = []
+          nudgeShakeOrigin = null
+        }
+      }, index * 45)
+      timer.unref?.()
+      return timer
+    })
   }
 
   function mainWindowTitle(): string {
@@ -411,6 +468,10 @@ if (!gotLock) {
       const onStatus = (ev: unknown): void => {
         mainWindow?.webContents.send(IpcEvents.msgStatus, ev)
       }
+      const onNudge = (ev: NudgeEvent): void => {
+        mainWindow?.webContents.send(IpcEvents.nudgeReceived, ev)
+        shakeMainWindowForNudge()
+      }
       const onConvs = (convs: Array<{ unread: number }>): void => {
         mainWindow?.webContents.send(IpcEvents.convsUpdated, convs)
         const total = convs.reduce((sum, c) => sum + c.unread, 0)
@@ -418,6 +479,7 @@ if (!gotLock) {
       }
       chat.on('message', onMessage)
       chat.on('status', onStatus)
+      chat.on('nudge', onNudge)
       chat.on('convs', onConvs)
       onConvs(chat.listConversations())
 
@@ -646,6 +708,7 @@ if (!gotLock) {
     })
     mainWindow.on('focus', () => mainWindow?.flashFrame(false))
     mainWindow.on('closed', () => {
+      clearNudgeShake(false)
       mainWindow = null
     })
 
@@ -789,6 +852,13 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.msgRecall, (_event, msgId: unknown): boolean => {
     if (typeof msgId !== 'string' || msgId.length === 0 || msgId.length > 64) return false
     return chat?.recall(msgId) ?? false
+  })
+
+  ipcMain.handle(IpcChannels.msgNudge, async (_event, peerId: unknown): Promise<NudgeResult> => {
+    if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) {
+      return { ok: false, reason: 'invalid' }
+    }
+    return chat?.sendNudge(peerId) ?? { ok: false, reason: 'invalid' }
   })
 
   ipcMain.handle(IpcChannels.msgForward, async (_event, msgId: unknown, targets: unknown) => {

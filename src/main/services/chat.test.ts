@@ -10,11 +10,18 @@ import type { MsgRepo, MsgRow, NewMessage } from '../store/msg-repo'
 
 class FakeMessenger extends EventEmitter {
   sent: Array<{ peerId: string; env: Envelope<MsgPayload> }> = []
+  reliableSent: Array<{ peerId: string; env: Envelope<MsgPayload> }> = []
   dropped: Array<{ msgId: string; peerIds: string[] }> = []
+  reliableResult = true
 
   async sendUserMessage(peerId: string, env: Envelope<MsgPayload>): Promise<SendOutcome> {
     this.sent.push({ peerId, env })
     return 'queued'
+  }
+
+  async sendReliable(peerId: string, env: Envelope<MsgPayload>): Promise<boolean> {
+    this.reliableSent.push({ peerId, env })
+    return this.reliableResult
   }
 
   dropQueuedMessage(msgId: string, peerIds: string[]): void {
@@ -141,5 +148,63 @@ describe('ChatService 撤回', () => {
       content: '你撤回了一条消息',
       status: 'sent'
     })
+  })
+})
+
+describe('ChatService 私聊窗口震动', () => {
+  it('发送震动走可靠通道但不写消息库，连续发送会被限流', async () => {
+    const msgRepo = new FakeMsgRepo()
+    const messenger = new FakeMessenger()
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger
+    })
+
+    await expect(chat.sendNudge('node-peer')).resolves.toEqual({ ok: true })
+    expect(messenger.reliableSent).toHaveLength(1)
+    expect(messenger.reliableSent[0]).toMatchObject({
+      peerId: 'node-peer',
+      env: { type: 'msg', payload: { kind: 'nudge' } }
+    })
+    expect(msgRepo.inserted).toHaveLength(0)
+    expect(messenger.sent).toHaveLength(0)
+
+    const limited = await chat.sendNudge('node-peer')
+    expect(limited.ok).toBe(false)
+    expect(limited.reason).toBe('rate-limited')
+    expect(limited.retryAfterMs).toBeGreaterThan(0)
+    expect(messenger.reliableSent).toHaveLength(1)
+  })
+
+  it('收到震动只触发本地事件，不入库；重复入站被接收端限流', () => {
+    const msgRepo = new FakeMsgRepo()
+    const messenger = new FakeMessenger()
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger
+    })
+    const nudges: Array<{ peerId: string; convId: string }> = []
+    chat.on('nudge', (event: { peerId: string; convId: string }) => nudges.push(event))
+
+    const env: Envelope<MsgPayload> = {
+      v: 1,
+      type: 'msg',
+      id: 'nudge-1',
+      from: 'node-peer',
+      ts: Date.now(),
+      payload: { kind: 'nudge' }
+    }
+    messenger.emit('incoming', env)
+    messenger.emit('incoming', { ...env, id: 'nudge-2' })
+
+    expect(nudges).toHaveLength(1)
+    expect(nudges[0]).toMatchObject({ peerId: 'node-peer', convId: 'single:node-peer' })
+    expect(msgRepo.inserted).toHaveLength(0)
   })
 })

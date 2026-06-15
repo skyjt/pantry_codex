@@ -91,8 +91,12 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
     case MSG_TYPES.msg: {
       if (!isRecord(payload)) return false
       const m = payload as Partial<MsgPayload>
-      if (m.kind !== 'text' && m.kind !== 'group-text' && m.kind !== 'recall') return false
-      if (m.resend !== undefined && typeof m.resend !== 'boolean') return false
+      if (m.kind !== 'text' && m.kind !== 'group-text' && m.kind !== 'recall' && m.kind !== 'nudge') {
+        return false
+      }
+      const resend = (m as { resend?: unknown }).resend
+      if (resend !== undefined && typeof resend !== 'boolean') return false
+      if (m.kind === 'nudge') return resend === undefined
       if (m.kind === 'recall') {
         if (!isStr(m.targetId, LIMITS.id)) return false
         if (m.groupId !== undefined) {
