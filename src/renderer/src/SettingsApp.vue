@@ -951,43 +951,71 @@ async function removeRange(cidr: string): Promise<void> {
         </section>
 
         <section v-else class="page-section">
-          <div class="about-card">
-            <div class="about-mark">茶</div>
-            <div>
-              <h2>茶话间 Pantry</h2>
-              <p>纯内网即时通讯与文件传输。无服务器，无遥测，数据不出局域网。</p>
+          <div class="about-panel">
+            <!-- 品牌标识区（决议 #90 重设计）：居中圆标 + 中英文名 + 定位 + 纯内网信任徽条 -->
+            <div class="about-hero">
+              <div class="about-mark">茶</div>
+              <h2>茶话间<span class="about-latin">Pantry</span></h2>
+              <p class="about-tagline">纯内网即时通讯与文件传输</p>
+              <div class="about-trust">
+                <PantryIcon name="shield" :size="13" />
+                <span>无服务器 · 无遥测 · 数据不出局域网</span>
+              </div>
             </div>
-          </div>
-          <div class="panel">
+
             <!-- 默认只露版本 / 许可 / 源码（决议 #90）：面向普通用户的核心信息 -->
-            <div class="info-grid">
-              <span>版本</span>
-              <strong>{{ info?.version ?? '-' }}</strong>
-              <span>许可</span>
-              <strong>MIT 许可证</strong>
-              <span>源码</span>
-              <a class="about-link" @click="openUrl('https://github.com/skyjt/pantry')">
-                github.com/skyjt/pantry
-                <PantryIcon name="external" :size="13" />
-              </a>
-            </div>
-            <!-- 开发者向运行时信息收进折叠区（决议 #90）：ⓘ 就地展开，Chrome 108 无原生 popover -->
-            <button class="about-more" @click="showAboutDetails = !showAboutDetails">
-              <PantryIcon :name="showAboutDetails ? 'chevron-up' : 'info'" :size="14" />
-              {{ showAboutDetails ? '收起详细信息' : '更多信息' }}
+            <dl class="about-rows">
+              <div class="about-row">
+                <dt>版本</dt>
+                <dd class="mono">{{ info?.version ?? '-' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>许可</dt>
+                <dd>MIT 许可证</dd>
+              </div>
+              <div class="about-row">
+                <dt>源码</dt>
+                <dd>
+                  <a class="about-link" @click="openUrl('https://github.com/skyjt/pantry')">
+                    github.com/skyjt/pantry
+                    <PantryIcon name="external" :size="13" />
+                  </a>
+                </dd>
+              </div>
+            </dl>
+
+            <!-- 开发者向运行时信息收进折叠区（决议 #90）：就地展开，Chrome 108 无原生 popover -->
+            <button
+              class="about-more"
+              :aria-expanded="showAboutDetails"
+              @click="showAboutDetails = !showAboutDetails"
+            >
+              <span>{{ showAboutDetails ? '收起详细信息' : '更多信息' }}</span>
+              <PantryIcon :name="showAboutDetails ? 'chevron-up' : 'chevron-down'" :size="15" />
             </button>
-            <div v-if="showAboutDetails" class="info-grid about-detail">
-              <span>Electron</span>
-              <strong>{{ info?.electron ?? '-' }}</strong>
-              <span>Chromium</span>
-              <strong>{{ info?.chrome ?? '-' }}</strong>
-              <span>Node</span>
-              <strong>{{ info?.node ?? '-' }}</strong>
-              <span>本机节点</span>
-              <strong>{{ info?.nodeId ?? '-' }}</strong>
-              <span>Emoji 图形</span>
-              <strong>Twemoji（本地打包，CC-BY 4.0）</strong>
-            </div>
+
+            <dl v-if="showAboutDetails" class="about-rows about-detail">
+              <div class="about-row">
+                <dt>Electron</dt>
+                <dd class="mono">{{ info?.electron ?? '-' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>Chromium</dt>
+                <dd class="mono">{{ info?.chrome ?? '-' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>Node</dt>
+                <dd class="mono">{{ info?.node ?? '-' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>本机节点</dt>
+                <dd class="mono nodeid">{{ info?.nodeId ?? '-' }}</dd>
+              </div>
+              <div class="about-row">
+                <dt>Emoji 图形</dt>
+                <dd class="muted">Twemoji（本地打包 · CC-BY 4.0）</dd>
+              </div>
+            </dl>
           </div>
         </section>
       </template>
@@ -1117,8 +1145,7 @@ async function removeRange(cidr: string): Promise<void> {
 }
 
 .page-head p,
-.panel-head p,
-.about-card p {
+.panel-head p {
   color: var(--text-3);
   font-size: 12px;
   line-height: 1.5;
@@ -1142,7 +1169,6 @@ async function removeRange(cidr: string): Promise<void> {
 }
 
 .panel,
-.about-card,
 .empty-panel {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1157,8 +1183,7 @@ async function removeRange(cidr: string): Promise<void> {
   margin-bottom: 12px;
 }
 
-.panel-head h2,
-.about-card h2 {
+.panel-head h2 {
   margin: 0 0 4px;
   font-size: 14px;
   font-weight: 700;
@@ -1686,36 +1711,179 @@ async function removeRange(cidr: string): Promise<void> {
   gap: 12px;
 }
 
-.about-card {
+/* 关于页（决议 #90 重设计）：单卡片承载——居中品牌标识 + 键值信息行 + 折叠开发者托盘 */
+.about-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-window);
+  overflow: hidden;
+}
+
+.about-hero {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 16px;
+  text-align: center;
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid var(--line);
 }
 
 .about-mark {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
   background: var(--primary);
   color: #fff;
-  font-size: 18px;
+  font-size: 26px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 8px 20px var(--primary-weak);
 }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 9px 12px;
+.about-hero h2 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-1);
+}
+
+.about-latin {
   font-size: 13px;
-}
-
-.info-grid span {
+  font-weight: 500;
+  letter-spacing: 0.5px;
   color: var(--text-3);
 }
 
-.info-grid strong {
+.about-tagline {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.about-trust {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 13px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.about-rows {
+  list-style: none;
+  padding: 2px 20px;
+}
+
+.about-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 0;
+}
+
+.about-row + .about-row {
+  border-top: 1px solid var(--line);
+}
+
+.about-row dt {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.about-row dd {
   min-width: 0;
+  text-align: right;
   overflow-wrap: anywhere;
+  color: var(--text-1);
+  font-size: 13px;
   font-weight: 600;
+}
+
+.about-row dd.muted {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.nodeid {
+  font-size: 12px;
+}
+
+.about-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.about-link:hover {
+  text-decoration: underline;
+}
+
+.about-more {
+  width: 100%;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.about-more:hover {
+  color: var(--primary);
+  background: var(--primary-weak);
+}
+
+.about-detail {
+  border-top: 1px solid var(--line);
+  background: var(--bg-list);
+  animation: about-reveal 0.18s ease;
+}
+
+@keyframes about-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .about-detail {
+    animation: none;
+  }
 }
 
 @media (max-width: 660px) {
