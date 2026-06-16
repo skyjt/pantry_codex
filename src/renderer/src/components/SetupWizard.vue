@@ -42,7 +42,7 @@ async function finish(): Promise<void> {
     <div class="card">
       <div class="brand">
         <PantryBrandLogo variant="icon" :size="52" class="brand-logo" />
-        <div class="brand-name">茶话间<span class="brand-latin">Pantry</span></div>
+        <div class="brand-name">茶话间<span class="brand-latin">Teahouse</span></div>
       </div>
       <div class="dots">
         <span v-for="i in 3" :key="i" class="dot" :class="{ on: step >= i }"></span>

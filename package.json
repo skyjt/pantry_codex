@@ -1,8 +1,8 @@
 {
   "name": "pantry",
   "productName": "茶话间",
-  "version": "0.19.7",
-  "description": "茶话间（Pantry）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
+  "version": "0.20.0",
+  "description": "茶话间（Teahouse）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
   "private": true,
   "main": "./out/main/index.js",
   "engines": {
@@ -37,7 +37,7 @@
   },
   "build": {
     "appId": "com.pantry.app",
-    "productName": "Pantry",
+    "productName": "Teahouse",
     "electronVersion": "22.3.27",
     "npmRebuild": false,
     "asar": true,
@@ -74,15 +74,15 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Pantry-${version}-win-${arch}-setup.${ext}",
+      "artifactName": "Teahouse-${version}-win-${arch}-setup.${ext}",
       "shortcutName": "茶话间"
     },
     "portable": {
-      "artifactName": "Pantry-${version}-win-${arch}-portable.${ext}"
+      "artifactName": "Teahouse-${version}-win-${arch}-portable.${ext}"
     },
     "linux": {
       "icon": "build/icons/linux",
-      "maintainer": "Pantry Maintainers <pantry-maintainers@example.invalid>",
+      "maintainer": "Teahouse Maintainers <teahouse-maintainers@example.invalid>",
       "target": [
         {
           "target": "deb",
@@ -98,9 +98,9 @@
         }
       ],
       "category": "Network",
-      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}",
+      "artifactName": "Teahouse-${version}-${os}-${arch}.${ext}",
       "desktop": {
-        "StartupWMClass": "pantry",
+        "StartupWMClass": "teahouse",
         "Name": "茶话间"
       }
     },
@@ -132,10 +132,10 @@
           ]
         }
       ],
-      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}",
+      "artifactName": "Teahouse-${version}-${os}-${arch}.${ext}",
       "extendInfo": {
-        "CFBundleDisplayName": "Pantry",
-        "CFBundleName": "Pantry"
+        "CFBundleDisplayName": "Teahouse",
+        "CFBundleName": "Teahouse"
       },
       "extraResources": [
         {

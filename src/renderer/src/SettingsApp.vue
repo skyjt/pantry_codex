@@ -1007,7 +1007,7 @@ async function removeRange(cidr: string): Promise<void> {
             <!-- 品牌标识区（决议 #90 重设计）：居中圆标 + 中英文名 + 定位 + 纯内网信任徽条 -->
             <div class="about-hero">
               <PantryBrandLogo variant="icon" :size="60" class="about-logo" />
-              <h2>茶话间<span class="about-latin">Pantry</span></h2>
+              <h2>茶话间<span class="about-latin">Teahouse</span></h2>
               <p class="about-tagline">纯内网即时通讯与文件传输</p>
               <div class="about-trust">
                 <PantryIcon name="shield" :size="13" />

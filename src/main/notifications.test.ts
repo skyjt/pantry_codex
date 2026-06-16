@@ -66,15 +66,15 @@ describe('notification helpers', () => {
       notificationIconPath({
         platform: 'linux',
         isPackaged: true,
-        resourcesPath: '/opt/Pantry/resources',
+        resourcesPath: '/opt/Teahouse/resources',
         appPath: '/app'
       })
-    ).toBe('/opt/Pantry/resources/icons/pantry.png')
+    ).toBe('/opt/Teahouse/resources/icons/pantry.png')
     expect(
       notificationIconPath({
         platform: 'win32',
         isPackaged: false,
-        resourcesPath: 'C:\\Pantry\\resources',
+        resourcesPath: 'C:\\Teahouse\\resources',
         appPath: 'C:\\repo'
       })
     ).toBe('C:\\repo\\build\\icons\\window-icon.png')

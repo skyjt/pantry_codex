@@ -98,12 +98,12 @@ if ((process.platform === 'win32' && release().startsWith('6.1')) || process.pla
 // 也不开放任何代理配置——代理对内网通信无意义，只会增加连接失败与信息泄漏面。
 app.commandLine.appendSwitch('no-proxy-server')
 
-// 运行时应用名固定为中文（决议 #60）：productName 已改 ASCII "Pantry" 以保证
-// 安装路径无中文（/opt/Pantry 等），但 userData 目录（已有用户数据所在）与
+// 运行时应用名固定为中文（决议 #60）：productName 已改 ASCII "Teahouse" 以保证
+// 安装路径无中文（/opt/Teahouse 等），但 userData 目录（已有用户数据所在）与
 // 系统通知标题必须保持「茶话间」——setName 必须在任何 getPath('userData') 之前。
 app.setName('茶话间')
 // Windows 通知/任务栏归属名（决议 #66）：不设则 Win10/11 的 toast 顶部显示默认
-// "electron.app.Pantry"；设为 appId，与 NSIS 安装的快捷方式 AUMID 一致，显示为「茶话间」。
+// "electron.app.Teahouse"；设为 appId，与 NSIS 安装的快捷方式 AUMID 一致，显示为「茶话间」。
 if (process.platform === 'win32') app.setAppUserModelId('com.pantry.app')
 
 // 本机双实例联调：PANTRY_USER_DATA 隔离数据目录（同时绕开单实例锁），见 README「开发」
@@ -283,7 +283,7 @@ if (!gotLock) {
 
   function mainWindowTitle(): string {
     const nick = appState?.config.setupDone ? appState.config.nick.trim() : ''
-    return nick ? `${nick}-🍵Pantry` : '茶话间'
+    return nick ? `${nick}-🍵Teahouse` : '茶话间'
   }
 
   function updateMainWindowTitle(): void {
@@ -1309,7 +1309,7 @@ if (!gotLock) {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '导入聊天记录备份',
       properties: ['openFile'],
-      filters: [{ name: 'Pantry Backup', extensions: ['pantry-bak', 'zip'] }]
+      filters: [{ name: 'Teahouse Backup', extensions: ['pantry-bak', 'zip'] }]
     })
     if (result.canceled || result.filePaths.length === 0) return null
     try {

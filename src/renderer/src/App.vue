@@ -106,7 +106,7 @@ const activeRailHint = ref<string | null>(null)
 
 function applyWindowTitle(next: SettingsView | null): void {
   const nick = next?.setupDone ? next.nick.trim() : ''
-  document.title = nick ? `${nick}-🍵Pantry` : '茶话间'
+  document.title = nick ? `${nick}-🍵Teahouse` : '茶话间'
 }
 
 function onVisibilityChange(): void {

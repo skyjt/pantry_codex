@@ -2,7 +2,7 @@
 
 <img src="build/icons/pantry-logo-icon.svg" alt="茶话间 Logo" width="120" height="120" />
 
-<h1>茶话间 &nbsp;·&nbsp; Pantry</h1>
+<h1>茶话间 &nbsp;·&nbsp; Teahouse</h1>
 
 <p><b>纯内网、基于 IP 的局域网即时通讯与文件传输工具</b></p>
 
@@ -74,7 +74,7 @@
 **macOS** — 打开 `.dmg` 拖入「应用程序」。内网分发若未签名 / 公证，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Pantry.app
+xattr -dr com.apple.quarantine /Applications/Teahouse.app
 ```
 
 ## 使用
