@@ -65,7 +65,7 @@ function confirmRemove(): void {
         v-for="conv in chatStore.visibleConvs"
         :key="conv.id"
         class="conv"
-        :class="{ active: conv.id === chatStore.activeConvId }"
+        :class="{ active: conv.id === chatStore.activeConvId, pinned: conv.pinned }"
         @click="chatStore.openConv(conv.id)"
         @contextmenu.prevent.stop="openMenu($event, conv)"
       >
@@ -154,6 +154,10 @@ function confirmRemove(): void {
   gap: 10px;
   padding: 10px 12px;
   cursor: pointer;
+}
+/* 置顶会话淡灰底（决议 #126）：与普通会话区分；hover / 选中态在其后定义，仍能覆盖 */
+.conv.pinned {
+  background: var(--bg-pinned);
 }
 .conv:hover {
   background: var(--line);
