@@ -30,6 +30,10 @@ export interface ConfigFile {
   manualPeers: string[]
   /** 网段扫描 CIDR 列表（F-DISC-2 第二板斧） */
   scanRanges: string[]
+  /** 网段来源元数据：本机新增或经局域网同事低频同步而来 */
+  scanRangeSources: Record<string, ScanRangeSourceRecord>
+  /** 用户主动移除过的网段，远端再次同步时不自动加回 */
+  ignoredScanRanges: Record<string, number>
   /** 监听端口；保存后重启生效 */
   udpPort: number
   tcpPort: number
@@ -55,6 +59,14 @@ export interface ConfigFile {
   showHideShortcut: string
 }
 
+export interface ScanRangeSourceRecord {
+  source: 'self' | 'remote'
+  addedAt: number
+  sourceNodeId?: string
+  sourceName?: string
+  lastAutoScanAt?: number
+}
+
 function readJson<T>(path: string): T | null {
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as T
@@ -67,6 +79,49 @@ function detectPlatform(): Platform {
   if (process.platform === 'win32') return 'win'
   if (process.platform === 'darwin') return 'mac'
   return 'linux'
+}
+
+function normalizeConfigCidr(input: string): string | null {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(input.trim())
+  if (!m) return null
+  const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+  const prefix = Number(m[5])
+  if (octets.some((o) => o > 255) || prefix < 8 || prefix > 30) return null
+  const hostBits = 32 - prefix
+  const hostCount = 2 ** hostBits - 2
+  if (hostCount <= 0 || hostCount > 1024) return null
+  const base =
+    ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
+  const network = (base >> hostBits << hostBits) >>> 0
+  return `${(network >>> 24) & 0xff}.${(network >>> 16) & 0xff}.${(network >>> 8) & 0xff}.${network & 0xff}/${prefix}`
+}
+
+function cleanScanRangeSourceRecord(value: unknown): ScanRangeSourceRecord | null {
+  if (!value || typeof value !== 'object') return null
+  const raw = value as Partial<ScanRangeSourceRecord>
+  const addedAt =
+    typeof raw.addedAt === 'number' && Number.isFinite(raw.addedAt) && raw.addedAt > 0
+      ? raw.addedAt
+      : Date.now()
+  const lastAutoScanAt =
+    typeof raw.lastAutoScanAt === 'number' &&
+    Number.isFinite(raw.lastAutoScanAt) &&
+    raw.lastAutoScanAt > 0
+      ? raw.lastAutoScanAt
+      : undefined
+  if (raw.source === 'self') {
+    return { source: 'self', addedAt, lastAutoScanAt }
+  }
+  if (raw.source === 'remote' && typeof raw.sourceNodeId === 'string') {
+    return {
+      source: 'remote',
+      sourceNodeId: raw.sourceNodeId,
+      sourceName: typeof raw.sourceName === 'string' ? raw.sourceName : '',
+      addedAt,
+      lastAutoScanAt
+    }
+  }
+  return null
 }
 
 export interface AppState {
@@ -140,9 +195,29 @@ export function saveAppSettings(
     >
   >
 ): void {
+  if (!state.config.scanRangeSources) state.config.scanRangeSources = {}
+  if (!state.config.ignoredScanRanges) state.config.ignoredScanRanges = {}
   if (patch.notifications !== undefined) state.config.notifications = patch.notifications
   if (patch.manualPeers !== undefined) state.config.manualPeers = patch.manualPeers
-  if (patch.scanRanges !== undefined) state.config.scanRanges = patch.scanRanges
+  if (patch.scanRanges !== undefined) {
+    const now = Date.now()
+    const prev = new Set(state.config.scanRanges)
+    const next = [...new Set(patch.scanRanges)]
+    const nextSet = new Set(next)
+    for (const cidr of prev) {
+      if (!nextSet.has(cidr)) {
+        state.config.ignoredScanRanges[cidr] = now
+        delete state.config.scanRangeSources[cidr]
+      }
+    }
+    for (const cidr of next) {
+      if (!prev.has(cidr)) delete state.config.ignoredScanRanges[cidr]
+      if (!state.config.scanRangeSources[cidr]) {
+        state.config.scanRangeSources[cidr] = { source: 'self', addedAt: now }
+      }
+    }
+    state.config.scanRanges = next
+  }
   if (patch.udpPort !== undefined) state.config.udpPort = patch.udpPort
   if (patch.tcpPort !== undefined) state.config.tcpPort = patch.tcpPort
   if (patch.hideOnCapture !== undefined) state.config.hideOnCapture = patch.hideOnCapture
@@ -157,6 +232,41 @@ export function saveAppSettings(
   if (patch.sendKey !== undefined) state.config.sendKey = patch.sendKey
   if (patch.captureShortcut !== undefined) state.config.captureShortcut = patch.captureShortcut
   if (patch.showHideShortcut !== undefined) state.config.showHideShortcut = patch.showHideShortcut
+  atomicWriteJson(state.configPath, state.config)
+}
+
+export function addSharedScanRanges(
+  state: AppState,
+  ranges: Array<{ cidr: string; addedAt: number }>,
+  source: { nodeId: string; name: string }
+): string[] {
+  if (!state.config.scanRangeSources) state.config.scanRangeSources = {}
+  if (!state.config.ignoredScanRanges) state.config.ignoredScanRanges = {}
+  const existing = new Set(state.config.scanRanges)
+  const accepted: string[] = []
+  for (const range of ranges) {
+    if (state.config.scanRanges.length >= 20) break
+    if (existing.has(range.cidr)) continue
+    if (state.config.ignoredScanRanges[range.cidr]) continue
+    state.config.scanRanges.push(range.cidr)
+    state.config.scanRangeSources[range.cidr] = {
+      source: 'remote',
+      sourceNodeId: source.nodeId,
+      sourceName: source.name,
+      addedAt: range.addedAt > 0 ? range.addedAt : Date.now()
+    }
+    existing.add(range.cidr)
+    accepted.push(range.cidr)
+  }
+  if (accepted.length > 0) atomicWriteJson(state.configPath, state.config)
+  return accepted
+}
+
+export function markScanRangeAutoScanned(state: AppState, cidr: string, at = Date.now()): void {
+  if (!state.config.scanRangeSources) state.config.scanRangeSources = {}
+  const record = state.config.scanRangeSources[cidr]
+  if (!record) return
+  record.lastAutoScanAt = at
   atomicWriteJson(state.configPath, state.config)
 }
 
@@ -195,6 +305,8 @@ export function loadAppState(
       notifications: true,
       manualPeers: [],
       scanRanges: [],
+      scanRangeSources: {},
+      ignoredScanRanges: {},
       udpPort,
       tcpPort,
       hideOnCapture: true,
@@ -225,8 +337,50 @@ export function loadAppState(
     ? config.manualPeers.filter((s): s is string => typeof s === 'string')
     : []
   config.scanRanges = Array.isArray(config.scanRanges)
-    ? config.scanRanges.filter((s): s is string => typeof s === 'string')
+    ? [
+        ...new Set(
+          config.scanRanges
+            .filter((s): s is string => typeof s === 'string')
+            .map((s) => normalizeConfigCidr(s))
+            .filter((s): s is string => typeof s === 'string')
+        )
+      ]
     : []
+  config.scanRangeSources =
+    config.scanRangeSources &&
+    typeof config.scanRangeSources === 'object' &&
+    !Array.isArray(config.scanRangeSources)
+      ? Object.fromEntries(
+          Object.entries(config.scanRangeSources)
+            .map(
+              ([cidr, record]) =>
+                [normalizeConfigCidr(cidr), cleanScanRangeSourceRecord(record)] as const
+            )
+            .filter(
+              (entry): entry is readonly [string, ScanRangeSourceRecord] =>
+                entry[0] !== null && entry[1] !== null
+            )
+        )
+      : {}
+  config.ignoredScanRanges =
+    config.ignoredScanRanges &&
+    typeof config.ignoredScanRanges === 'object' &&
+    !Array.isArray(config.ignoredScanRanges)
+      ? Object.fromEntries(
+          Object.entries(config.ignoredScanRanges)
+            .map(([key, value]) => [normalizeConfigCidr(key), value] as const)
+            .filter(
+              (entry): entry is readonly [string, number] =>
+                entry[0] !== null && typeof entry[1] === 'number'
+            )
+        )
+      : {}
+  const now = Date.now()
+  for (const cidr of config.scanRanges) {
+    if (!config.scanRangeSources[cidr]) {
+      config.scanRangeSources[cidr] = { source: 'self', addedAt: now }
+    }
+  }
   config.udpPort =
     typeof config.udpPort === 'number' &&
     Number.isInteger(config.udpPort) &&

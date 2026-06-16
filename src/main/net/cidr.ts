@@ -3,7 +3,13 @@
 
 export const SCAN_MAX_HOSTS = 1024
 
-export function parseCidr(input: string): string[] | null {
+interface ParsedCidr {
+  prefix: number
+  network: number
+  hostCount: number
+}
+
+function parseCidrBase(input: string): ParsedCidr | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(input.trim())
   if (!m) return null
   const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
@@ -17,13 +23,26 @@ export function parseCidr(input: string): string[] | null {
   const base =
     ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
   const network = (base >> hostBits << hostBits) >>> 0
+  return { prefix, network, hostCount }
+}
 
+function formatIpv4(addr: number): string {
+  return `${(addr >>> 24) & 0xff}.${(addr >>> 16) & 0xff}.${(addr >>> 8) & 0xff}.${addr & 0xff}`
+}
+
+export function normalizeCidr(input: string): string | null {
+  const parsed = parseCidrBase(input)
+  if (!parsed) return null
+  return `${formatIpv4(parsed.network)}/${parsed.prefix}`
+}
+
+export function parseCidr(input: string): string[] | null {
+  const parsed = parseCidrBase(input)
+  if (!parsed) return null
   const hosts: string[] = []
-  for (let i = 1; i <= hostCount; i++) {
-    const addr = (network + i) >>> 0
-    hosts.push(
-      `${(addr >>> 24) & 0xff}.${(addr >>> 16) & 0xff}.${(addr >>> 8) & 0xff}.${addr & 0xff}`
-    )
+  for (let i = 1; i <= parsed.hostCount; i++) {
+    const addr = (parsed.network + i) >>> 0
+    hosts.push(formatIpv4(addr))
   }
   return hosts
 }

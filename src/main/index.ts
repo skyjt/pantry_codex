@@ -39,8 +39,21 @@ import {
   type ProfileSubmit,
   type SettingsView
 } from '../shared/ipc'
-import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
-import { loadAppState, saveAppSettings, saveProfile, type AppState } from './store/app-state'
+import {
+  DEFAULT_TCP_PORT,
+  DEFAULT_UDP_PORT,
+  LIMITS,
+  TIMINGS,
+  type ScanRangeSummary
+} from '../shared/protocol'
+import {
+  addSharedScanRanges,
+  loadAppState,
+  markScanRangeAutoScanned,
+  saveAppSettings,
+  saveProfile,
+  type AppState
+} from './store/app-state'
 import { setupTray, stopTrayUnreadFlash, updateTrayUnread } from './windows/tray'
 import { openSettingsWindow } from './windows/settings-window'
 import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
@@ -50,7 +63,7 @@ import {
   notificationIconPath
 } from './notifications'
 import { StickerRepo } from './store/sticker-repo'
-import { parseCidr } from './net/cidr'
+import { normalizeCidr, parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
 import { GroupRepo } from './store/group-repo'
 import { FilesService } from './services/files'
@@ -67,6 +80,7 @@ import { DedupRepo } from './store/dedup-repo'
 import { UdpChannel } from './net/udp'
 import { PeerRegistry } from './net/peer-registry'
 import { Discovery, type ManualPeer } from './net/discovery'
+import { RangeSync } from './net/range-sync'
 import { Messenger } from './net/messenger'
 import { PeerClock } from './net/peer-clock'
 import { ChatService } from './services/chat'
@@ -136,10 +150,12 @@ if (!gotLock) {
   let capturing = false
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   let appState: AppState | null = null
+  let rangeSync: RangeSync | null = null
   let tray: Tray | null = null
   let isQuitting = false
   let nudgeShakeOrigin: [number, number] | null = null
   let nudgeShakeTimers: Array<ReturnType<typeof setTimeout>> = []
+  const rangeScanTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function parsePort(value: string | undefined): number | null {
     if (!value) return null
@@ -423,6 +439,109 @@ if (!gotLock) {
     return registry ? registry.list().map(toPeerView) : []
   }
 
+  function scanRangeItems(): SettingsView['scanRangeItems'] {
+    const c = appState?.config
+    if (!c) return []
+    const sources = c.scanRangeSources ?? {}
+    return c.scanRanges.map((cidr) => {
+      const source = sources[cidr] ?? { source: 'self' as const, addedAt: Date.now() }
+      return {
+        cidr,
+        source: source.source,
+        sourceNodeId: source.sourceNodeId,
+        sourceName: source.sourceName,
+        addedAt: source.addedAt,
+        lastAutoScanAt: source.lastAutoScanAt
+      }
+    })
+  }
+
+  function sharedScanRanges(): ScanRangeSummary[] {
+    const c = appState?.config
+    if (!c) return []
+    const ignored = c.ignoredScanRanges ?? {}
+    const sources = c.scanRangeSources ?? {}
+    const now = Date.now()
+    const seen = new Set<string>()
+    const ranges: ScanRangeSummary[] = []
+    for (const raw of c.scanRanges) {
+      const cidr = normalizeCidr(raw)
+      if (!cidr || ignored[cidr] || seen.has(cidr)) continue
+      seen.add(cidr)
+      ranges.push({ cidr, addedAt: sources[cidr]?.addedAt ?? now })
+    }
+    return ranges
+  }
+
+  function hashString(value: string): number {
+    let hash = 2166136261
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i)
+      hash = Math.imul(hash, 16777619)
+    }
+    return hash >>> 0
+  }
+
+  function shouldAutoScanRange(cidr: string): boolean {
+    if (!appState || !registry) return false
+    const onlineCount = registry.onlineCount()
+    if (onlineCount <= TIMINGS.scanRangeAutoScanLargeOnlineThreshold) return true
+    return (
+      hashString(`${appState.nodeId}:${cidr}`) % TIMINGS.scanRangeAutoScanLargeOnlineModulo ===
+      0
+    )
+  }
+
+  function scheduleAutoScanRange(cidr: string): void {
+    const state = appState
+    if (!state || !discovery || rangeScanTimers.has(cidr)) return
+    const meta = state.config.scanRangeSources?.[cidr]
+    if (!meta || meta.source !== 'remote') return
+    const now = Date.now()
+    if (
+      meta.lastAutoScanAt &&
+      now - meta.lastAutoScanAt < TIMINGS.scanRangeAutoScanMinInterval
+    ) {
+      return
+    }
+    if (!shouldAutoScanRange(cidr)) return
+    const delay =
+      TIMINGS.scanRangeAutoScanInitialMin +
+      Math.floor(
+        Math.random() *
+          (TIMINGS.scanRangeAutoScanInitialMax - TIMINGS.scanRangeAutoScanInitialMin + 1)
+      )
+    const timer = setTimeout(() => {
+      rangeScanTimers.delete(cidr)
+      const hosts = parseCidr(cidr)
+      if (!hosts || !discovery || !appState) return
+      discovery.scanHosts(hosts, udpPort, TIMINGS.scanRangeAutoScanHostDelay)
+      markScanRangeAutoScanned(appState, cidr)
+      broadcastSettings()
+    }, delay)
+    rangeScanTimers.set(cidr, timer)
+    timer.unref?.()
+  }
+
+  function scheduleExistingRemoteRangeScans(): void {
+    const c = appState?.config
+    if (!c) return
+    for (const cidr of c.scanRanges) scheduleAutoScanRange(cidr)
+  }
+
+  function acceptSharedScanRanges(fromNodeId: string, ranges: ScanRangeSummary[]): void {
+    const state = appState
+    if (!state) return
+    const sourceName = resolvePeerDisplayName(fromNodeId) || '同事'
+    const accepted = addSharedScanRanges(state, ranges, {
+      nodeId: fromNodeId,
+      name: sourceName
+    })
+    if (accepted.length === 0) return
+    for (const cidr of accepted) scheduleAutoScanRange(cidr)
+    broadcastSettings()
+  }
+
   async function startNet(): Promise<void> {
     const state = appState
     if (!state) return
@@ -439,6 +558,13 @@ if (!gotLock) {
     // 时钟偏移矫正（决议 #65）：发现层观测各节点时钟差，chat/groups 显示时矫正到本机钟
     const peerClock = new PeerClock()
     discovery = new Discovery({ udp, registry, profile: state.profile, manualPeers: allManual, peerClock })
+    rangeSync = new RangeSync({
+      udp,
+      registry,
+      selfId: state.nodeId,
+      getRanges: sharedScanRanges,
+      acceptRanges: acceptSharedScanRanges
+    })
 
     // 存储层降级链：文件库 → 内存库（功能照常、不持久）→ 全不可用则只剩发现功能
     try {
@@ -573,6 +699,8 @@ if (!gotLock) {
     try {
       await udp.start()
       discovery.start()
+      rangeSync?.start()
+      scheduleExistingRemoteRangeScans()
       netState.ok = true
     } catch (err) {
       // 端口被占等启动失败：进"离线模式"，窗口照常可用（tech-design §2）
@@ -911,6 +1039,7 @@ if (!gotLock) {
       notifications: c?.notifications !== false,
       manualPeers: c?.manualPeers ?? [],
       scanRanges: c?.scanRanges ?? [],
+      scanRangeItems: scanRangeItems(),
       udpPort: c?.udpPort ?? udpPort,
       tcpPort: c?.tcpPort ?? tcpPort,
       hideOnCapture: c?.hideOnCapture !== false,
@@ -1137,6 +1266,7 @@ if (!gotLock) {
     if (appState && typeof patch === 'object' && patch !== null) {
       const p = patch as Record<string, unknown>
       const clean: AppSettingsPatch = {}
+      const previousScanRanges = new Set(appState.config.scanRanges)
       if (typeof p.notifications === 'boolean') clean.notifications = p.notifications
       if (Array.isArray(p.manualPeers)) {
         clean.manualPeers = p.manualPeers
@@ -1144,8 +1274,14 @@ if (!gotLock) {
           .slice(0, 100)
       }
       if (Array.isArray(p.scanRanges)) {
-        clean.scanRanges = p.scanRanges
-          .filter((s): s is string => typeof s === 'string')
+        clean.scanRanges = [
+          ...new Set(
+            p.scanRanges
+              .filter((s): s is string => typeof s === 'string')
+              .map((s) => normalizeCidr(s))
+              .filter((s): s is string => typeof s === 'string')
+          )
+        ]
           .slice(0, 20)
       }
       const nextUdpPort = parsePortValue(p.udpPort)
@@ -1171,6 +1307,19 @@ if (!gotLock) {
       const showHideShortcut = normalizeShortcut(p.showHideShortcut)
       if (showHideShortcut !== null) clean.showHideShortcut = showHideShortcut
       saveAppSettings(appState, clean)
+      if (clean.scanRanges !== undefined) {
+        const nextScanRanges = new Set(clean.scanRanges)
+        for (const cidr of previousScanRanges) {
+          if (!nextScanRanges.has(cidr)) {
+            const timer = rangeScanTimers.get(cidr)
+            if (timer) clearTimeout(timer)
+            rangeScanTimers.delete(cidr)
+          }
+        }
+        if (clean.scanRanges.some((cidr) => !previousScanRanges.has(cidr))) {
+          rangeSync?.scheduleShareSoon()
+        }
+      }
       if (clean.autoLaunch !== undefined) applyAutoLaunch(clean.autoLaunch)
       if (clean.captureShortcut !== undefined || clean.showHideShortcut !== undefined) {
         registerGlobalShortcuts()
@@ -1201,7 +1350,9 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.netScan, (_event, cidr: unknown): number => {
     if (typeof cidr !== 'string' || !discovery) return -1
-    const hosts = parseCidr(cidr)
+    const normalized = normalizeCidr(cidr)
+    if (!normalized) return -1
+    const hosts = parseCidr(normalized)
     if (!hosts) return -1
     return discovery.scanHosts(hosts, udpPort)
   })
@@ -1543,6 +1694,10 @@ if (!gotLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stopTrayUnreadFlash(tray)
+    rangeSync?.stop()
+    rangeSync = null
+    for (const timer of rangeScanTimers.values()) clearTimeout(timer)
+    rangeScanTimers.clear()
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时
     discovery = null
     if (pruneTimer) clearInterval(pruneTimer)

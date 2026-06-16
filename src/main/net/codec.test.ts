@@ -8,7 +8,8 @@ import {
   type GroupPayload,
   type MsgPayload,
   type Profile,
-  type ProfilePayload
+  type ProfilePayload,
+  type ScanRangesPayload
 } from '../../shared/protocol'
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -139,6 +140,29 @@ describe('codec', () => {
 
     const resend = makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'nudge', resend: true })
     expect(decode(encode(resend))).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
+  it('scan-ranges 只接受受控 CIDR 列表', () => {
+    const ok = makeEnvelope<ScanRangesPayload>(MSG_TYPES.scanRanges, 'node-aaaa', {
+      ranges: [{ cidr: '10.1.2.0/24', addedAt: Date.now() }]
+    })
+    expect(decode(encode(ok))).toMatchObject({ ok: true, known: true })
+
+    const tooLarge = makeEnvelope<ScanRangesPayload>(MSG_TYPES.scanRanges, 'node-aaaa', {
+      ranges: [{ cidr: '10.0.0.0/16', addedAt: Date.now() }]
+    })
+    expect(decode(encode(tooLarge))).toEqual({
+      ok: false,
+      reason: 'bad-payload:scan-ranges'
+    })
+
+    const missingTime = makeEnvelope(MSG_TYPES.scanRanges, 'node-aaaa', {
+      ranges: [{ cidr: '10.1.2.0/24' }]
+    })
+    expect(decode(encode(missingTime))).toEqual({
+      ok: false,
+      reason: 'bad-payload:scan-ranges'
+    })
   })
 
   it('group.info 支持 creatorId，旧包缺 creatorId 仍兼容', () => {

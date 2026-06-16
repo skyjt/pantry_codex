@@ -7,6 +7,7 @@ import {
   type AppSettingsPatch,
   type ConversationView,
   type DataExportOptions,
+  type ScanRangeItemView,
   type SettingsView,
   type TransferView
 } from '../../shared/ipc'
@@ -91,7 +92,7 @@ const activeNotice = computed(() =>
   section.value === 'network' && scanTip.value ? scanTip.value : savedTip.value
 )
 const hasManualPeers = computed(() => (settings.value?.manualPeers.length ?? 0) > 0)
-const hasScanRanges = computed(() => (settings.value?.scanRanges.length ?? 0) > 0)
+const hasScanRanges = computed(() => (settings.value?.scanRangeItems.length ?? 0) > 0)
 const hasTransfers = computed(() => transfers.value.length > 0)
 
 onMounted(async () => {
@@ -420,6 +421,12 @@ function formatBytes(value: number): string {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function scanRangeSourceLabel(item: ScanRangeItemView): string {
+  if (item.source === 'self') return '本机'
+  const name = item.sourceName?.trim() || '同事'
+  return `来自 ${name}`
 }
 
 async function addPeer(): Promise<void> {
@@ -853,12 +860,12 @@ async function removeRange(cidr: string): Promise<void> {
             </div>
             <div v-if="!hasScanRanges" class="empty-state">尚未保存扫描网段</div>
             <ul v-else class="chips">
-              <li v-for="r in settings.scanRanges" :key="r">
-                <span>{{ r }}</span>
-                <button class="icon-button" title="再次扫描" @click="rescan(r)">
+              <li v-for="r in settings.scanRangeItems" :key="r.cidr">
+                <span>{{ r.cidr }} · {{ scanRangeSourceLabel(r) }}</span>
+                <button class="icon-button" title="再次扫描" @click="rescan(r.cidr)">
                   <PantryIcon name="refresh" :size="13" />
                 </button>
-                <button class="icon-button" title="移除" @click="removeRange(r)">
+                <button class="icon-button" title="移除" @click="removeRange(r.cidr)">
                   <PantryIcon name="x" :size="13" />
                 </button>
               </li>

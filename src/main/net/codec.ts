@@ -7,6 +7,7 @@ import {
   MSG_TYPES,
   OFFER_FILES_PER_PACKET,
   PROTOCOL_VERSION,
+  SCAN_RANGES_PER_PACKET,
   TEXT_TCP_LIMIT,
   TEXT_UDP_LIMIT,
   UDP_MAX_INBOUND,
@@ -19,9 +20,11 @@ import {
   type PeersPayload,
   type PresencePayload,
   type Profile,
-  type ProfilePayload
+  type ProfilePayload,
+  type ScanRangesPayload
 } from '../../shared/protocol'
 import { PEERS_PER_PACKET } from '../../shared/protocol'
+import { normalizeCidr } from './cidr'
 
 // 信封编解码 + 入站校验（protocol §1/§4）：
 // 一切来自网络的报文按不可信输入处理 —— 字段白名单、类型、长度全检；
@@ -56,6 +59,10 @@ function isStrAllowEmpty(x: unknown, max: number): x is string {
 
 function isInt(x: unknown): x is number {
   return typeof x === 'number' && Number.isFinite(x) && Number.isInteger(x)
+}
+
+function isCidr(x: unknown): x is string {
+  return typeof x === 'string' && x.length <= 18 && normalizeCidr(x) !== null
 }
 
 export function validateProfile(p: unknown): p is Profile {
@@ -216,6 +223,24 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
           s.tcpPort <= 65535 &&
           isInt(s.lastSeen) &&
           s.lastSeen >= 0
+      )
+    }
+    case MSG_TYPES.scanRanges: {
+      if (!isRecord(payload)) return false
+      const p = payload as Partial<ScanRangesPayload>
+      if (
+        !Array.isArray(p.ranges) ||
+        p.ranges.length === 0 ||
+        p.ranges.length > SCAN_RANGES_PER_PACKET
+      ) {
+        return false
+      }
+      return p.ranges.every(
+        (r) =>
+          isRecord(r) &&
+          isCidr(r.cidr) &&
+          isInt(r.addedAt) &&
+          r.addedAt > 0
       )
     }
     case MSG_TYPES.exit:

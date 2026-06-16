@@ -46,7 +46,22 @@ export const TIMINGS = {
   /** gossip 条目新鲜度门槛：lastSeen 超过此值的转述不予验证 */
   gossipFreshness: 600_000,
   /** 节点缓存启动探测范围：lastSeen 在此窗口内的离线节点逐个单播 entry（§6.3） */
-  peerCacheProbeTtl: 7 * 24 * 3_600_000
+  peerCacheProbeTtl: 7 * 24 * 3_600_000,
+  /** 网段记录同步：启动/新增后的首次分享抖动窗口，避免同一时刻群发 */
+  scanRangeShareInitialMin: 2 * 60_000,
+  scanRangeShareInitialMax: 10 * 60_000,
+  /** 网段记录同步：低频兜底周期 */
+  scanRangeShareInterval: 60 * 60_000,
+  /** 自动接收网段后的首次后台扫描抖动窗口 */
+  scanRangeAutoScanInitialMin: 30 * 60_000,
+  scanRangeAutoScanInitialMax: 90 * 60_000,
+  /** 同一自动同步网段最短扫描间隔 */
+  scanRangeAutoScanMinInterval: 12 * 60 * 60_000,
+  /** 自动后台扫描限速：约 16 地址/秒，低于手动扫描 */
+  scanRangeAutoScanHostDelay: 62,
+  /** 在线规模较大时，只有部分客户端参与后台扫描 */
+  scanRangeAutoScanLargeOnlineThreshold: 50,
+  scanRangeAutoScanLargeOnlineModulo: 10
 }
 export type Timings = typeof TIMINGS
 
@@ -54,6 +69,8 @@ export type Timings = typeof TIMINGS
 export const PEERS_PER_PACKET = 8
 /** gossip 周期交换的扇出节点数 */
 export const GOSSIP_FANOUT = 2
+/** scan-ranges 报文单包条目上限（CIDR + 元数据，保证 ≤ UDP_MAX_PAYLOAD） */
+export const SCAN_RANGES_PER_PACKET = 10
 
 /** 字段长度上限（入站校验白名单，protocol §1 第 5 条） */
 export const LIMITS = {
@@ -131,6 +148,17 @@ export interface PeerSummary {
 /** gossip 节点摘要交换（§6.3）：收端对陌生且新鲜的条目单播 entry 验证，不直接入表 */
 export interface PeersPayload {
   peers: PeerSummary[]
+}
+
+export interface ScanRangeSummary {
+  cidr: string
+  /** 源端首次记录该网段的大致时间，仅用于 UI/去重元数据，不参与权限判断 */
+  addedAt: number
+}
+
+/** 低频同步网段记录；收端只入配置候选，扫描由本机后台节流器决定 */
+export interface ScanRangesPayload {
+  ranges: ScanRangeSummary[]
 }
 
 /** 群成员上限（requirements F-MSG-4） */
@@ -298,6 +326,7 @@ export const MSG_TYPES = {
   presence: 'presence',
   profile: 'profile',
   peers: 'peers',
+  scanRanges: 'scan-ranges',
   msg: 'msg',
   ack: 'ack',
   fileCtl: 'file-ctl',

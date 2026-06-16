@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCidr, SCAN_MAX_HOSTS } from './cidr'
+import { normalizeCidr, parseCidr, SCAN_MAX_HOSTS } from './cidr'
 
 describe('parseCidr（网段扫描）', () => {
   it('/30 展开 2 个主机（去网络与广播地址）', () => {
@@ -15,6 +15,12 @@ describe('parseCidr（网段扫描）', () => {
 
   it('基址非网络地址也归一（按掩码取整）', () => {
     expect(parseCidr('192.168.1.77/30')).toEqual(['192.168.1.77', '192.168.1.78'])
+  })
+
+  it('normalizeCidr 返回规范网络地址写法', () => {
+    expect(normalizeCidr('10.1.2.88/24')).toBe('10.1.2.0/24')
+    expect(normalizeCidr('172.16.2.9/22')).toBe('172.16.0.0/22')
+    expect(normalizeCidr('10.0.0.0/21')).toBeNull()
   })
 
   it('超大段/非法输入拒绝', () => {

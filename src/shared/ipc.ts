@@ -362,6 +362,7 @@ export interface SettingsView {
   notifications: boolean
   manualPeers: string[]
   scanRanges: string[]
+  scanRangeItems: ScanRangeItemView[]
   udpPort: number
   tcpPort: number
   /** 截图时隐藏茶话间窗口（决议 #22） */
@@ -382,6 +383,15 @@ export interface SettingsView {
     capture: boolean
     showHide: boolean
   }
+}
+
+export interface ScanRangeItemView {
+  cidr: string
+  source: 'self' | 'remote'
+  sourceNodeId?: string
+  sourceName?: string
+  addedAt: number
+  lastAutoScanAt?: number
 }
 
 export interface AppSettingsPatch {

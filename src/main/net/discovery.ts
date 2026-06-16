@@ -178,9 +178,9 @@ export class Discovery {
   }
 
   /** 网段定向扫描（F-DISC-2 第二板斧）：错峰单播 entry，≤125 地址/秒；返回扫描地址数 */
-  scanHosts(hosts: string[], port: number): number {
+  scanHosts(hosts: string[], port: number, hostDelayMs = 8): number {
     hosts.forEach((host, i) => {
-      const timer = setTimeout(() => this.probe(host, port), i * 8)
+      const timer = setTimeout(() => this.probe(host, port), i * hostDelayMs)
       timer.unref?.()
     })
     return hosts.length
