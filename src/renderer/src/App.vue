@@ -384,6 +384,14 @@ onUnmounted(() => {
       </div>
     </main>
   </div>
+
+  <!-- 移除聊天后的 10 秒撤回提示（决议 #125）：倒计时结束才真正删除聊天记录 -->
+  <div v-if="chatStore.pendingRemoval" class="undo-toast" role="status">
+    <span class="undo-text">已删除与「{{ chatStore.pendingRemoval.name }}」的聊天记录</span>
+    <button type="button" class="undo-btn" @click="chatStore.undoRemoveConversation()">
+      撤回 {{ chatStore.pendingRemoval.secondsLeft }}s
+    </button>
+  </div>
 </template>
 
 <style scoped>
@@ -769,5 +777,63 @@ onUnmounted(() => {
 }
 .hint {
   font-size: 12px;
+}
+
+/* 移除聊天撤回提示（决议 #125）：底部居中浮条，茶青撤回按钮，尊重 reduced-motion */
+.undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100% - 48px);
+  padding: 10px 12px 10px 16px;
+  border-radius: 10px;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18);
+  animation: undo-rise 0.18s ease;
+}
+.undo-text {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.undo-btn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.undo-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+@keyframes undo-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .undo-toast {
+    animation: none;
+  }
 }
 </style>

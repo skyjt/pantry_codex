@@ -37,21 +37,32 @@ async function toggleMute(): Promise<void> {
   if (conv) await chatStore.muteConversation(conv.id, !conv.muted)
 }
 
-async function removeConv(): Promise<void> {
+const confirmConv = ref<ConversationView | null>(null)
+
+const confirmName = computed(() => (confirmConv.value ? convName(confirmConv.value) : ''))
+
+// 移除聊天（决议 #125）：右键菜单先弹二次确认，确认后才进入 10 秒撤回窗口
+function askRemoveConv(): void {
   const conv = menu.value?.conv
   menu.value = null
-  if (conv) await chatStore.removeConversation(conv.id)
+  if (conv) confirmConv.value = conv
+}
+
+function confirmRemove(): void {
+  const conv = confirmConv.value
+  confirmConv.value = null
+  if (conv) chatStore.requestRemoveConversation(conv.id, convName(conv))
 }
 </script>
 
 <template>
   <div class="pane" @click="menu = null">
-    <div v-if="chatStore.convs.length === 0" class="placeholder">
+    <div v-if="chatStore.visibleConvs.length === 0" class="placeholder">
       还没有会话<br />去「通讯录」找个人开聊
     </div>
     <ul v-else class="conv-list">
       <li
-        v-for="conv in chatStore.convs"
+        v-for="conv in chatStore.visibleConvs"
         :key="conv.id"
         class="conv"
         :class="{ active: conv.id === chatStore.activeConvId }"
@@ -100,7 +111,19 @@ async function removeConv(): Promise<void> {
     >
       <button @click="togglePin">{{ menu.conv.pinned ? '取消置顶' : '置顶' }}</button>
       <button @click="toggleMute">{{ menu.conv.muted ? '取消免打扰' : '免打扰' }}</button>
-      <button class="danger" @click="removeConv">移除会话</button>
+      <button class="danger" @click="askRemoveConv">移除会话</button>
+    </div>
+
+    <!-- 移除聊天二次确认（决议 #125）：确认后删除聊天记录，仍有 10 秒撤回窗口 -->
+    <div v-if="confirmConv" class="confirm-mask" @click.self="confirmConv = null">
+      <div class="confirm-card" role="dialog" aria-modal="true" aria-label="移除聊天">
+        <h3>移除聊天</h3>
+        <p>移除后，与「{{ confirmName }}」的聊天记录将被删除。删除后 10 秒内可撤回。</p>
+        <div class="confirm-actions">
+          <button class="cancel" @click="confirmConv = null">取消</button>
+          <button class="danger-btn" @click="confirmRemove">移除</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -273,5 +296,63 @@ async function removeConv(): Promise<void> {
 }
 .conv-menu button.danger {
   color: var(--danger);
+}
+
+/* 移除聊天二次确认弹窗（决议 #125）：沿用设计语言——8px 圆角、茶青取消 hover、危险红主按钮 */
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+}
+.confirm-card {
+  width: 320px;
+  background: var(--bg-window);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  padding: 20px 20px 16px;
+}
+.confirm-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 8px;
+}
+.confirm-card p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  margin-bottom: 18px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.confirm-actions button {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.confirm-actions .cancel {
+  border: 1px solid var(--line);
+  background: var(--bg-window);
+  color: var(--text-2);
+}
+.confirm-actions .cancel:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.confirm-actions .danger-btn {
+  border: none;
+  background: var(--danger);
+  color: #fff;
+}
+.confirm-actions .danger-btn:hover {
+  filter: brightness(0.96);
 }
 </style>

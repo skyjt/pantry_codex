@@ -68,6 +68,8 @@ export class MsgRepo {
   private readonly statusStmt: DatabaseT.Statement
   private readonly recallStmt: DatabaseT.Statement
   private readonly deleteFtsStmt: DatabaseT.Statement
+  private readonly deleteFtsByConvStmt: DatabaseT.Statement
+  private readonly deleteByConvStmt: DatabaseT.Statement
   private readonly getStmt: DatabaseT.Statement
   private readonly resetSendingStmt: DatabaseT.Statement
 
@@ -92,6 +94,10 @@ export class MsgRepo {
       "UPDATE messages SET status = 'recalled', content = '', file_ref = NULL WHERE id = ?"
     )
     this.deleteFtsStmt = db.prepare('DELETE FROM messages_fts WHERE msg_id = ?')
+    this.deleteFtsByConvStmt = db.prepare(
+      'DELETE FROM messages_fts WHERE msg_id IN (SELECT id FROM messages WHERE conv_id = ?)'
+    )
+    this.deleteByConvStmt = db.prepare('DELETE FROM messages WHERE conv_id = ?')
     this.getStmt = db.prepare('SELECT * FROM messages WHERE id = ?')
     // 启动自愈（决议 #22）：残留"发送中"复位为失败，杜绝永远转圈
     this.resetSendingStmt = db.prepare(
@@ -144,6 +150,12 @@ export class MsgRepo {
     const info = this.recallStmt.run(msgId)
     this.deleteFtsStmt.run(msgId)
     return info.changes > 0
+  }
+
+  /** 删除某会话的全部消息及其全文索引（移除聊天 = 删除聊天内容，决议 #125） */
+  deleteByConv(convId: string): void {
+    this.deleteFtsByConvStmt.run(convId)
+    this.deleteByConvStmt.run(convId)
   }
 
   get(msgId: string): MsgRow | undefined {

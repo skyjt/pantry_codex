@@ -171,6 +171,30 @@ try {
   convRepo.markRead(convId)
   assert.equal(convRepo.get(convId)?.unread, 0)
 
+  // 5b. 移除聊天：deleteByConv 删除会话全部消息 + 全文索引（决议 #125）
+  const delConvId = convRepo.ensureSingle('node-del')
+  msgRepo.insert({
+    id: 'm-del-1',
+    convId: delConvId,
+    senderId: 'node-del',
+    isMine: false,
+    kind: 'text',
+    content: '待删除的机密内容',
+    ts: 3000,
+    status: 'sent'
+  })
+  assert.equal(msgRepo.page(delConvId, null, 10).length, 1, '删除前应有一条消息')
+  const delHitsBefore = db
+    .prepare('SELECT msg_id FROM messages_fts WHERE messages_fts MATCH ?')
+    .all(toFtsQuery('机密')) as unknown[]
+  assert.equal(delHitsBefore.length, 1, '删除前正文应能被 FTS 搜到')
+  msgRepo.deleteByConv(delConvId)
+  assert.equal(msgRepo.page(delConvId, null, 10).length, 0, 'deleteByConv 后消息应清空')
+  const delHitsAfter = db
+    .prepare('SELECT msg_id FROM messages_fts WHERE messages_fts MATCH ?')
+    .all(toFtsQuery('机密')) as unknown[]
+  assert.equal(delHitsAfter.length, 0, 'deleteByConv 后全文索引应一并清除')
+
   // 6. 补发队列与去重
   const queueRepo = new QueueRepo(db)
   queueRepo.enqueue('q-1', 'node-bob', '{"x":1}', Date.now() - 8 * 24 * 3_600_000) // 已过期

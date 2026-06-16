@@ -11,6 +11,15 @@ import type {
 // 主进程聊天数据的投影 + 乐观更新（tech-design §7 状态流）
 let nudgeClearTimer: ReturnType<typeof setTimeout> | null = null
 let nudgeOpenRun = 0
+// 移除聊天的 10 秒撤回窗口（决议 #125）：commit 定时器 + 每秒倒计时
+let removalCommitTimer: ReturnType<typeof setTimeout> | null = null
+let removalTickTimer: ReturnType<typeof setInterval> | null = null
+
+interface PendingRemoval {
+  convId: string
+  name: string
+  secondsLeft: number
+}
 
 type ConversationOpenScrollMode = 'restore' | 'latest' | 'target'
 
@@ -42,6 +51,8 @@ export const useChatStore = defineStore('chat', {
     selfNick: '',
     selfAvatar: -1,
     lastNudge: null as NudgeEvent | null,
+    /** 移除聊天的待删除项（决议 #125）：非空时该会话在列表中隐藏，10 秒倒计时内可撤回 */
+    pendingRemoval: null as PendingRemoval | null,
     initialized: false
   }),
   getters: {
@@ -51,8 +62,14 @@ export const useChatStore = defineStore('chat', {
     activeMessages(state): MessageView[] {
       return state.activeConvId ? (state.messages[state.activeConvId] ?? []) : []
     },
+    /** 会话列表展示用：隐藏处于撤回窗口内的待删除会话（决议 #125） */
+    visibleConvs(state): ConversationView[] {
+      const hidden = state.pendingRemoval?.convId
+      return hidden ? state.convs.filter((c) => c.id !== hidden) : state.convs
+    },
     totalUnread(state): number {
-      return state.convs.reduce((sum, c) => sum + c.unread, 0)
+      const hidden = state.pendingRemoval?.convId
+      return state.convs.reduce((sum, c) => (c.id === hidden ? sum : sum + c.unread), 0)
     }
   },
   actions: {
@@ -202,11 +219,52 @@ export const useChatStore = defineStore('chat', {
       await window.pantry.muteConversation(convId, muted)
     },
 
-    async removeConversation(convId: string): Promise<void> {
-      await window.pantry.removeConversation(convId)
+    /**
+     * 移除聊天（决议 #125）：二次确认后调用——先本地隐藏会话并开 10 秒撤回窗口，期间不落库；
+     * 10 秒内撤回则恢复，超时才真正删除聊天记录（消息 + 全文索引 + 会话条目）。
+     */
+    requestRemoveConversation(convId: string, name: string): void {
+      // 一次只保留一个待删除项：已有未决删除先立即落库
+      if (this.pendingRemoval) void this.commitRemoval()
+      this.clearRemovalTimers()
+      this.pendingRemoval = { convId, name, secondsLeft: 10 }
       if (this.activeConvId === convId) this.activeConvId = null
-      delete this.messages[convId]
-      delete this.scrollPositions[convId]
+      removalTickTimer = setInterval(() => {
+        if (this.pendingRemoval && this.pendingRemoval.secondsLeft > 0) {
+          this.pendingRemoval.secondsLeft -= 1
+        }
+      }, 1000)
+      removalCommitTimer = setTimeout(() => {
+        void this.commitRemoval()
+      }, 10000)
+    },
+
+    /** 撤回移除：取消倒计时并恢复会话（无任何落库删除） */
+    undoRemoveConversation(): void {
+      this.clearRemovalTimers()
+      this.pendingRemoval = null
+    },
+
+    /** 倒计时结束或被新移除挤掉时落库：真正删除聊天记录 */
+    async commitRemoval(): Promise<void> {
+      const pending = this.pendingRemoval
+      this.clearRemovalTimers()
+      this.pendingRemoval = null
+      if (!pending) return
+      await window.pantry.removeConversation(pending.convId)
+      delete this.messages[pending.convId]
+      delete this.scrollPositions[pending.convId]
+    },
+
+    clearRemovalTimers(): void {
+      if (removalCommitTimer) {
+        clearTimeout(removalCommitTimer)
+        removalCommitTimer = null
+      }
+      if (removalTickTimer) {
+        clearInterval(removalTickTimer)
+        removalTickTimer = null
+      }
     },
 
     async loadEarlier(): Promise<number> {

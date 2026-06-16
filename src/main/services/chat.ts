@@ -97,7 +97,10 @@ export class ChatService extends EventEmitter {
     this.emitConvs()
   }
 
+  // 移除聊天（决议 #125）：删除该会话的全部聊天记录（消息 + 全文索引）后再移除会话条目；
+  // 渲染层在调用前已做二次确认与 10 秒撤回窗口，到这里即真正落库删除。
   removeConversation(convId: string): void {
+    this.deps.msgRepo.deleteByConv(convId)
     this.deps.convRepo.remove(convId)
     this.emitConvs()
   }
