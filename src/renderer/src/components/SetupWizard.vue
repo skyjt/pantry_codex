@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { SettingsView } from '../../../shared/ipc'
+import PantryBrandLogo from './PantryBrandLogo.vue'
 
 // 首次启动向导（F-SYS-6，ui-design §7.4）：三步必经，防止全网一片"未命名"。
 
@@ -39,7 +40,10 @@ async function finish(): Promise<void> {
 <template>
   <div class="mask">
     <div class="card">
-      <div class="brand">茶话间</div>
+      <div class="brand">
+        <PantryBrandLogo variant="icon" :size="52" class="brand-logo" />
+        <div class="brand-name">茶话间<span class="brand-latin">Pantry</span></div>
+      </div>
       <div class="dots">
         <span v-for="i in 3" :key="i" class="dot" :class="{ on: step >= i }"></span>
       </div>
@@ -65,7 +69,7 @@ async function finish(): Promise<void> {
 
       <div v-else class="body">
         <h2>收到的文件放哪？</h2>
-        <p class="tip">文件传输功能即将到来，先把目录定好</p>
+        <p class="tip">同事发来的文件会保存到这里，之后可在设置里随时更改</p>
         <div class="dir">
           <span class="dir-path">{{ shownDir }}</span>
           <button class="ghost small" @click="pickDir">更改…</button>
@@ -97,15 +101,31 @@ async function finish(): Promise<void> {
   text-align: center;
 }
 .brand {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.brand-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-1);
+}
+.brand-latin {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
 }
 .dots {
   display: flex;
   justify-content: center;
   gap: 6px;
-  margin: 14px 0 22px;
+  margin: 16px 0 22px;
 }
 .dot {
   width: 8px;

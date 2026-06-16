@@ -385,7 +385,7 @@ function dateEnd(value: string): number | null {
 
 function convLabel(conv: ConversationView): string {
   const prefix = conv.type === 'group' ? '讨论组' : '单聊'
-  return `${prefix} ${conv.peerId}${conv.preview ? ` - ${conv.preview.slice(0, 18)}` : ''}`
+  return `${prefix} ${conv.peerId}${conv.preview ? ` · ${conv.preview.slice(0, 18)}` : ''}`
 }
 
 async function importData(): Promise<void> {
@@ -810,7 +810,7 @@ async function removeRange(cidr: string): Promise<void> {
               <li v-for="t in transfers" :key="t.transferId">
                 <div>
                   <strong>{{ t.name }}</strong>
-                  <small>{{ transferStatusLabel(t.status) }} - {{ transferMeta(t) }}</small>
+                  <small>{{ transferStatusLabel(t.status) }} · {{ transferMeta(t) }}</small>
                 </div>
                 <button class="ghost compact" :disabled="!t.savedPath" @click="revealTransfer(t.transferId)">
                   打开

@@ -1230,7 +1230,10 @@ async function onDrop(event: DragEvent): Promise<void> {
             <span class="profile-title">
               <strong>{{ peer.remark || peer.nick }}</strong>
               <small v-if="peer.remark">昵称：{{ peer.nick }}</small>
-              <small :class="{ on: peer.online }">{{ peer.online ? '● 在线' : '离线' }}</small>
+              <span class="profile-status" :class="{ on: peer.online }">
+                <span class="profile-status-dot"></span>
+                {{ peer.online ? '在线' : '离线' }}
+              </span>
             </span>
           </header>
           <div class="profile-rows">
@@ -2259,8 +2262,35 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--text-3);
   font-size: 12px;
 }
-.profile-title small.on {
+/* 在线状态与联系人资料页统一：对称状态点 + 文案的小药丸，不再用「● 在线」文本字形（决议 #122） */
+.profile-status {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  margin-top: 3px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-list);
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1;
+}
+.profile-status.on {
   color: var(--online);
+  background: rgba(43, 162, 69, 0.08);
+  border-color: rgba(43, 162, 69, 0.18);
+}
+.profile-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--offline);
+}
+.profile-status.on .profile-status-dot {
+  background: var(--online);
 }
 .profile-rows {
   padding: 10px 0 8px;

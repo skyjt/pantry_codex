@@ -117,10 +117,15 @@ async function openHit(convId: string, seq: number, msgId: string): Promise<void
 }
 .sec {
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-3);
-  padding: 10px 12px 4px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 2px;
+  letter-spacing: 0.3px;
+  padding: 14px 12px 6px;
+}
+/* 分类标题不再贴下划线，改用组间分隔线 + 间距节奏区隔（决议 #122）；首个分类不加顶线 */
+.sec:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
 }
 .item {
   padding: 8px 12px;

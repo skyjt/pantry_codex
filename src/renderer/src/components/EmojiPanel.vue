@@ -61,7 +61,7 @@ onMounted(() => void stickers.init())
         </span>
       </div>
       <p v-if="stickers.list.length === 0" class="empty">
-        还没有收藏——在聊天图片上右键「添加到表情」
+        还没有收藏的表情<br />在聊天图片上右键「添加到表情」
       </p>
     </div>
   </div>
@@ -188,6 +188,7 @@ onMounted(() => void stickers.init())
   grid-column: 1 / -1;
   text-align: center;
   font-size: 12px;
+  line-height: 1.8;
   color: var(--text-3);
   padding: 20px 8px;
 }
