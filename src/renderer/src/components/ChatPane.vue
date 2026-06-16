@@ -38,6 +38,55 @@ transfersStore.init()
 
 const draft = ref('')
 const dragging = ref(false)
+
+// 可拖拽调节的输入框高度（决议 #127）：拖输入区顶部手柄上下改 .input-shell 高度，
+// clamp 到 [48, 320]，用 localStorage 记忆，纯渲染层、不新增 IPC/存储。
+const INPUT_MIN_H = 48
+const INPUT_MAX_H = 320
+const INPUT_DEFAULT_H = 72
+function readStoredInputHeight(): number {
+  try {
+    const v = Number(localStorage.getItem('chat-input-height'))
+    if (Number.isFinite(v) && v >= INPUT_MIN_H && v <= INPUT_MAX_H) return v
+  } catch {
+    /* localStorage 不可用时退默认值 */
+  }
+  return INPUT_DEFAULT_H
+}
+const inputShellHeight = ref(readStoredInputHeight())
+let inputResizeMove: ((e: PointerEvent) => void) | null = null
+let inputResizeUp: (() => void) | null = null
+
+function stopInputResize(): void {
+  if (inputResizeMove) window.removeEventListener('pointermove', inputResizeMove)
+  if (inputResizeUp) window.removeEventListener('pointerup', inputResizeUp)
+  inputResizeMove = null
+  inputResizeUp = null
+}
+
+function startInputResize(e: PointerEvent): void {
+  e.preventDefault()
+  stopInputResize()
+  const startY = e.clientY
+  const startH = inputShellHeight.value
+  inputResizeMove = (ev: PointerEvent): void => {
+    // 向上拖（clientY 变小）增高，向下拖减小
+    const next = startH - (ev.clientY - startY)
+    inputShellHeight.value = Math.max(INPUT_MIN_H, Math.min(INPUT_MAX_H, Math.round(next)))
+  }
+  inputResizeUp = (): void => {
+    stopInputResize()
+    try {
+      localStorage.setItem('chat-input-height', String(inputShellHeight.value))
+    } catch {
+      /* 忽略写入失败，仅本次会话生效 */
+    }
+  }
+  window.addEventListener('pointermove', inputResizeMove)
+  window.addEventListener('pointerup', inputResizeUp)
+}
+
+onUnmounted(stopInputResize)
 const showEmoji = ref(false)
 const showHistorySearch = ref(false)
 const showMembers = ref(false)
@@ -1391,6 +1440,16 @@ async function onDrop(event: DragEvent): Promise<void> {
     </div>
 
     <footer class="input-area">
+      <!-- 输入框高度拖拽手柄（决议 #127）：压在消息/输入分隔线上，上下拖调高 -->
+      <div
+        class="input-resizer"
+        role="separator"
+        aria-label="拖动调整输入框高度"
+        title="拖动调整输入框高度"
+        @pointerdown="startInputResize"
+      >
+        <span class="input-resizer-grip"></span>
+      </div>
       <div class="toolbar">
         <span ref="emojiScope" class="emoji-scope">
           <EmojiPanel
@@ -1498,7 +1557,11 @@ async function onDrop(event: DragEvent): Promise<void> {
           {{ peersStore.nameOf(id) }}
         </button>
       </div>
-      <div class="input-shell" :class="{ 'has-mirror': draftUsesEmojiMirror }">
+      <div
+        class="input-shell"
+        :class="{ 'has-mirror': draftUsesEmojiMirror }"
+        :style="{ height: `${inputShellHeight}px` }"
+      >
         <div v-if="draftUsesEmojiMirror" class="input-mirror" aria-hidden="true">
           <div
             class="input-mirror-content"
@@ -2566,9 +2629,30 @@ async function onDrop(event: DragEvent): Promise<void> {
   border-top: 1px solid var(--line);
   padding: 8px 12px 10px;
 }
+/* 输入框高度拖拽手柄（决议 #127）：铺满顶部、压在消息/输入分隔线上；
+   默认细灰 grip 提示可拖，hover 变深，ns-resize 光标 */
+.input-resizer {
+  height: 8px;
+  margin: -8px -12px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+.input-resizer-grip {
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  transition: background 0.15s ease;
+}
+.input-resizer:hover .input-resizer-grip {
+  background: var(--text-3);
+}
 .input-shell {
   position: relative;
-  height: 72px;
 }
 .input {
   position: absolute;

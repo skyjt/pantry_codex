@@ -677,10 +677,16 @@ onUnmounted(() => {
   flex-direction: column;
 }
 .search-box {
-  padding: 34px 12px 8px; /* 顶部让出拖拽带与 mac 红绿灯（决议 #49） */
+  /* 与聊天头部 .head 等高（84px），两栏顶栏分隔线连成一条（决议 #127）；
+     padding-top 32px 让出拖拽带与 mac 红绿灯，与 .head 一致 */
+  height: 84px;
+  flex: 0 0 84px;
+  box-sizing: border-box;
+  padding: 32px 12px 0;
   display: flex;
   gap: 6px;
   align-items: center;
+  border-bottom: 1px solid var(--line);
 }
 .search-field {
   flex: 1;
