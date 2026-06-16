@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 import type { MessageView } from '../shared/ipc'
 import { emojiSafePlainText } from '../shared/compat-emoji'
 
@@ -27,9 +27,10 @@ const MAX_NOTIFICATION_BODY_CHARS = 60
 
 export function notificationIconPath(input: NotificationIconPathInput): string | undefined {
   if (input.platform === 'darwin') return undefined
+  const path = input.platform === 'win32' ? win32 : posix
   return input.isPackaged
-    ? join(input.resourcesPath, 'icons/pantry.png')
-    : join(input.appPath, 'build/icons/window-icon.png')
+    ? path.join(input.resourcesPath, 'icons', 'pantry.png')
+    : path.join(input.appPath, 'build', 'icons', 'window-icon.png')
 }
 
 export function messageNotificationPreview(msg: MessageView, hidePreview: boolean): string {

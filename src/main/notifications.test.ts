@@ -74,10 +74,10 @@ describe('notification helpers', () => {
       notificationIconPath({
         platform: 'win32',
         isPackaged: false,
-        resourcesPath: '/res',
-        appPath: '/repo'
+        resourcesPath: 'C:\\Pantry\\resources',
+        appPath: 'C:\\repo'
       })
-    ).toBe('/repo/build/icons/window-icon.png')
+    ).toBe('C:\\repo\\build\\icons\\window-icon.png')
     expect(
       notificationIconPath({
         platform: 'darwin',

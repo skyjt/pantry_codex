@@ -136,12 +136,22 @@ jobs:
         run: npm ci
 
       - name: 五连验证
+        shell: pwsh
         run: |
-          npm test
-          npm run test:db
-          npm run typecheck
-          npm run build
-          npm run smoke
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Checked {
+            param([string]$Command, [string[]]$Arguments)
+            & $Command @Arguments
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+          Invoke-Checked npm @('test')
+          Invoke-Checked npm @('run', 'test:db')
+          Invoke-Checked npm @('run', 'typecheck')
+          Invoke-Checked npm @('run', 'build')
+          Invoke-Checked npm @('run', 'smoke')
 
       - name: 构建 Win7 x64 产物
         run: npm run dist:win
@@ -189,7 +199,9 @@ jobs:
         run: npm ci
 
       - name: 五连验证
+        shell: bash
         run: |
+          set -euo pipefail
           npm test
           npm run test:db
           npm run typecheck
