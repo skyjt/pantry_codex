@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { MessageView } from '../../../shared/ipc'
+import { imageMimeFromExt } from '../utils/clipboard'
 import { useTransfersStore } from '../stores/transfers'
 import { useStickersStore } from '../stores/stickers'
 import PantryIcon from './PantryIcon.vue'
@@ -17,7 +18,7 @@ const menuAt = ref<{ x: number; y: number } | null>(null)
 const addTip = ref('')
 const addTipKind = ref<'ok' | 'fail'>('ok')
 const MENU_WIDTH = 112
-const MENU_HEIGHT = 68
+const MENU_HEIGHT = 100
 const MENU_MARGIN = 8
 let addTipTimer: number | undefined
 
@@ -36,8 +37,43 @@ function onContextMenu(event: MouseEvent): void {
 async function addToStickers(): Promise<void> {
   menuAt.value = null
   const ok = await stickersStore.addFromTransfer(transferId.value)
-  addTipKind.value = ok ? 'ok' : 'fail'
-  addTip.value = ok ? '已添加到表情' : '添加失败'
+  showTip(ok ? '已添加到表情' : '添加失败', ok ? 'ok' : 'fail')
+}
+
+async function sourceToPngBlob(bytes: ArrayBuffer, ext: string): Promise<Blob | null> {
+  const bitmap = await createImageBitmap(new Blob([bytes], { type: imageMimeFromExt(ext) }))
+  const canvas = document.createElement('canvas')
+  canvas.width = bitmap.width
+  canvas.height = bitmap.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    bitmap.close()
+    return null
+  }
+  ctx.drawImage(bitmap, 0, 0)
+  bitmap.close()
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+}
+
+async function copyImage(): Promise<void> {
+  menuAt.value = null
+  try {
+    if (!transferId.value) throw new Error('missing transfer id')
+    const source = await window.pantry.fetchStickerSource(transferId.value)
+    if (!source) throw new Error('source unavailable')
+    const png = await sourceToPngBlob(source.bytes, source.ext)
+    if (!png) throw new Error('png unavailable')
+    const ok = await window.pantry.writeImageToClipboard(await png.arrayBuffer())
+    if (!ok) throw new Error('clipboard write failed')
+    showTip('已复制', 'ok')
+  } catch {
+    showTip('复制失败', 'fail')
+  }
+}
+
+function showTip(text: string, kind: 'ok' | 'fail'): void {
+  addTipKind.value = kind
+  addTip.value = text
   clearAddTipTimer()
   addTipTimer = window.setTimeout(() => {
     addTip.value = ''
@@ -105,6 +141,7 @@ onUnmounted(clearAddTipTimer)
       :style="{ left: `${menuAt.x}px`, top: `${menuAt.y}px` }"
       @click.stop
     >
+      <button type="button" @click="copyImage">复制</button>
       <button type="button" @click="forwardImage">转发</button>
       <button type="button" @click="addToStickers">添加到表情</button>
     </div>

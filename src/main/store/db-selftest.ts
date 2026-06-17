@@ -20,6 +20,7 @@ import { SearchService } from '../services/search'
 import { PorterService } from '../services/porter'
 import { PeerRegistry } from '../net/peer-registry'
 import type { PeerRecord } from '../net/peer-registry'
+import { writeStoreZip } from '../util/zip-store'
 
 function makePeer(name: string, rev = 1): PeerRecord {
   return {
@@ -398,7 +399,10 @@ try {
   stickerRepo.insert('s-media', stickerPath, 64, 64, false)
 
   const backupPath = join(dir, 'pantry.pantry-bak')
-  new PorterService(db, 'node-self', '我', join(dir, 'restore-src')).export('backup', backupPath)
+  new PorterService(db, 'node-self', '我', join(dir, 'restore-src'), [dir]).export(
+    'backup',
+    backupPath
+  )
   const db2 = openDatabase(join(dir, 'imported.db'))
   try {
     const result = new PorterService(db2, 'node-new', '新我', join(dir, 'restored')).importBackup(
@@ -429,6 +433,81 @@ try {
     assert.equal(importedGroup?.adminHint, '项目代号')
   } finally {
     db2.close()
+  }
+
+  const externalPath = join(dir, 'external-secret.webp')
+  writeFileSync(externalPath, Buffer.from('do-not-import-by-path'))
+  const badBackupPath = join(dir, 'bad-paths.pantry-bak')
+  const badJsonl = (rows: unknown[]): Buffer =>
+    Buffer.from(rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8')
+  writeStoreZip(badBackupPath, [
+    {
+      name: 'manifest.json',
+      data: Buffer.from(
+        JSON.stringify({
+          formatVer: 1,
+          exportedAt: Date.now(),
+          exportedBy: 'node-old',
+          nick: '旧我',
+          counts: { conversations: 1, messages: 1, peers: 0, groups: 0, stickers: 1, transfers: 1, media: 0 }
+        }),
+        'utf8'
+      )
+    },
+    {
+      name: 'conversations.jsonl',
+      data: badJsonl([{ id: 'single:node-old', type: 'single', peerId: 'node-old', lastTs: 6000 }])
+    },
+    {
+      name: 'messages.jsonl',
+      data: badJsonl([
+        {
+          id: 'm-bad',
+          convId: 'single:node-old',
+          senderId: 'node-old',
+          isMine: true,
+          kind: 'image',
+          content: '[图片]',
+          fileRef: JSON.stringify({ transferId: 't-bad', name: 'bad.webp', size: 1, count: 1, dir: false }),
+          ts: 6000,
+          status: 'sent'
+        }
+      ])
+    },
+    { name: 'peers.jsonl', data: badJsonl([]) },
+    { name: 'groups.jsonl', data: badJsonl([]) },
+    {
+      name: 'stickers.jsonl',
+      data: badJsonl([{ id: 's-bad', path: externalPath, w: 64, h: 64, animated: 0, sort: 0, added: 6000 }])
+    },
+    {
+      name: 'transfers.jsonl',
+      data: badJsonl([
+        {
+          transferId: 't-bad',
+          msgId: 'm-bad',
+          peerId: 'node-old',
+          direction: 'out',
+          files: JSON.stringify({ name: 'bad.webp', savedPath: externalPath }),
+          status: 'done',
+          bytesDone: 1,
+          total: 1,
+          ts: 6000
+        }
+      ])
+    }
+  ])
+  const db3 = openDatabase(join(dir, 'bad-imported.db'))
+  try {
+    new PorterService(db3, 'node-new', '新我', join(dir, 'bad-restored')).importBackup(badBackupPath)
+    const importedBadTransfer = db3
+      .prepare('SELECT files FROM transfers WHERE transfer_id = ?')
+      .get('t-bad') as { files: string }
+    assert.equal(JSON.parse(importedBadTransfer.files).savedPath, undefined, '无归档媒体时不得保留外部传输路径')
+    const badSticker = db3.prepare('SELECT path FROM stickers WHERE id = ?').get('s-bad')
+    assert.equal(badSticker, undefined, '无归档媒体时不得导入外部表情路径')
+  } finally {
+    db3.close()
   }
 
   console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/porter/中文FTS 全部通过')

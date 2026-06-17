@@ -35,6 +35,7 @@ export class PeerRegistry extends EventEmitter {
   /** 收到对端任意报文时调用；带 profile 的报文（entry/alive/profile）会更新资料 */
   touch(nodeId: string, ip: string, udpPort: number, profile?: Profile): PeerRecord | null {
     if (nodeId === this.selfNodeId) return null
+    if (profile && profile.nodeId !== nodeId) return null
 
     const now = Date.now()
     const existing = this.peers.get(nodeId)
@@ -49,16 +50,20 @@ export class PeerRegistry extends EventEmitter {
       return record
     }
 
+    const sameAddress = existing.ip === ip && existing.udpPort === udpPort
+    if (!sameAddress) {
+      // 已在线节点不接受源地址漂移；离线节点换地址必须带完整 profile 重新握手。
+      if (existing.online || !profile) return null
+      existing.ip = ip
+      existing.udpPort = udpPort
+      changed = true
+    }
+
     let cameOnline = false
     if (!existing.online) {
       existing.online = true
       changed = true
       cameOnline = true
-    }
-    if (existing.ip !== ip || existing.udpPort !== udpPort) {
-      existing.ip = ip
-      existing.udpPort = udpPort
-      changed = true
     }
     if (profile && profile.profileRev >= existing.profile.profileRev) {
       if (profile.profileRev > existing.profile.profileRev || profile.nick !== existing.profile.nick) {

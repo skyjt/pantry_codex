@@ -165,7 +165,9 @@ export const useChatStore = defineStore('chat', {
       this.upsertConversation(conv)
       this.activeConvId = conv.id
       this.viewingHistory = false
-      if (!this.messages[conv.id]) {
+      // latest 语义 = 必看最新页：即使已缓存（可能是历史搜索上下文窗口或不完整页），
+      // 也重载最新一页，确保贴的"底部"就是真正最新消息（震动 / 通知直达，决议 #133）
+      if (scroll === 'latest' || !this.messages[conv.id]) {
         this.setConversationMessages(conv.id, await window.pantry.pageMessages(conv.id, null, 50))
       }
       this.requestConversationScroll(scroll)
@@ -180,7 +182,8 @@ export const useChatStore = defineStore('chat', {
       }
       this.activeConvId = convId
       this.viewingHistory = false
-      if (!this.messages[convId]) {
+      // latest 入口（通知 / 托盘直达等）重载最新页，不复用可能过期 / 历史的缓存（决议 #133）
+      if (scroll === 'latest' || !this.messages[convId]) {
         this.setConversationMessages(convId, await window.pantry.pageMessages(convId, null, 50))
       }
       await window.pantry.markRead(convId)

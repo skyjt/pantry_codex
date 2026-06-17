@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MSG_TYPES, type Envelope, type MsgPayload, type Profile, type Timings } from '../../shared/protocol'
+import {
+  MSG_TYPES,
+  type AckPayload,
+  type Envelope,
+  type MsgPayload,
+  type Profile,
+  type Timings
+} from '../../shared/protocol'
 import { makeEnvelope } from './codec'
 import { UdpChannel } from './udp'
 import { PeerRegistry } from './peer-registry'
@@ -190,6 +197,25 @@ describe('messenger 回环集成', () => {
     expect(payload.kind).toBe('text')
     if (payload.kind === 'text') expect(payload.text).toBe('你好，鲍勃')
     expect(a.queue.items).toHaveLength(0)
+  })
+
+  it('UDP ACK 必须来自本轮发送目标地址', async () => {
+    nextPort += 20
+    const a = await makeStack('alice', nextPort)
+    const evil = await makeStack('evil', nextPort + 5)
+    const peer = makeProfile('bob', nextPort + 9)
+    a.registry.touch(peer.nodeId, '127.0.0.1', nextPort + 9, peer)
+
+    const env = textEnv(a.profile.nodeId, '需要真实 ACK')
+    const sending = a.messenger.sendReliable(peer.nodeId, env)
+    await sleep(10)
+    evil.udp.send(
+      makeEnvelope<AckPayload>(MSG_TYPES.ack, peer.nodeId, { ackFor: env.id }),
+      '127.0.0.1',
+      a.port
+    )
+
+    await expect(sending).resolves.toBe(false)
   })
 
   it('超长文本通过 TCP 控制帧直达', async () => {

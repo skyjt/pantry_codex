@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import type { DataExportOptions, DataImportResult, ExportFormat } from '../../shared/ipc'
 import { toFtsTokens } from '../store/fts'
+import { isPathInsideAny } from '../util/path-policy'
 import { readZip, writeStoreZip, type ZipEntry } from '../util/zip-store'
 
 interface MessageDump {
@@ -112,8 +113,13 @@ export class PorterService {
     private readonly db: DatabaseT.Database,
     private readonly selfId: string,
     private readonly nick: string,
-    private readonly mediaDir: string
+    private readonly mediaDir: string,
+    private readonly extraMediaRoots: string[] = []
   ) {}
+
+  private managedMediaRoots(): string[] {
+    return [this.mediaDir, ...this.extraMediaRoots]
+  }
 
   export(format: ExportFormat, path: string, options?: DataExportOptions): void {
     if (format === 'backup') {
@@ -255,7 +261,7 @@ export class PorterService {
       )
       .all() as StickerDump[]
     return rows.map((row) => {
-      const archivePath = existingFile(row.path)
+      const archivePath = existingFile(row.path) && this.isManagedMediaPath(row.path)
         ? `media/stickers/${safeName(row.id)}${extname(row.path) || '.bin'}`
         : undefined
       return { ...row, archivePath }
@@ -279,7 +285,9 @@ export class PorterService {
     return rows.map((row) => {
       const savedPath = savedPathOf(row.files)
       const archivePath =
-        mediaTransferIds.has(row.transferId) && existingFile(savedPath)
+        mediaTransferIds.has(row.transferId) &&
+        existingFile(savedPath) &&
+        this.isManagedMediaPath(savedPath)
           ? `media/transfers/${safeName(row.transferId)}${extname(savedPath) || '.bin'}`
           : undefined
       return { ...row, archivePath }
@@ -425,7 +433,7 @@ export class PorterService {
     const restored = sticker.archivePath
       ? this.restoreMedia(entries, sticker.archivePath, `sticker-${sticker.id}`)
       : null
-    const path = restored || (existingFile(sticker.path) ? sticker.path : '')
+    const path = restored ?? ''
     if (!path) return
     this.db
       .prepare(
@@ -476,8 +484,13 @@ export class PorterService {
 
   private addMediaEntry(entries: ZipEntry[], archivePath: string, sourcePath: string | null): void {
     if (!sourcePath || !existingFile(sourcePath)) return
+    if (!this.isManagedMediaPath(sourcePath)) return
     if (entries.some((entry) => entry.name === archivePath)) return
     entries.push({ name: archivePath, data: readFileSync(sourcePath) })
+  }
+
+  private isManagedMediaPath(path: string | null): path is string {
+    return typeof path === 'string' && path.length > 0 && isPathInsideAny(path, this.managedMediaRoots())
   }
 
   private restoreMedia(
@@ -598,7 +611,7 @@ function rewriteFilesBlob(raw: string, restoredPath: string | null): string {
   const blob = parseFilesBlob(raw)
   if (restoredPath) {
     blob.savedPath = restoredPath
-  } else if (blob.savedPath && !existingFile(blob.savedPath)) {
+  } else {
     delete blob.savedPath
   }
   return JSON.stringify(blob)

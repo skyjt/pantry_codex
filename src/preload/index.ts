@@ -154,6 +154,10 @@ const api: PantryApi = {
   startCapture: (): Promise<void> => ipcRenderer.invoke(IpcChannels.captureStart),
   captureDone: (bytes: ArrayBuffer, send: boolean): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.captureDone, bytes, send),
+  writeImageToClipboard: (bytes: ArrayBuffer): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.clipboardWriteImage, bytes),
+  readImageFromClipboard: (): Promise<ArrayBuffer | null> =>
+    ipcRenderer.invoke(IpcChannels.clipboardReadImage),
   fetchStickerSource: (transferId: string): Promise<{ bytes: ArrayBuffer; ext: string } | null> =>
     ipcRenderer.invoke(IpcChannels.stickerFetchSource, transferId),
   addSticker: (bytes: ArrayBuffer, ext: string, w: number, h: number): Promise<StickerView | null> =>
@@ -181,6 +185,8 @@ const api: PantryApi = {
   onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener),
   onSettingsUpdated: (listener) => subscribe<SettingsView>(IpcEvents.settingsUpdated, listener),
   onScanProgress: (listener) => subscribe<ScanProgressView>(IpcEvents.netScanProgress, listener),
+  onClipboardPasteImage: (listener): (() => void) =>
+    subscribe<void>(IpcEvents.clipboardPasteImage, listener),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),
   toggleMaximizeWindow: (): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.winToggleMaximize),

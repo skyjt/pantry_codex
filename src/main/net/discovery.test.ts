@@ -3,6 +3,7 @@ import {
   MSG_TYPES,
   type PeersPayload,
   type Profile,
+  type ProfilePayload,
   type ScanRangeSummary,
   type Timings
 } from '../../shared/protocol'
@@ -185,6 +186,29 @@ describe('discovery 回环集成', () => {
     // A 在下个心跳发现 rev 失配 → 发 entry → B 回 alive 带新资料
     await waitFor(() => a.registry.get(b.profile.nodeId)?.profile.nick === 'bob-换了个人', 3000)
     expect(a.registry.get(b.profile.nodeId)?.profile.profileRev).toBe(2)
+  })
+
+  it('已在线节点不接受不同 UDP 源地址的伪造重绑定', async () => {
+    const a = await makeStack('alice')
+    const b = await makeStack('bob', [{ host: '127.0.0.1', port: a.port }])
+    const evil = await makeStack('evil')
+    a.discovery.start()
+    b.discovery.start()
+    await waitFor(() => a.registry.get(b.profile.nodeId)?.online === true)
+    const before = a.registry.get(b.profile.nodeId)
+
+    evil.udp.send(
+      makeEnvelope<ProfilePayload>(MSG_TYPES.entry, b.profile.nodeId, {
+        profile: { ...b.profile, nick: '伪造 bob', profileRev: b.profile.profileRev + 1 }
+      }),
+      '127.0.0.1',
+      a.port
+    )
+    await sleep(100)
+
+    const after = a.registry.get(b.profile.nodeId)
+    expect(after?.udpPort).toBe(before?.udpPort)
+    expect(after?.profile.nick).toBe('bob')
   })
 
   it('scan-ranges：在线节点低频同步网段记录，用户忽略后不自动加回', async () => {

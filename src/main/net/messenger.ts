@@ -36,6 +36,7 @@ export type SendOutcome = 'sent' | 'queued'
 
 interface PendingEntry {
   timer: ReturnType<typeof setTimeout> | null
+  expected: { ip: string; udpPort: number } | null
   settle: (acked: boolean) => void
 }
 
@@ -171,6 +172,7 @@ export class Messenger extends EventEmitter {
 
       const entry: PendingEntry = {
         timer: null,
+        expected: null,
         settle: (acked: boolean) => {
           if (!this.pending.has(key)) return
           this.pending.delete(key)
@@ -188,7 +190,10 @@ export class Messenger extends EventEmitter {
           return
         }
         const record = this.registry.get(peerId)
-        if (record) this.udp.send(env, record.ip, record.udpPort)
+        if (record) {
+          entry.expected = { ip: record.ip, udpPort: record.udpPort }
+          this.udp.send(env, record.ip, record.udpPort)
+        }
         entry.timer = setTimeout(step, delays[attempt])
         attempt += 1
       }
@@ -249,7 +254,10 @@ export class Messenger extends EventEmitter {
 
     if (env.type === MSG_TYPES.ack) {
       const ackFor = (env.payload as AckPayload).ackFor
-      this.pending.get(`${env.from}|${ackFor}`)?.settle(true)
+      const entry = this.pending.get(`${env.from}|${ackFor}`)
+      if (entry?.expected?.ip === rinfo.address && entry.expected.udpPort === rinfo.port) {
+        entry.settle(true)
+      }
       return
     }
 
@@ -259,12 +267,15 @@ export class Messenger extends EventEmitter {
       env.type === MSG_TYPES.fileCtl ||
       env.type === MSG_TYPES.group
     ) {
+      if (this.registry.get(env.from)) {
+        const record = this.registry.touch(env.from, rinfo.address, rinfo.port)
+        if (!record) return
+      }
       const ack = makeEnvelope<AckPayload>(MSG_TYPES.ack, this.selfId, { ackFor: env.id })
       this.udp.send(ack, rinfo.address, rinfo.port)
 
       if (this.dedup.has(env.id)) return // 补发/重传造成的重复，只应答不重复处理
       this.dedup.add(env.id, Date.now())
-      this.registry.touch(env.from, rinfo.address, rinfo.port) // 能发报文=在线
       this.emit('incoming', env, rinfo)
     }
   }

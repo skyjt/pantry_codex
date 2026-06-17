@@ -5,6 +5,7 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { splitEmojiText } from '../utils/compat-emoji'
+import { hasClipboardText } from '../utils/clipboard'
 import { emojiAdvanceWidth, fontOfStyle, setTextMeasurer } from '../utils/emoji-metrics'
 import { emojiToTwemojiCode, twemojiUrl } from '../utils/twemoji-assets'
 import { listTime, separatorTime } from '../utils/time'
@@ -95,6 +96,7 @@ const mentionIds = ref<string[]>([])
 const pendingMentionAt = ref<number | null>(null)
 const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
+const msgsContent = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
 const peerProfileScope = ref<HTMLElement | null>(null)
@@ -104,6 +106,8 @@ const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
+let stopClipboardPaste: (() => void) | null = null
+let clipboardImagePasteBusy = false
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
 // 历史搜索结果点图片：单击放大 / 双击定位的延时区分（决议 #74）
 let hitClickTimer: ReturnType<typeof setTimeout> | null = null
@@ -147,6 +151,11 @@ let nudgeFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 let nudgeRetryTimer: ReturnType<typeof setInterval> | null = null
 let applyingConversationScroll = false
 const SCROLL_BOTTOM_THRESHOLD = 24
+// 贴底意图（决议 #133）：用户处于"看最新"状态时，图片 / 文件卡片等异步撑高后继续贴底
+let stickBottom = false
+let bottomKeeper: ResizeObserver | null = null
+// 距底超过约两屏（决议 #134）：驱动消息区右下角"回到最新"悬浮按钮的显示
+const farFromBottom = ref(false)
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -296,11 +305,28 @@ onMounted(async () => {
     settings.value = next
     void nextTick(refreshInputFont)
   })
+  stopClipboardPaste = window.pantry.onClipboardPasteImage(() => {
+    const active = document.activeElement
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      if (active !== inputEl.value) return
+    }
+    if (canSendMedia.value) void sendClipboardImageFallback()
+  })
+  // 内容异步撑高（图片 / 文件卡片加载完成、消息渲染）后，若处于贴底意图则继续贴到最新（决议 #133）
+  if (msgsContent.value && typeof ResizeObserver !== 'undefined') {
+    bottomKeeper = new ResizeObserver(() => {
+      const el = scrollArea.value
+      if (el && stickBottom && !isNearBottom(el)) el.scrollTop = el.scrollHeight
+    })
+    bottomKeeper.observe(msgsContent.value)
+  }
   applyConversationScroll()
 })
 
 onUnmounted(() => {
   rememberConversationScroll()
+  bottomKeeper?.disconnect()
+  bottomKeeper = null
   document.removeEventListener('mousedown', onDocumentPointerDown)
   if (historySearchTimer) clearTimeout(historySearchTimer)
   if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
@@ -309,6 +335,7 @@ onUnmounted(() => {
   if (recallCountdownTimer) clearInterval(recallCountdownTimer)
   historySearchRun += 1
   stopSettings?.()
+  stopClipboardPaste?.()
 })
 
 watch(
@@ -366,8 +393,17 @@ function needSeparator(msg: MessageView, index: number): boolean {
 function scrollToBottom(): void {
   void nextTick(() => {
     const el = scrollArea.value
-    if (el) applyScrollTop(el.scrollHeight)
+    if (el) {
+      stickBottom = true
+      applyScrollTop(el.scrollHeight)
+    }
   })
+}
+
+// 点右下角悬浮按钮回到最新（决议 #134）：历史页需重载最新页，最新页直接滚到底
+function jumpToLatest(): void {
+  if (chatStore.viewingHistory) void chatStore.backToLatest()
+  else scrollToBottom()
 }
 
 function isNearBottom(el = scrollArea.value): boolean {
@@ -395,16 +431,23 @@ function applyScrollTop(top: number): void {
 function applyConversationScroll(): void {
   const convId = chatStore.activeConvId
   const mode = chatStore.openScrollMode
-  if (!convId || mode === 'target') return
+  if (!convId) return
+  // 搜索跳转定位到指定历史消息（高亮居中），不属于贴底意图，避免内容撑高时被拉回底部
+  if (mode === 'target') {
+    stickBottom = false
+    return
+  }
   void nextTick(() => {
     if (chatStore.activeConvId !== convId) return
     const el = scrollArea.value
     if (!el) return
     const saved = chatStore.scrollPositions[convId]
     if (mode === 'latest' || !saved || saved.atBottom) {
+      stickBottom = true
       applyScrollTop(el.scrollHeight)
       return
     }
+    stickBottom = false
     applyScrollTop(Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight)))
   })
 }
@@ -453,6 +496,10 @@ async function onScroll(): Promise<void> {
   const el = scrollArea.value
   if (!el) return
   rememberConversationScroll()
+  // 跟随贴底意图随滚动更新：贴近底部则保持跟随，向上翻历史则停止（决议 #133）
+  stickBottom = isNearBottom(el)
+  // 距底超过约两屏才显示"回到最新"按钮，避免一上滑就冒出来打扰（决议 #134）
+  farFromBottom.value = el.scrollHeight - el.clientHeight - el.scrollTop > el.clientHeight * 2
   if (applyingConversationScroll || el.scrollTop > 40 || loadingEarlier.value) return
   loadingEarlier.value = true
   const prevHeight = el.scrollHeight
@@ -779,6 +826,20 @@ async function send(): Promise<void> {
   await chatStore.send(text, mentions)
 }
 
+async function sendClipboardImageFallback(event?: Event): Promise<boolean> {
+  if (clipboardImagePasteBusy) return false
+  clipboardImagePasteBusy = true
+  try {
+    const bytes = await window.pantry.readImageFromClipboard()
+    if (!bytes) return false
+    event?.preventDefault()
+    await chatStore.sendImageBytes('粘贴图片.png', bytes)
+    return true
+  } finally {
+    clipboardImagePasteBusy = false
+  }
+}
+
 function setNudgeFeedback(text: string, kind: 'ok' | 'warn' = 'ok'): void {
   nudgeFeedback.value = { text, kind }
   if (nudgeFeedbackTimer) clearTimeout(nudgeFeedbackTimer)
@@ -828,6 +889,10 @@ async function sendNudge(): Promise<void> {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'v') {
+    void sendClipboardImageFallback(event)
+    return
+  }
   if (event.key === '@' && isGroup.value && canSend.value && mentionMembers.value.length > 0) {
     pendingMentionAt.value = inputEl.value?.selectionStart ?? draft.value.length
     showMentionPicker.value = true
@@ -1027,30 +1092,36 @@ async function sendImage(): Promise<void> {
 
 /** Ctrl+V 粘贴：复制的文件按路径发（保留文件名/类型），截图位图按 bytes 发（F-MSG-3 / 决议 #76） */
 async function onPaste(event: ClipboardEvent): Promise<void> {
-  if (!canSendMedia.value || !event.clipboardData) return
+  if (!canSendMedia.value) return
+  const data = event.clipboardData
   // 1) 从文件管理器复制的真实文件：Electron 为剪贴板 File 注入 path（与拖拽同机制）
   const paths: string[] = []
-  for (const file of Array.from(event.clipboardData.files)) {
-    const p = (file as File & { path?: string }).path
-    if (p) paths.push(p)
+  if (data) {
+    for (const file of Array.from(data.files)) {
+      const p = (file as File & { path?: string }).path
+      if (p) paths.push(p)
+    }
+    if (paths.length > 0) {
+      event.preventDefault()
+      if (paths.length === 1 && isImagePath(paths[0])) await chatStore.sendImagePath(paths[0])
+      else await chatStore.sendFilePaths(paths)
+      return
+    }
+    // 复制网页 / 富文本 emoji 时，剪贴板常同时带 text/plain 和 image/png；文本交给 textarea 原生粘贴。
+    if (hasClipboardText(data)) return
+    // 2) 截图位图（无对应文件路径）：直接按图片 bytes 发送
+    for (const item of Array.from(data.items)) {
+      if (!item.type.startsWith('image/')) continue
+      const file = item.getAsFile()
+      if (!file) continue
+      event.preventDefault()
+      const bytes = await file.arrayBuffer()
+      const ext = item.type === 'image/jpeg' ? '.jpg' : '.png'
+      await chatStore.sendImageBytes(`粘贴图片${ext}`, bytes)
+      return
+    }
   }
-  if (paths.length > 0) {
-    event.preventDefault()
-    if (paths.length === 1 && isImagePath(paths[0])) await chatStore.sendImagePath(paths[0])
-    else await chatStore.sendFilePaths(paths)
-    return
-  }
-  // 2) 截图位图（无对应文件路径）：直接按图片 bytes 发送
-  for (const item of Array.from(event.clipboardData.items)) {
-    if (!item.type.startsWith('image/')) continue
-    const file = item.getAsFile()
-    if (!file) continue
-    event.preventDefault()
-    const bytes = await file.arrayBuffer()
-    const ext = item.type === 'image/jpeg' ? '.jpg' : '.png'
-    await chatStore.sendImageBytes(`粘贴图片${ext}`, bytes)
-    return
-  }
+  await sendClipboardImageFallback(event)
 }
 
 function onDragOver(event: DragEvent): void {
@@ -1340,6 +1411,7 @@ async function onDrop(event: DragEvent): Promise<void> {
 
     <div class="body-wrap">
       <div ref="scrollArea" class="msgs" @scroll="onScroll">
+      <div ref="msgsContent" class="msgs-content">
       <div v-if="loadingEarlier" class="sep">加载更早的消息…</div>
       <template v-for="(msg, i) in chatStore.activeMessages" :key="msg.id">
         <div v-if="needSeparator(msg, i)" class="sep">{{ separatorTime(msg.ts) }}</div>
@@ -1417,11 +1489,19 @@ async function onDrop(event: DragEvent): Promise<void> {
         </div>
       </template>
       </div>
+      </div>
+      <Transition name="jump-latest">
+        <button
+          v-if="chatStore.viewingHistory || farFromBottom"
+          class="jump-latest"
+          type="button"
+          title="回到最新消息"
+          @click="jumpToLatest"
+        >
+          <PantryIcon name="chevron-down" :size="20" />
+        </button>
+      </Transition>
     </div>
-
-    <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
-      <PantryIcon name="chevron-down" :size="14" />回到最新
-    </button>
 
     <div
       v-if="msgMenu"
@@ -1692,22 +1772,53 @@ async function onDrop(event: DragEvent): Promise<void> {
     background: transparent;
   }
 }
-.back-latest {
+/* "回到最新"悬浮圆按钮（决议 #134）：贴消息区右下角，白底 + 茶青箭头 + 柔和阴影 */
+.jump-latest {
   position: absolute;
-  right: 20px;
-  bottom: 150px;
+  right: 16px;
+  bottom: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--bg-window);
-  border-radius: 14px;
-  font-size: 12px;
   color: var(--primary);
-  padding: 5px 12px;
+  display: grid;
+  place-items: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
   z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  transition: box-shadow 140ms ease, border-color 140ms ease;
+}
+.jump-latest:active {
+  background: var(--bg-list);
+}
+/* 进出场：淡入 + 自下方 8px 上移，缓动复用项目既有曲线 */
+.jump-latest-enter-active,
+.jump-latest-leave-active {
+  transition: opacity 160ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.jump-latest-enter-from,
+.jump-latest-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .jump-latest-enter-active,
+  .jump-latest-leave-active {
+    transition: opacity 120ms ease;
+  }
+  .jump-latest-enter-from,
+  .jump-latest-leave-to {
+    transform: none;
+  }
+}
+/* hover 只做高亮：茶青描边 + 阴影略增，保持白底，不加半透明、不浮动（决议 #135） */
+.jump-latest:hover {
+  background: var(--bg-window);
+  border-color: var(--primary);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.07);
+  opacity: 1;
 }
 .tool {
   border: none;
@@ -2444,6 +2555,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 .msgs {
   flex: 1;
@@ -2451,6 +2563,11 @@ async function onDrop(event: DragEvent): Promise<void> {
   min-height: 0;
   overflow-y: auto;
   padding: 12px 16px;
+}
+.msgs-content {
+  /* ResizeObserver 观察目标：跟随图片 / 文件卡片异步撑高贴底（决议 #133）；
+     flow-root 让高度精确包含内容，消息流间距与无包裹时一致 */
+  display: flow-root;
 }
 .sender {
   font-size: 11px;

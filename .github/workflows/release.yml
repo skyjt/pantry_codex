@@ -9,7 +9,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CI: "true"
@@ -44,6 +44,8 @@ jobs:
 
       - name: 拉取源码
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: 安装 npm 依赖
         run: npm ci
@@ -125,6 +127,8 @@ jobs:
     steps:
       - name: 拉取源码
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -188,6 +192,8 @@ jobs:
     steps:
       - name: 拉取源码
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -238,6 +244,8 @@ jobs:
   publish-github-release:
     name: 发布 GitHub Release
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     needs:
       - linux-debian10-uos20-x64
       - windows7-x64

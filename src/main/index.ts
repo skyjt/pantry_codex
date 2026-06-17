@@ -38,7 +38,8 @@ import {
   type PeerView,
   type ProfileSubmit,
   type ScanProgressView,
-  type SettingsView
+  type SettingsView,
+  type TransferView
 } from '../shared/ipc'
 import {
   DEFAULT_TCP_PORT,
@@ -87,6 +88,8 @@ import { PeerClock } from './net/peer-clock'
 import { ChatService } from './services/chat'
 import { ImageOcrResultCache } from './services/image-ocr-cache'
 import type { PeerRecord } from './net/peer-registry'
+import { isPathInsideAny, PathGrantStore } from './util/path-policy'
+import { resolveDevRendererUrl } from './util/renderer-url'
 
 // Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠；UOS/Debian 目标机多国产 GPU 或旧驱动，
 // GPU 进程频报 ContextResult::kTransientFailure —— 两者默认软渲染（tech-design §9，决议 #55）
@@ -135,7 +138,9 @@ if (!gotLock) {
   const OCR_SOURCE_MAX_BYTES = 25 * 1024 * 1024
   const GLOBAL_SCAN_HOST_DELAY = 8
   const GLOBAL_SCAN_PROGRESS_PUSH_INTERVAL = 200
+  const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
   const imageOcrCache = new ImageOcrResultCache()
+  const rendererPathGrants = new PathGrantStore()
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
   const remarks = new Map<string, string>()
@@ -206,6 +211,53 @@ if (!gotLock) {
       appPath: app.getAppPath()
     })
     return icon && existsSync(icon) ? icon : undefined
+  }
+
+  function writeClipboardImage(bytes: ArrayBuffer): boolean {
+    if (bytes.byteLength === 0 || bytes.byteLength > 30 * 1024 * 1024) return false
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes))
+    if (image.isEmpty()) return false
+    clipboard.writeImage(image)
+    return !clipboard.readImage().isEmpty()
+  }
+
+  function readClipboardImage(): ArrayBuffer | null {
+    if (clipboard.readText().length > 0) return null
+    const image = clipboard.readImage()
+    if (image.isEmpty()) return null
+    const png = image.toPNG()
+    if (png.byteLength === 0 || png.byteLength > 30 * 1024 * 1024) return null
+    return png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength)
+  }
+
+  const imagesDir = (): string => join(app.getPath('userData'), 'data', 'images')
+  const importedMediaDir = (): string => join(app.getPath('userData'), 'data', 'imported-media')
+  const stickersDir = (): string => join(app.getPath('userData'), 'data', 'stickers')
+  const managedMediaRoots = (): string[] => [imagesDir(), importedMediaDir(), stickersDir()]
+  const managedStickerRoots = (): string[] => [stickersDir(), importedMediaDir()]
+
+  function stageOutgoingImagePath(sourcePath: string): string | null {
+    try {
+      const ext = IMG_EXTS.has(extname(sourcePath).toLowerCase())
+        ? extname(sourcePath).toLowerCase()
+        : '.png'
+      const dir = join(imagesDir(), 'out')
+      mkdirSync(dir, { recursive: true })
+      const staged = join(dir, `${randomUUID()}${ext}`)
+      copyFileSync(sourcePath, staged)
+      return staged
+    } catch {
+      return null
+    }
+  }
+
+  function managedTransferMediaView(transferId: string): TransferView | null {
+    const view = files?.transferView(transferId)
+    if (!view?.savedPath || view.status !== 'done') return null
+    const msg = msgRepoRef?.get(view.msgId)
+    if (!msg || (msg.kind !== 'image' && msg.kind !== 'sticker')) return null
+    if (!isPathInsideAny(view.savedPath, managedMediaRoots())) return null
+    return view
   }
 
   function showMainWindow(options: { forceForeground?: boolean } = {}): void {
@@ -740,7 +792,7 @@ if (!gotLock) {
         tcpPort,
         getSaveDir: () =>
           appState?.config.fileDir || join(app.getPath('downloads'), '茶话间'),
-        getImagesDir: () => join(app.getPath('userData'), 'data', 'images')
+        getImagesDir: imagesDir
       })
       files.on('message', onMessage)
       files.on('status', onStatus)
@@ -776,7 +828,8 @@ if (!gotLock) {
         db,
         state.nodeId,
         state.config.nick,
-        join(app.getPath('userData'), 'data', 'imported-media')
+        importedMediaDir(),
+        [imagesDir(), stickersDir()]
       )
       search = new SearchService(db, registry, (id) => remarks.get(id) ?? '')
       msgRepoRef = new MsgRepo(db)
@@ -946,6 +999,16 @@ if (!gotLock) {
     // 安全红线（README）：不放行任何窗口内导航与新窗口
     mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     mainWindow.webContents.on('will-navigate', (event) => event.preventDefault())
+    mainWindow.webContents.on('before-input-event', (_event, input) => {
+      if (
+        input.type === 'keyDown' &&
+        (input.meta || input.control) &&
+        !input.alt &&
+        input.key.toLowerCase() === 'v'
+      ) {
+        mainWindow?.webContents.send(IpcEvents.clipboardPasteImage)
+      }
+    })
 
     mainWindow.once('ready-to-show', () => mainWindow?.show())
     // 关窗 = 进托盘常驻（F-SYS-1）；托盘不可用的桌面环境降级为直接退出
@@ -960,8 +1023,13 @@ if (!gotLock) {
       mainWindow = null
     })
 
-    if (process.env['ELECTRON_RENDERER_URL']) {
-      void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+    const rendererUrl = resolveDevRendererUrl(
+      process.env['ELECTRON_RENDERER_URL'],
+      '',
+      app.isPackaged
+    )
+    if (rendererUrl) {
+      void mainWindow.loadURL(rendererUrl)
     } else {
       void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
     }
@@ -1200,7 +1268,8 @@ if (!gotLock) {
           db,
           appState.nodeId,
           appState.config.nick,
-          join(app.getPath('userData'), 'data', 'imported-media')
+          importedMediaDir(),
+          [imagesDir(), stickersDir()]
         )
       }
       discovery?.announceProfile() // 资料变更即时广播（F-DISC-7 的发送侧）
@@ -1219,27 +1288,33 @@ if (!gotLock) {
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 
-  ipcMain.handle(IpcChannels.filePick, async (_event, directory: unknown): Promise<string[] | null> => {
+  ipcMain.handle(IpcChannels.filePick, async (event, directory: unknown): Promise<string[] | null> => {
     if (!mainWindow) return null
     const result = await dialog.showOpenDialog(mainWindow, {
       title: directory === true ? '选择要发送的文件夹' : '选择要发送的文件',
       properties: directory === true ? ['openDirectory'] : ['openFile', 'multiSelections']
     })
-    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths
+    if (result.canceled || result.filePaths.length === 0) return null
+    rendererPathGrants.grant(event.sender.id, result.filePaths)
+    return result.filePaths
   })
 
-  ipcMain.handle(IpcChannels.fileOffer, async (_event, peerId: unknown, paths: unknown) => {
+  ipcMain.handle(IpcChannels.fileOffer, async (event, peerId: unknown, paths: unknown) => {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return null
     if (!paths.every((p) => typeof p === 'string' && p.length > 0 && p.length < 2048)) return null
-    return (await files?.offerPaths(peerId, paths as string[])) ?? null
+    const cleanPaths = paths as string[]
+    if (!rendererPathGrants.consume(event.sender.id, cleanPaths)) return null
+    return (await files?.offerPaths(peerId, cleanPaths)) ?? null
   })
 
-  ipcMain.handle(IpcChannels.groupFileOffer, async (_event, groupId: unknown, paths: unknown) => {
+  ipcMain.handle(IpcChannels.groupFileOffer, async (event, groupId: unknown, paths: unknown) => {
     if (typeof groupId !== 'string' || groupId.length === 0 || groupId.length > 64) return null
     if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return null
     if (!paths.every((p) => typeof p === 'string' && p.length > 0 && p.length < 2048)) return null
-    return (await files?.offerGroupPaths(groupId, paths as string[])) ?? null
+    const cleanPaths = paths as string[]
+    if (!rendererPathGrants.consume(event.sender.id, cleanPaths)) return null
+    return (await files?.offerGroupPaths(groupId, cleanPaths)) ?? null
   })
 
   ipcMain.handle(IpcChannels.fileAccept, async (_event, transferId: unknown, saveAs: unknown) => {
@@ -1322,8 +1397,6 @@ if (!gotLock) {
     }
   })
 
-  const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
-
   ipcMain.handle(
     IpcChannels.imgSendBytes,
     async (_event, peerId: unknown, name: unknown, bytes: unknown) => {
@@ -1356,18 +1429,24 @@ if (!gotLock) {
     }
   )
 
-  ipcMain.handle(IpcChannels.imgOfferPath, async (_event, peerId: unknown, path: unknown) => {
+  ipcMain.handle(IpcChannels.imgOfferPath, async (event, peerId: unknown, path: unknown) => {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
-    return (await files?.offerPaths(peerId, [path], 'image')) ?? null
+    if (!rendererPathGrants.consume(event.sender.id, [path])) return null
+    const staged = stageOutgoingImagePath(path)
+    if (!staged) return null
+    return (await files?.offerPaths(peerId, [staged], 'image')) ?? null
   })
 
-  ipcMain.handle(IpcChannels.groupImgOfferPath, async (_event, groupId: unknown, path: unknown) => {
+  ipcMain.handle(IpcChannels.groupImgOfferPath, async (event, groupId: unknown, path: unknown) => {
     if (typeof groupId !== 'string' || groupId.length === 0 || groupId.length > 64) return null
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
-    return (await files?.offerGroupPaths(groupId, [path], 'image')) ?? null
+    if (!rendererPathGrants.consume(event.sender.id, [path])) return null
+    const staged = stageOutgoingImagePath(path)
+    if (!staged) return null
+    return (await files?.offerGroupPaths(groupId, [staged], 'image')) ?? null
   })
 
   ipcMain.handle(IpcChannels.settingsSaveApp, (_event, patch: unknown): SettingsView => {
@@ -1483,8 +1562,8 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.imgOpenViewer, (_event, transferId: unknown): boolean => {
     if (typeof transferId !== 'string' || transferId.length > 64) return false
-    const view = files?.transferView(transferId)
-    if (!view?.savedPath) return false
+    const view = managedTransferMediaView(transferId)
+    if (!view) return false
     openImageViewerWindow(transferId, view.name)
     return true
   })
@@ -1513,8 +1592,8 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.imgOcrSource, (event, transferId: unknown): ImageOcrSource | null => {
     if (typeof transferId !== 'string' || transferId.length === 0 || transferId.length > 64) return null
     if (!event.sender.getURL().includes('#/image-viewer?')) return null
-    const view = files?.transferView(transferId)
-    if (!view?.savedPath || view.status !== 'done') return null
+    const view = managedTransferMediaView(transferId)
+    if (!view) return null
     if (view.totalSize <= 0 || view.totalSize > OCR_SOURCE_MAX_BYTES) return null
     try {
       const buf = readFileSync(view.savedPath)
@@ -1529,8 +1608,7 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.imgOcrResultGet, (event, transferId: unknown, cacheKey: unknown): ImageOcrResult | null => {
     if (typeof transferId !== 'string' || typeof cacheKey !== 'string') return null
     if (!event.sender.getURL().includes('#/image-viewer?')) return null
-    const view = files?.transferView(transferId)
-    if (!view?.savedPath || view.status !== 'done') return null
+    if (!managedTransferMediaView(transferId)) return null
     return imageOcrCache.get(transferId, cacheKey)
   })
 
@@ -1612,21 +1690,24 @@ if (!gotLock) {
     closeCaptureWindow()
     if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return
     if (bytes.byteLength > 30 * 1024 * 1024) return
-    const image = nativeImage.createFromBuffer(Buffer.from(bytes))
-    if (image.isEmpty()) return
-    clipboard.writeImage(image) // 始终进剪贴板（随处可贴）
+    if (!writeClipboardImage(bytes)) return // 始终进剪贴板（随处可贴）
     if (send === true && mainWindow) {
       showMainWindow()
       mainWindow.webContents.send(IpcEvents.captured, bytes)
     }
   })
 
-  const stickersDir = (): string => join(app.getPath('userData'), 'data', 'stickers')
+  ipcMain.handle(IpcChannels.clipboardWriteImage, (_event, bytes: unknown) => {
+    if (!(bytes instanceof ArrayBuffer)) return false
+    return writeClipboardImage(bytes)
+  })
+
+  ipcMain.handle(IpcChannels.clipboardReadImage, () => readClipboardImage())
 
   ipcMain.handle(IpcChannels.stickerFetchSource, (_event, transferId: unknown) => {
     if (typeof transferId !== 'string' || transferId.length > 64) return null
-    const view = files?.transferView(transferId)
-    if (!view?.savedPath) return null
+    const view = managedTransferMediaView(transferId)
+    if (!view) return null
     try {
       const buf = readFileSync(view.savedPath)
       if (buf.length > 25 * 1024 * 1024) return null
@@ -1667,7 +1748,7 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.stickerRemove, (_event, id: unknown) => {
     if (typeof id !== 'string' || id.length > 64 || !stickerRepo) return
     const path = stickerRepo.remove(id)
-    if (path) rmSync(path, { force: true })
+    if (path && isPathInsideAny(path, managedStickerRoots())) rmSync(path, { force: true })
   })
 
   ipcMain.handle(IpcChannels.stickerReorder, (_event, ids: unknown) => {
@@ -1687,6 +1768,7 @@ if (!gotLock) {
     if (typeof id !== 'string' || id.length > 64 || !stickerRepo) return null
     const row = stickerRepo.get(id)
     if (!row) return null
+    if (!isPathInsideAny(row.path, managedStickerRoots())) return null
     return (await files?.offerPaths(peerId, [row.path], 'sticker')) ?? null
   })
 
@@ -1711,8 +1793,8 @@ if (!gotLock) {
 
   ipcMain.handle(IpcChannels.imgSaveAs, async (event, transferId: unknown): Promise<boolean> => {
     if (typeof transferId !== 'string' || transferId.length > 64) return false
-    const view = files?.transferView(transferId)
-    if (!view?.savedPath) return false
+    const view = managedTransferMediaView(transferId)
+    if (!view) return false
     const owner = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined
     const options = {
       title: '图片另存为',
@@ -1751,8 +1833,8 @@ if (!gotLock) {
     protocol.registerFileProtocol('pantry-img', (request, callback) => {
       try {
         const transferId = new URL(request.url).hostname
-        const view = files?.transferView(transferId)
-        if (view?.savedPath) {
+        const view = managedTransferMediaView(transferId)
+        if (view) {
           callback({ path: view.savedPath })
           return
         }
@@ -1767,7 +1849,7 @@ if (!gotLock) {
       try {
         const id = new URL(request.url).hostname
         const row = stickerRepo?.get(id)
-        if (row) {
+        if (row && isPathInsideAny(row.path, managedStickerRoots())) {
           callback({ path: row.path })
           return
         }

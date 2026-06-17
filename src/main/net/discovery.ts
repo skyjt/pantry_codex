@@ -211,13 +211,16 @@ export class Discovery {
     switch (env.type) {
       case MSG_TYPES.entry: {
         const { profile } = env.payload as ProfilePayload
-        this.registry.touch(env.from, rinfo.address, rinfo.port, profile)
-        this.scheduleAliveReply(env.from, rinfo)
+        if (profile.nodeId !== env.from) break
+        if (this.registry.touch(env.from, rinfo.address, rinfo.port, profile)) {
+          this.scheduleAliveReply(env.from, rinfo)
+        }
         break
       }
       case MSG_TYPES.alive:
       case MSG_TYPES.profile: {
         const { profile } = env.payload as ProfilePayload
+        if (profile.nodeId !== env.from) break
         this.registry.touch(env.from, rinfo.address, rinfo.port, profile)
         break
       }
@@ -228,8 +231,8 @@ export class Discovery {
       case MSG_TYPES.presence: {
         const presence = env.payload as PresencePayload
         const knownRev = this.registry.profileRevOf(env.from)
-        this.registry.touch(env.from, rinfo.address, rinfo.port)
-        if (knownRev !== -1 && presence.profileRev !== knownRev) {
+        const touched = this.registry.touch(env.from, rinfo.address, rinfo.port)
+        if (touched && knownRev !== -1 && presence.profileRev !== knownRev) {
           // 资料版本失配 → 发 entry 触发对方回 alive（全量资料），§6.2 防"机器换人"
           this.udp.send(this.envEntry(), rinfo.address, rinfo.port)
         }

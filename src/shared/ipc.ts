@@ -62,6 +62,8 @@ export const IpcChannels = {
   groupSend: 'group:send',
   captureStart: 'capture:start',
   captureDone: 'capture:done',
+  clipboardWriteImage: 'clipboard:write-image',
+  clipboardReadImage: 'clipboard:read-image',
   stickerFetchSource: 'sticker:fetch-source',
   stickerAdd: 'sticker:add',
   stickerList: 'sticker:list',
@@ -99,6 +101,8 @@ export const IpcEvents = {
   settingsUpdated: 'settings:updated',
   /** 主界面全局网段刷新进度 */
   netScanProgress: 'net:scan-progress',
+  /** 主窗收到 Command/Ctrl+V；renderer 只在输入框聚焦时兜底读图片剪贴板 */
+  clipboardPasteImage: 'clipboard:paste-image',
   /** 窗口最大化状态变化 → 自绘控制按钮切换图标（决议 #49） */
   winMaximizeChanged: 'win:maximized-changed'
 } as const
@@ -544,6 +548,10 @@ export interface PantryApi {
   startCapture(): Promise<void>
   /** 截图框选完成：写剪贴板；send=true 时同时回推主窗发送到当前会话 */
   captureDone(bytes: ArrayBuffer, send: boolean): Promise<void>
+  /** 写系统图片剪贴板；表情 / 图片消息复制用 */
+  writeImageToClipboard(bytes: ArrayBuffer): Promise<boolean>
+  /** 读系统图片剪贴板 PNG；输入框 Command+V 兜底用 */
+  readImageFromClipboard(): Promise<ArrayBuffer | null>
   /** 读取某次传输的原始字节（收藏表情的压缩流水线用，仅图片/表情类传输可读） */
   fetchStickerSource(transferId: string): Promise<{ bytes: ArrayBuffer; ext: string } | null>
   /** 保存收藏（bytes 已经渲染层压缩）；返回新表情 */
@@ -571,6 +579,8 @@ export interface PantryApi {
   onSettingsUpdated(listener: (settings: SettingsView) => void): () => void
   /** 主界面全局网段刷新进度 */
   onScanProgress(listener: (progress: ScanProgressView) => void): () => void
+  /** 主窗 Command/Ctrl+V 图片剪贴板兜底 */
+  onClipboardPasteImage(listener: () => void): () => void
   /** 沉浸式无标题栏（决议 #49）：最小化当前窗口 */
   minimizeWindow(): Promise<void>
   /** 最大化/还原当前窗口；返回切换后是否处于最大化 */

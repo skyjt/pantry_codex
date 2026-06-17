@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { resolveDevRendererUrl } from '../util/renderer-url'
 
 let win: BrowserWindow | null = null
 
@@ -23,8 +24,13 @@ export function openImageViewerWindow(transferId: string, name: string): void {
 
   if (win && !win.isDestroyed()) {
     win.setTitle(title)
-    if (process.env['ELECTRON_RENDERER_URL']) {
-      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#${hash}`)
+    const rendererUrl = resolveDevRendererUrl(
+      process.env['ELECTRON_RENDERER_URL'],
+      hash,
+      app.isPackaged
+    )
+    if (rendererUrl) {
+      void win.loadURL(rendererUrl)
     } else {
       void win.loadFile(join(__dirname, '../renderer/index.html'), { hash })
     }
@@ -62,8 +68,13 @@ export function openImageViewerWindow(transferId: string, name: string): void {
     win = null
   })
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#${hash}`)
+  const rendererUrl = resolveDevRendererUrl(
+    process.env['ELECTRON_RENDERER_URL'],
+    hash,
+    app.isPackaged
+  )
+  if (rendererUrl) {
+    void win.loadURL(rendererUrl)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'), { hash })
   }

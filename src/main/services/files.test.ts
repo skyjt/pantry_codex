@@ -12,6 +12,7 @@ import type { GroupRepo } from '../store/group-repo'
 import type { MsgRepo, MsgRow, NewMessage } from '../store/msg-repo'
 import type { TransferRepo, TransferRow } from '../store/transfer-repo'
 import { FilesService } from './files'
+import { makeEnvelope } from '../net/codec'
 
 const tmpDirs: string[] = []
 
@@ -160,6 +161,52 @@ function waitTick(): Promise<void> {
 }
 
 describe('FilesService 群聊媒体', () => {
+  it('拒绝声明总大小与文件清单不一致的图片 offer', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
+    tmpDirs.push(dir)
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-bad-size',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: 'a.png', size: 30 }],
+        totalSize: 1,
+        fileCount: 1,
+        rootName: 'a.png',
+        purpose: 'image'
+      })
+    )
+    await waitTick()
+
+    expect(msgRepo.rows.size).toBe(0)
+    expect(transferRepo.rows.size).toBe(0)
+    expect(messenger.sent[0].peerId).toBe('node-bob')
+    expect(messenger.sent[0].env.payload).toMatchObject({
+      op: 'decline',
+      transferId: 't-bad-size'
+    })
+  })
+
   it('群文件发送只投递在线成员，并在本端只插入一条群消息', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
     tmpDirs.push(dir)

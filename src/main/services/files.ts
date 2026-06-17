@@ -623,13 +623,19 @@ export class FilesService extends EventEmitter {
       }
     }
     if (plans.filter((p) => !p.isDir).length !== asm.fileCount) return // 分包不一致，丢弃
+    const trustedTotalSize = plans.reduce((sum, plan) => sum + (plan.isDir ? 0 : plan.size), 0)
+    if (trustedTotalSize !== asm.totalSize) {
+      console.warn('[files] offer 声明大小与清单不一致，整体拒绝：', offer.transferId)
+      void this.declineUnknown(peerId, offer.transferId)
+      return
+    }
 
     // 图片/表情免确认条件复核（不信任发送方标记；群聊图片走 10MB 上限——决议 #33）
     const imageLimit = asm.groupId ? GROUP_IMG_AUTO_ACCEPT : IMG_AUTO_ACCEPT
     const inPurpose =
       (asm.purpose === 'image' || asm.purpose === 'sticker') &&
       asm.fileCount === 1 &&
-      asm.totalSize <= imageLimit &&
+      trustedTotalSize <= imageLimit &&
       plans.length === 1 &&
       !plans[0].isDir &&
       !plans[0].relPath.includes('/')
@@ -644,7 +650,7 @@ export class FilesService extends EventEmitter {
     const fileRef: FileRefView = {
       transferId: offer.transferId,
       name: asm.rootName,
-      size: asm.totalSize,
+      size: trustedTotalSize,
       count: asm.fileCount,
       dir: plans.some((p) => p.relPath.includes('/'))
     }
@@ -670,7 +676,7 @@ export class FilesService extends EventEmitter {
       direction: 'in',
       files: JSON.stringify({ name: asm.rootName } satisfies FilesBlob),
       status: 'offering',
-      total: asm.totalSize,
+      total: trustedTotalSize,
       ts: now
     })
     this.incoming.set(offer.transferId, {

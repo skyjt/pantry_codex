@@ -1,5 +1,6 @@
-import { BrowserWindow, type Rectangle } from 'electron'
+import { app, BrowserWindow, type Rectangle } from 'electron'
 import { join } from 'node:path'
+import { resolveDevRendererUrl } from '../util/renderer-url'
 
 // 截图框选窗（F-CAP-1）：覆盖主屏的无边框置顶窗，经 #/capture 挂 CaptureApp。
 // 截屏图像在窗口加载完成后经 IPC 注入（dataURL）。
@@ -43,8 +44,13 @@ export function openCaptureWindow(
     win?.focus()
   })
 
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}#/capture`)
+  const rendererUrl = resolveDevRendererUrl(
+    process.env['ELECTRON_RENDERER_URL'],
+    '/capture',
+    app.isPackaged
+  )
+  if (rendererUrl) {
+    void win.loadURL(rendererUrl)
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: '/capture' })
   }
