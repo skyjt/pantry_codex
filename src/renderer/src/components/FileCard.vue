@@ -14,6 +14,14 @@ const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
 const peersStore = usePeersStore()
 
+interface TransferStats {
+  total: number
+  done: number
+  failed: number
+  active: boolean
+  receivedNames: string[]
+}
+
 const ref_ = computed(() => props.msg.fileRef)
 const transferIds = computed(() => {
   if (!ref_.value) return []
@@ -28,15 +36,31 @@ const transfer = computed(() => transferList.value[0])
 const multiOut = computed(
   () => transferIds.value.length > 1 && transferList.value.every((t) => t.direction === 'out')
 )
-const multiActive = computed(
-  () => multiOut.value && transferList.value.some((t) => t.status === 'offering' || t.status === 'accepted')
-)
+const transferStats = computed<TransferStats>(() => {
+  const stats: TransferStats = {
+    total: transferList.value.length,
+    done: 0,
+    failed: 0,
+    active: false,
+    receivedNames: []
+  }
+  for (const t of transferList.value) {
+    if (t.status === 'done') {
+      stats.done += 1
+      stats.receivedNames.push(peersStore.nameOf(t.peerId))
+    } else if (t.status === 'failed' || t.status === 'declined' || t.status === 'canceled') {
+      stats.failed += 1
+    } else if (t.status === 'offering' || t.status === 'accepted') {
+      stats.active = true
+    }
+  }
+  return stats
+})
+const multiActive = computed(() => multiOut.value && transferStats.value.active)
 // 群聊文件接收名单（决议 #75）：x/x 计数 + 已接收成员名（备注优先）
 const totalCount = computed(() => transferIds.value.length)
-const doneCount = computed(() => transferList.value.filter((t) => t.status === 'done').length)
-const receivedNames = computed(() =>
-  transferList.value.filter((t) => t.status === 'done').map((t) => peersStore.nameOf(t.peerId))
-)
+const doneCount = computed(() => transferStats.value.done)
+const receivedNames = computed(() => transferStats.value.receivedNames)
 const percent = computed(() => {
   const list = multiOut.value ? transferList.value : transfer.value ? [transfer.value] : []
   const total = list.reduce((sum, t) => sum + t.totalSize, 0)
@@ -69,11 +93,7 @@ const metaText = computed(() => {
 const statusText = computed(() => {
   if (multiOut.value) {
     const total = transferIds.value.length
-    const list = transferList.value
-    const done = list.filter((t) => t.status === 'done').length
-    const failed = list.filter((t) =>
-      t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
-    ).length
+    const { done, failed } = transferStats.value
     if (done === total) return '已全部送达'
     if (failed === total && total > 0) return '传输失败'
     if (failed > 0) return `${failed} 位未完成`
@@ -119,12 +139,8 @@ const showBadge = computed(
 // 徽标配色：完成绿（带对勾）、取消灰、拒收/失败红
 const badgeTone = computed(() => {
   if (multiOut.value) {
-    const list = transferList.value
-    const done = list.filter((t) => t.status === 'done').length
-    if (list.length > 0 && done === list.length) return 'done'
-    const failed = list.filter(
-      (t) => t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
-    ).length
+    const { done, failed, total } = transferStats.value
+    if (total > 0 && done === total) return 'done'
     return failed > 0 ? 'failed' : 'muted'
   }
   const s = transfer.value?.status

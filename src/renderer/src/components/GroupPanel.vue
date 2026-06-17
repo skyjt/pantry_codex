@@ -19,9 +19,8 @@ const newName = ref('')
 const adding = ref(false)
 const adminPassword = ref('')
 
-const addable = computed(() =>
-  peersStore.peers.filter((p) => !props.group.members.includes(p.nodeId))
-)
+const memberIds = computed(() => new Set(props.group.members))
+const addable = computed(() => peersStore.peers.filter((p) => !memberIds.value.has(p.nodeId)))
 const canShowAdmin = computed(
   () => props.group.amMember && (props.group.canManage || props.group.hasAdminPassword)
 )

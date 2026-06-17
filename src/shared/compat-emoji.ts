@@ -90,6 +90,13 @@ export const COMPAT_EMOJIS: CompatEmojiItem[] = [
 
 const EMOJI_MAP = new Map(COMPAT_EMOJIS.map((item) => [item.char, item]))
 const EMOJI_CHARS = [...EMOJI_MAP.keys()].sort((a, b) => b.length - a.length)
+const EMOJI_CANDIDATES_BY_FIRST_UNIT = new Map<number, string[]>()
+for (const char of EMOJI_CHARS) {
+  const first = char.charCodeAt(0)
+  const candidates = EMOJI_CANDIDATES_BY_FIRST_UNIT.get(first)
+  if (candidates) candidates.push(char)
+  else EMOJI_CANDIDATES_BY_FIRST_UNIT.set(first, [char])
+}
 const GENERIC_EMOJI_RE =
   /[\p{Emoji_Presentation}\p{Extended_Pictographic}](?:\uFE0E|\uFE0F)?/gu
 const EMOJI_JOINER_RE = /[\u200D\uFE0E\uFE0F]/g
@@ -107,7 +114,7 @@ export function splitEmojiText(text: string): EmojiTextPart[] {
   const out: EmojiTextPart[] = []
   let i = 0
   while (i < text.length) {
-    const emoji = EMOJI_CHARS.find((char) => text.startsWith(char, i))
+    const emoji = matchCompatEmojiAt(text, i)
     if (emoji) {
       out.push({ text: emoji, emoji: true })
       i += emoji.length
@@ -130,11 +137,18 @@ export function emojiSafePlainText(text: string, replacement = '[表情]'): stri
   return rendered.replace(/(?:\[表情\]){2,}/g, replacement)
 }
 
-function nextEmojiIndex(text: string, from: number): number {
-  let next = text.length
-  for (const char of EMOJI_CHARS) {
-    const index = text.indexOf(char, from)
-    if (index >= 0 && index < next) next = index
+function matchCompatEmojiAt(text: string, offset: number): string | null {
+  const candidates = EMOJI_CANDIDATES_BY_FIRST_UNIT.get(text.charCodeAt(offset))
+  if (!candidates) return null
+  for (const emoji of candidates) {
+    if (text.startsWith(emoji, offset)) return emoji
   }
-  return next
+  return null
+}
+
+function nextEmojiIndex(text: string, from: number): number {
+  for (let i = from; i < text.length; i += 1) {
+    if (matchCompatEmojiAt(text, i)) return i
+  }
+  return text.length
 }

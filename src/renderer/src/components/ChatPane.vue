@@ -157,7 +157,7 @@ const group = computed(() =>
 const peer = computed(() => {
   const conv = chatStore.activeConv
   if (!conv || conv.type === 'group') return null
-  return peersStore.peers.find((p) => p.nodeId === conv.peerId) ?? null
+  return peersStore.byId(conv.peerId) ?? null
 })
 const peerName = computed(() => {
   if (isGroup.value) return group.value?.name ?? '讨论组'
@@ -169,10 +169,12 @@ const peerOnline = computed(() => peer.value?.online ?? false)
 const canSend = computed(() => (isGroup.value ? (group.value?.amMember ?? false) : true))
 const onlineGroupRecipientCount = computed(() => {
   if (!group.value) return 0
-  return group.value.members.filter((id) => {
-    if (id === chatStore.selfId) return false
-    return peersStore.byId(id)?.online ?? false
-  }).length
+  let count = 0
+  for (const id of group.value.members) {
+    if (id === chatStore.selfId) continue
+    if (peersStore.byId(id)?.online) count += 1
+  }
+  return count
 })
 const canSendMedia = computed(() =>
   isGroup.value ? canSend.value && onlineGroupRecipientCount.value > 0 : peerOnline.value

@@ -8,7 +8,13 @@ export const usePeersStore = defineStore('peers', {
     initialized: false
   }),
   getters: {
-    onlineCount: (state) => state.peers.filter((p) => p.online).length,
+    onlineCount: (state) => {
+      let count = 0
+      for (const peer of state.peers) {
+        if (peer.online) count += 1
+      }
+      return count
+    },
     /** 统一显示名：备注优先于昵称（F-DISC-9） */
     nameOf: (state) => {
       const map = new Map<string, string>()
