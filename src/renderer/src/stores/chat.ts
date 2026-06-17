@@ -15,6 +15,37 @@ let nudgeOpenRun = 0
 let removalCommitTimer: ReturnType<typeof setTimeout> | null = null
 let removalTickTimer: ReturnType<typeof setInterval> | null = null
 
+interface MessageCache {
+  list: MessageView[]
+  ids: Set<string>
+  byId: Map<string, MessageView>
+}
+
+const messageCaches = new Map<string, MessageCache>()
+
+function rebuildMessageCache(convId: string, list: MessageView[]): MessageCache {
+  const cache: MessageCache = {
+    list,
+    ids: new Set<string>(),
+    byId: new Map<string, MessageView>()
+  }
+  for (const msg of list) {
+    cache.ids.add(msg.id)
+    cache.byId.set(msg.id, msg)
+  }
+  messageCaches.set(convId, cache)
+  return cache
+}
+
+function messageCacheFor(convId: string, list: MessageView[]): MessageCache {
+  const cache = messageCaches.get(convId)
+  return cache && cache.list === list ? cache : rebuildMessageCache(convId, list)
+}
+
+function dropMessageCache(convId: string): void {
+  messageCaches.delete(convId)
+}
+
 interface PendingRemoval {
   convId: string
   name: string
@@ -93,13 +124,11 @@ export const useChatStore = defineStore('chat', {
         this.convs = convs
       })
       window.pantry.onMsgNew((msg) => {
-        const list = this.messages[msg.convId]
-        if (list && !list.some((m) => m.id === msg.id)) list.push(msg)
+        if (this.messages[msg.convId]) this.appendConversationMessage(msg.convId, msg)
         if (msg.convId === this.activeConvId) void window.pantry.markRead(msg.convId)
       })
       window.pantry.onMsgStatus((event) => {
-        const target = this.messages[event.convId]?.find((m) => m.id === event.id)
-        if (target) target.status = event.status
+        this.updateConversationMessageStatus(event.convId, event.id, event.status)
       })
       window.pantry.onNudgeReceived((event) => {
         const run = ++nudgeOpenRun
@@ -137,7 +166,7 @@ export const useChatStore = defineStore('chat', {
       this.activeConvId = conv.id
       this.viewingHistory = false
       if (!this.messages[conv.id]) {
-        this.messages[conv.id] = await window.pantry.pageMessages(conv.id, null, 50)
+        this.setConversationMessages(conv.id, await window.pantry.pageMessages(conv.id, null, 50))
       }
       this.requestConversationScroll(scroll)
     },
@@ -152,7 +181,7 @@ export const useChatStore = defineStore('chat', {
       this.activeConvId = convId
       this.viewingHistory = false
       if (!this.messages[convId]) {
-        this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
+        this.setConversationMessages(convId, await window.pantry.pageMessages(convId, null, 50))
       }
       await window.pantry.markRead(convId)
       this.requestConversationScroll(scroll)
@@ -168,7 +197,7 @@ export const useChatStore = defineStore('chat', {
       }
       this.activeConvId = convId
       const ctx = await window.pantry.getMessageContext(convId, seq)
-      this.messages[convId] = ctx
+      this.setConversationMessages(convId, ctx)
       // 跳转窗口若已含会话最新消息（尾条 ts 触达 lastTs），则不算"看历史"，
       // 避免点最新命中 / 关闭搜索后仍误显"回到最新"（决议 #74）
       const conv = this.convs.find((c) => c.id === convId)
@@ -184,7 +213,7 @@ export const useChatStore = defineStore('chat', {
     async backToLatest(): Promise<void> {
       const convId = this.activeConvId
       if (!convId) return
-      this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
+      this.setConversationMessages(convId, await window.pantry.pageMessages(convId, null, 50))
       this.viewingHistory = false
       this.requestConversationScroll('latest')
     },
@@ -192,6 +221,38 @@ export const useChatStore = defineStore('chat', {
     requestConversationScroll(mode: ConversationOpenScrollMode): void {
       this.openScrollMode = mode
       this.openScrollRun += 1
+    },
+
+    setConversationMessages(convId: string, messages: MessageView[]): void {
+      this.messages[convId] = messages
+      rebuildMessageCache(convId, this.messages[convId] ?? [])
+    },
+
+    appendConversationMessage(convId: string, msg: MessageView): boolean {
+      const list = (this.messages[convId] ??= [])
+      const cache = messageCacheFor(convId, list)
+      if (cache.ids.has(msg.id)) return false
+      list.push(msg)
+      const stored = list[list.length - 1]
+      cache.ids.add(stored.id)
+      cache.byId.set(stored.id, stored)
+      return true
+    },
+
+    prependEarlierMessages(convId: string, messages: MessageView[]): number {
+      const list = (this.messages[convId] ??= [])
+      const cache = messageCacheFor(convId, list)
+      const fresh = messages.filter((msg) => !cache.ids.has(msg.id))
+      if (fresh.length === 0) return 0
+      this.setConversationMessages(convId, [...fresh, ...list])
+      return fresh.length
+    },
+
+    updateConversationMessageStatus(convId: string, msgId: string, status: MessageView['status']): void {
+      const list = this.messages[convId]
+      if (!list) return
+      const target = messageCacheFor(convId, list).byId.get(msgId)
+      if (target) target.status = status
     },
 
     rememberConversationScroll(convId: string, top: number, atBottom: boolean): void {
@@ -253,6 +314,7 @@ export const useChatStore = defineStore('chat', {
       if (!pending) return
       await window.pantry.removeConversation(pending.convId)
       delete this.messages[pending.convId]
+      dropMessageCache(pending.convId)
       delete this.scrollPositions[pending.convId]
     },
 
@@ -273,8 +335,7 @@ export const useChatStore = defineStore('chat', {
       const list = this.messages[convId] ?? []
       const before = list.length > 0 ? list[0].seq : null
       const earlier = await window.pantry.pageMessages(convId, before, 50)
-      this.messages[convId] = [...earlier, ...list]
-      return earlier.length
+      return this.prependEarlierMessages(convId, earlier)
     },
 
     async send(text: string, mentions: string[] = []): Promise<boolean> {
@@ -285,8 +346,7 @@ export const useChatStore = defineStore('chat', {
           ? await window.pantry.sendGroupText(conv.peerId, text, mentions)
           : await window.pantry.sendText(conv.peerId, text)
       if (!view) return false
-      const list = (this.messages[conv.id] ??= [])
-      if (!list.some((m) => m.id === view.id)) list.push(view)
+      this.appendConversationMessage(conv.id, view)
       return true
     },
 
@@ -307,8 +367,7 @@ export const useChatStore = defineStore('chat', {
     async forward(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> {
       const result = await window.pantry.forwardMessage(msgId, targets)
       for (const msg of result.messages) {
-        const list = this.messages[msg.convId]
-        if (list && !list.some((m) => m.id === msg.id)) list.push(msg)
+        if (this.messages[msg.convId]) this.appendConversationMessage(msg.convId, msg)
       }
       return result
     },
@@ -355,10 +414,8 @@ export const useChatStore = defineStore('chat', {
     },
 
     pushOwn(view: MessageView | null): boolean {
-      const conv = this.activeConv
-      if (!view || !conv) return false
-      const list = (this.messages[conv.id] ??= [])
-      if (!list.some((m) => m.id === view.id)) list.push(view)
+      if (!view) return false
+      if (this.messages[view.convId]) this.appendConversationMessage(view.convId, view)
       return true
     }
   }
