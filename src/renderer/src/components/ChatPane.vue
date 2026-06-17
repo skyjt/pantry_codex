@@ -1582,14 +1582,22 @@ async function onDrop(event: DragEvent): Promise<void> {
         </span>
         <span ref="pkScope" class="pk-scope">
           <div v-if="showPk" class="pk-popover">
-            <button type="button" :disabled="!canSendPk" @click="sendPk('rps')">
-              <span class="pk-option-rps">✌</span>
+            <button
+              type="button"
+              :disabled="!canSendPk"
+              :title="canSendPk ? '猜拳' : pkDisabledReason"
+              @click="sendPk('rps')"
+            >
+              <PantryIcon name="pk-rps" :size="24" />
               <span>猜拳</span>
             </button>
-            <button type="button" :disabled="!canSendPk" @click="sendPk('dice')">
-              <span class="pk-option-dice" aria-hidden="true">
-                <span></span><span></span><span></span><span></span>
-              </span>
+            <button
+              type="button"
+              :disabled="!canSendPk"
+              :title="canSendPk ? '骰子' : pkDisabledReason"
+              @click="sendPk('dice')"
+            >
+              <PantryIcon name="pk-dice" :size="24" />
               <span>骰子</span>
             </button>
           </div>
@@ -1599,6 +1607,8 @@ async function onDrop(event: DragEvent): Promise<void> {
               :class="{ active: showPk }"
               type="button"
               aria-label="PK"
+              aria-haspopup="menu"
+              :aria-expanded="showPk ? 'true' : 'false'"
               @click="showPk = !showPk"
             >
               <PantryIcon name="pk" :size="18" />
@@ -1790,55 +1800,46 @@ async function onDrop(event: DragEvent): Promise<void> {
   bottom: calc(100% + 8px);
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(2, 68px);
-  gap: 6px;
-  padding: 7px;
+  grid-template-columns: repeat(2, 70px);
+  gap: 8px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-window);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.13);
   z-index: 28;
 }
 .pk-popover button {
-  height: 62px;
-  border: none;
-  border-radius: 6px;
+  height: 60px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-1);
   display: grid;
-  grid-template-rows: 30px 18px;
+  grid-template-rows: 28px 18px;
   place-items: center;
   gap: 2px;
   font-size: 12px;
   cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 100ms ease;
+}
+.pk-popover button .pantry-icon {
+  color: var(--primary);
 }
 .pk-popover button:hover:not(:disabled) {
-  background: var(--line);
+  background: rgba(61, 139, 107, 0.1);
+  border-color: rgba(61, 139, 107, 0.22);
+}
+.pk-popover button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.pk-popover button:focus-visible {
+  outline: 2px solid rgba(61, 139, 107, 0.35);
+  outline-offset: 2px;
 }
 .pk-popover button:disabled {
   opacity: 0.38;
   cursor: default;
-}
-.pk-option-rps {
-  color: var(--primary);
-  font-size: 24px;
-  line-height: 1;
-}
-.pk-option-dice {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 4px;
-  padding: 5px;
-  border: 1.5px solid var(--primary);
-  border-radius: 6px;
-}
-.pk-option-dice span {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--primary);
 }
 .history-search-scope {
   position: relative;
@@ -1950,9 +1951,9 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .pk-tool-text {
   position: absolute;
-  right: 2px;
+  right: 1px;
   bottom: 1px;
-  font-size: 8px;
+  font-size: 7.5px;
   line-height: 1;
   font-weight: 700;
   color: currentColor;
@@ -2004,6 +2005,13 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .tool:hover:not(:disabled) {
   background: var(--line);
+}
+.tool:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.tool:focus-visible {
+  outline: 2px solid rgba(61, 139, 107, 0.35);
+  outline-offset: 1px;
 }
 .tool.active {
   color: var(--primary);

@@ -104,75 +104,91 @@ function randomRef(nextGame: PkGame): PkRefView {
 .pk-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  max-width: 100%;
+  vertical-align: top;
 }
 .pk-bubble {
-  width: 196px;
-  padding: 8px 12px;
+  box-sizing: border-box;
+  width: 184px;
+  padding: 9px 10px 10px;
   border-radius: 8px;
   background: var(--bubble-peer);
-  border-left: 3px solid var(--primary);
+  border: 1px solid rgba(61, 139, 107, 0.18);
+  border-left-color: rgba(61, 139, 107, 0.72);
+  border-left-width: 2px;
 }
 .pk-bubble.mine {
   background: var(--bubble-mine);
 }
 .pk-title {
-  color: var(--text-2);
+  color: var(--primary);
   font-size: 12px;
   font-weight: 600;
-  margin-bottom: 8px;
+  line-height: 1.2;
+  margin-bottom: 4px;
 }
 .pk-stage {
-  height: 70px;
+  height: 54px;
   display: grid;
   place-items: center;
 }
-.pk-stage.rolling {
-  animation: pk-pop 160ms ease-in-out infinite alternate;
-}
 .dice-face {
-  width: 58px;
-  height: 58px;
+  width: 46px;
+  height: 46px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  padding: 8px;
-  border: 1.5px solid var(--text-2);
+  padding: 7px;
+  border: 1.4px solid var(--text-2);
   border-radius: 8px;
   background: var(--bg-window);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
 }
 .dice-cell {
   display: grid;
   place-items: center;
 }
 .dice-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--text-1);
 }
 .rps-hand {
-  width: 58px;
-  height: 58px;
+  width: 48px;
+  height: 48px;
   display: block;
 }
 .pk-result {
   color: var(--text-1);
   font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
   text-align: center;
 }
 .pk-action {
   flex: 0 0 auto;
-  height: 28px;
+  height: 26px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 999px;
   background: var(--bg-window);
   color: var(--primary);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+}
+.pk-action:hover:not(:disabled) {
+  background: rgba(61, 139, 107, 0.1);
+  border-color: rgba(61, 139, 107, 0.3);
+}
+.pk-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.pk-action:focus-visible {
+  outline: 2px solid rgba(61, 139, 107, 0.35);
+  outline-offset: 2px;
 }
 .pk-action:disabled {
   color: var(--text-3);
@@ -187,9 +203,9 @@ function randomRef(nextGame: PkGame): PkRefView {
     transform: translateY(-1px) scale(1.03);
   }
 }
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .pk-stage.rolling {
-    animation: none;
+    animation: pk-pop 160ms ease-in-out infinite alternate;
   }
 }
 </style>
