@@ -1603,7 +1603,7 @@ async function onDrop(event: DragEvent): Promise<void> {
           </div>
           <span class="tool-wrap" :data-tip="pkToolTip">
             <button
-              class="tool pk-tool"
+              class="tool"
               :class="{ active: showPk }"
               type="button"
               aria-label="PK"
@@ -1611,8 +1611,7 @@ async function onDrop(event: DragEvent): Promise<void> {
               :aria-expanded="showPk ? 'true' : 'false'"
               @click="showPk = !showPk"
             >
-              <PantryIcon name="pk" :size="17" />
-              <span class="pk-tool-text">PK</span>
+              <PantryIcon name="pk" :size="18" />
             </button>
           </span>
         </span>
@@ -1962,20 +1961,6 @@ async function onDrop(event: DragEvent): Promise<void> {
   display: grid;
   place-items: center;
   position: relative;
-}
-.pk-tool {
-  width: auto;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.pk-tool-text {
-  font-size: 11px;
-  line-height: 1;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  color: currentColor;
 }
 .tool-wrap {
   position: relative;
