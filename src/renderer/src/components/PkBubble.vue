@@ -144,7 +144,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="pk-bubble" :class="{ mine }">
+  <div class="pk-bubble" :class="{ mine, 'has-action': showAction }">
     <div class="pk-stage" :class="{ reveal: justSettled }">
       <div v-if="game === 'dice'" class="dice-cube" :style="cubeStyle" :aria-label="`${diceValue} 点`">
         <div v-for="face in 6" :key="face" class="dice-side" :class="'s' + face">
@@ -184,7 +184,7 @@ onUnmounted(() => {
 .pk-bubble {
   --pk-edge: rgba(61, 139, 107, 0.22);
   box-sizing: border-box;
-  max-width: 234px;
+  width: 132px;
   padding: 8px 9px;
   border-radius: 8px;
   background: var(--bubble-peer);
@@ -200,12 +200,17 @@ html[data-theme='dark'] .pk-bubble {
 .pk-bubble.mine {
   background: var(--bubble-mine);
 }
+/* 固定卡片宽度（决议 #147）：避免「出了布」比「出了石头」短一截、动画态→定格态宽度跳变；他人含参与按钮更宽，信息列 flex:1 撑满、结果左对齐、短文字右侧留白 */
+.pk-bubble.has-action {
+  width: 200px;
+}
 /* 信息列：玩法标签（小）+ 结果文字纵向堆叠，占据开奖窗右侧 */
 .pk-info {
   display: flex;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  flex: 1;
 }
 .pk-label {
   display: inline-flex;
