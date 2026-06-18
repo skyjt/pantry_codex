@@ -38,7 +38,8 @@ const rpsResult = computed(() => {
 })
 const rpsSrc = computed(() => {
   if (game.value !== 'rps' || !rpsResult.value) return ''
-  const emoji: Record<PkRpsResult, string> = { rock: '✊', paper: '✋', scissors: '✌️' }
+  // 石头用 👊(1f44a) 而非 ✊(270a)：本地 twemoji 资源缺 270a.svg，1f44a 已内置且同套画风（决议 #148）
+  const emoji: Record<PkRpsResult, string> = { rock: '👊', paper: '✋', scissors: '✌️' }
   return twemojiUrl(emojiToTwemojiCode(emoji[rpsResult.value]))
 })
 const rpsRotY = ref(0)
