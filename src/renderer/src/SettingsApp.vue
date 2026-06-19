@@ -52,7 +52,6 @@ const sections: Array<{ id: Section; label: string; summary: string }> = [
 const section = ref<Section>('profile')
 const settings = ref<SettingsView | null>(null)
 const info = ref<AppInfo | null>(null)
-const savedTip = ref('')
 // 关于页「更多信息」折叠（决议 #90）：默认收起开发者向运行时信息
 const showAboutDetails = ref(false)
 
@@ -86,9 +85,7 @@ const avatarSummary = computed(() => {
   return avatar.value === -1 ? `昵称首字 · ${colorName}` : `图标 · ${colorName}`
 })
 const currentSection = computed(() => sections.find((item) => item.id === section.value) ?? sections[0])
-const activeNotice = computed(() =>
-  section.value === 'network' && scanTip.value ? scanTip.value : savedTip.value
-)
+const activeNotice = computed(() => (section.value === 'network' ? scanTip.value : ''))
 const hasManualPeers = computed(() => (settings.value?.manualPeers.length ?? 0) > 0)
 const hasScanRanges = computed(() => (settings.value?.scanRangeItems.length ?? 0) > 0)
 const hasTransfers = computed(() => transfers.value.length > 0)
@@ -103,7 +100,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopSettings?.()
-  Object.values(saveFlashTimers).forEach((t) => clearTimeout(t))
+  if (toastTimer) clearTimeout(toastTimer)
 })
 
 async function reload(): Promise<void> {
@@ -128,20 +125,13 @@ function syncForm(s: SettingsView): void {
   applyAppearance(s)
 }
 
-function flashSaved(text = '已保存'): void {
-  savedTip.value = text
-  setTimeout(() => (savedTip.value = ''), 1500)
-}
-
-// 保存按钮成功态（用户反馈）：保存成功后按钮就地变「保存成功！」并打勾，3 秒后自动恢复
-const savedFlash = ref<Record<string, boolean>>({})
-const saveFlashTimers: Record<string, ReturnType<typeof setTimeout>> = {}
-function flashSaveButton(key: string): void {
-  savedFlash.value = { ...savedFlash.value, [key]: true }
-  if (saveFlashTimers[key]) clearTimeout(saveFlashTimers[key])
-  saveFlashTimers[key] = setTimeout(() => {
-    savedFlash.value = { ...savedFlash.value, [key]: false }
-  }, 3000)
+// 「设置已保存」浮层 toast（决议 #151）：失焦 / 调整即时保存后，底部居中胶囊淡入，停留约 1.8s 后淡出
+const toast = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function flashSaved(text = '设置已保存'): void {
+  toast.value = text
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (toast.value = ''), 1800)
 }
 
 // 关于页源码链接（决议 #90）：交系统浏览器打开，非 app 内加载远程内容，不违反纯内网红线
@@ -155,8 +145,27 @@ async function saveApp(patch: AppSettingsPatch, tip = '已保存'): Promise<void
   flashSaved(tip)
 }
 
-async function saveProfile(): Promise<void> {
-  if (!nick.value.trim()) return
+function profileDirty(): boolean {
+  const s = settings.value
+  if (!s) return false
+  return (
+    nick.value.trim() !== s.nick ||
+    company.value.trim() !== s.company ||
+    dept.value.trim() !== s.dept ||
+    team.value.trim() !== s.team ||
+    avatar.value !== s.avatar ||
+    fileDir.value !== s.fileDir
+  )
+}
+
+// 资料失焦 / 头像点击 / 改目录后即时保存（决议 #151）：昵称必填，空则复原并提示；无改动则跳过、不弹窗
+async function autoSaveProfile(): Promise<void> {
+  if (!nick.value.trim()) {
+    if (settings.value) nick.value = settings.value.nick
+    flashSaved('昵称不能为空')
+    return
+  }
+  if (!profileDirty()) return
   settings.value = await window.pantry.saveProfile({
     nick: nick.value.trim(),
     company: company.value.trim(),
@@ -166,21 +175,23 @@ async function saveProfile(): Promise<void> {
     fileDir: fileDir.value
   })
   if (settings.value) syncForm(settings.value)
-  flashSaved('已保存，全网通讯录将自动刷新')
-  flashSaveButton('profile')
+  flashSaved('设置已保存')
 }
 
 function chooseInitialAvatar(): void {
   avatar.value = -1
+  void autoSaveProfile()
 }
 
 function chooseAvatarEmoji(index: number): void {
   avatar.value = avatarValue(index, selectedAvatarColor.value)
+  void autoSaveProfile()
 }
 
 function chooseAvatarColor(index: number): void {
   const emoji = selectedAvatarEmoji.value >= 0 ? selectedAvatarEmoji.value : 0
   avatar.value = avatarValue(emoji, index)
+  void autoSaveProfile()
 }
 
 function avatarOptionStyle(index: number): { backgroundColor: string; color: string } {
@@ -189,7 +200,10 @@ function avatarOptionStyle(index: number): { backgroundColor: string; color: str
 
 async function pickFileDir(): Promise<void> {
   const dir = await window.pantry.pickDirectory()
-  if (dir) fileDir.value = dir
+  if (dir) {
+    fileDir.value = dir
+    await autoSaveProfile()
+  }
 }
 
 async function toggleNotifications(): Promise<void> {
@@ -264,7 +278,20 @@ async function saveShortcuts(): Promise<void> {
     },
     '快捷键已保存'
   )
-  flashSaveButton('shortcuts')
+}
+
+// 快捷键录制框失焦即保存（决议 #151）：清录制态，组合键有变才写入
+async function onShortcutBlur(): Promise<void> {
+  recordingShortcut.value = null
+  const s = settings.value
+  if (!s) return
+  if (
+    captureShortcut.value.trim() === s.captureShortcut &&
+    showHideShortcut.value.trim() === s.showHideShortcut
+  ) {
+    return
+  }
+  await saveShortcuts()
 }
 
 async function resetShortcuts(): Promise<void> {
@@ -328,15 +355,20 @@ function shortcutLabel(acc: string): string {
   return acc.replace('CommandOrControl', mod).replace(/\+/g, ' + ')
 }
 
-async function savePorts(): Promise<void> {
+// 端口框失焦即保存（决议 #151）：无改动跳过；无效值复原并提示
+async function autoSavePorts(): Promise<void> {
+  const s = settings.value
+  if (!s) return
+  if (udpPortInput.value === String(s.udpPort) && tcpPortInput.value === String(s.tcpPort)) return
   const udpPort = parsePort(udpPortInput.value)
   const tcpPort = parsePort(tcpPortInput.value)
   if (!udpPort || !tcpPort) {
+    udpPortInput.value = String(s.udpPort)
+    tcpPortInput.value = String(s.tcpPort)
     flashSaved('端口需为 1-65535')
     return
   }
   await saveApp({ udpPort, tcpPort }, '端口已保存，重启后生效')
-  flashSaveButton('ports')
 }
 
 function parsePort(value: string): number | null {
@@ -573,31 +605,20 @@ async function removeRange(cidr: string): Promise<void> {
             <div class="field-grid">
               <label class="field">
                 <span>昵称</span>
-                <input v-model="nick" maxlength="32" />
+                <input v-model="nick" maxlength="32" @blur="autoSaveProfile" />
               </label>
               <label class="field">
                 <span>公司</span>
-                <input v-model="company" maxlength="32" />
+                <input v-model="company" maxlength="32" @blur="autoSaveProfile" />
               </label>
               <label class="field">
                 <span>部门</span>
-                <input v-model="dept" maxlength="32" />
+                <input v-model="dept" maxlength="32" @blur="autoSaveProfile" />
               </label>
               <label class="field">
                 <span>团队</span>
-                <input v-model="team" maxlength="32" />
+                <input v-model="team" maxlength="32" @blur="autoSaveProfile" />
               </label>
-            </div>
-            <div class="panel-actions">
-              <button
-                class="primary save-btn"
-                :class="{ 'is-saved': savedFlash.profile }"
-                :disabled="!nick.trim()"
-                @click="saveProfile"
-              >
-                <PantryIcon v-if="savedFlash.profile" name="check" :size="15" class="save-check" />
-                <span>{{ savedFlash.profile ? '保存成功！' : '保存资料' }}</span>
-              </button>
             </div>
           </div>
         </section>
@@ -722,17 +743,7 @@ async function removeRange(cidr: string): Promise<void> {
                 <strong>保存位置</strong>
                 <small class="path">{{ fileDir || settings.defaultFileDir }}</small>
               </div>
-              <div class="button-row">
-                <button class="ghost" @click="pickFileDir">更改</button>
-                <button
-                  class="primary subtle save-btn"
-                  :class="{ 'is-saved': savedFlash.profile }"
-                  @click="saveProfile"
-                >
-                  <PantryIcon v-if="savedFlash.profile" name="check" :size="15" class="save-check" />
-                  <span>{{ savedFlash.profile ? '保存成功！' : '保存' }}</span>
-                </button>
-              </div>
+              <button class="ghost" @click="pickFileDir">更改</button>
             </div>
           </div>
 
@@ -867,18 +878,12 @@ async function removeRange(cidr: string): Promise<void> {
             <div class="field-grid">
               <label class="field">
                 <span>UDP 端口</span>
-                <input v-model="udpPortInput" type="number" min="1" max="65535" />
+                <input v-model="udpPortInput" type="number" min="1" max="65535" @blur="autoSavePorts" />
               </label>
               <label class="field">
                 <span>TCP 端口</span>
-                <input v-model="tcpPortInput" type="number" min="1" max="65535" />
+                <input v-model="tcpPortInput" type="number" min="1" max="65535" @blur="autoSavePorts" />
               </label>
-            </div>
-            <div class="panel-actions">
-              <button class="primary save-btn" :class="{ 'is-saved': savedFlash.ports }" @click="savePorts">
-                <PantryIcon v-if="savedFlash.ports" name="check" :size="15" class="save-check" />
-                <span>{{ savedFlash.ports ? '保存成功！' : '保存端口' }}</span>
-              </button>
             </div>
           </div>
         </section>
@@ -902,7 +907,7 @@ async function removeRange(cidr: string): Promise<void> {
                 :placeholder="recordingShortcut === 'capture' ? '按下新组合键…' : '未设置（已禁用）'"
                 readonly
                 @focus="recordingShortcut = 'capture'"
-                @blur="recordingShortcut = null"
+                @blur="onShortcutBlur"
                 @keydown="onShortcutKeydown($event, 'capture')"
               />
               <small v-if="settings.shortcutStatus && !settings.shortcutStatus.capture" class="shortcut-warn">
@@ -922,7 +927,7 @@ async function removeRange(cidr: string): Promise<void> {
                 :placeholder="recordingShortcut === 'showHide' ? '按下新组合键…' : '未设置（已禁用）'"
                 readonly
                 @focus="recordingShortcut = 'showHide'"
-                @blur="recordingShortcut = null"
+                @blur="onShortcutBlur"
                 @keydown="onShortcutKeydown($event, 'showHide')"
               />
               <small v-if="settings.shortcutStatus && !settings.shortcutStatus.showHide" class="shortcut-warn">
@@ -941,14 +946,6 @@ async function removeRange(cidr: string): Promise<void> {
             </div>
             <div class="panel-actions">
               <button class="ghost" @click="resetShortcuts">恢复默认</button>
-              <button
-                class="primary save-btn"
-                :class="{ 'is-saved': savedFlash.shortcuts }"
-                @click="saveShortcuts"
-              >
-                <PantryIcon v-if="savedFlash.shortcuts" name="check" :size="15" class="save-check" />
-                <span>{{ savedFlash.shortcuts ? '保存成功！' : '保存快捷键' }}</span>
-              </button>
             </div>
           </div>
         </section>
@@ -1023,6 +1020,12 @@ async function removeRange(cidr: string): Promise<void> {
         </section>
       </template>
     </main>
+    <Transition name="toast">
+      <div v-if="toast" class="toast" role="status" aria-live="polite">
+        <PantryIcon name="check" :size="15" />
+        <span>{{ toast }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
