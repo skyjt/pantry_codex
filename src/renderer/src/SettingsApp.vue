@@ -2004,4 +2004,52 @@ async function removeRange(cidr: string): Promise<void> {
     grid-template-columns: 1fr;
   }
 }
+
+/* 「设置已保存」浮层 toast（决议 #152）：修复上一版样式丢失（裸 div 挤进 flex 布局乱放）+ taste 重设计。
+   固定在右侧内容区水平居中（calc 补偿 174px 侧栏，不偏向侧栏）、底部上浮（顶部被拖拽带 / 标题 / 关闭按钮占满）；
+   深色胶囊对比当前主题、currentColor 对勾保证两主题对比、茶青味柔影（非纯黑）；淡入 + 上移 / 淡出 + 下移，尊重 reduced-motion */
+.toast {
+  position: fixed;
+  left: calc(50% + 87px);
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 9px var(--sp-4);
+  border-radius: var(--r-pill);
+  background: var(--text-1);
+  color: var(--bg-window);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 8px 26px rgba(34, 49, 42, 0.3), 0 2px 6px rgba(34, 49, 42, 0.18);
+  z-index: 60;
+  pointer-events: none;
+}
+.toast .pantry-icon {
+  flex: none;
+}
+.toast-enter-active {
+  transition: opacity 0.24s ease, transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 10px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active,
+  .toast-leave-active {
+    transition: opacity 0.16s ease;
+  }
+  .toast-enter-from,
+  .toast-leave-to {
+    transform: translateX(-50%);
+  }
+}
 </style>
