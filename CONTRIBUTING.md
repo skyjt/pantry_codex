@@ -93,6 +93,8 @@ pantry/
 
 **分层约定**：`renderer/` 不直接 import electron / node 模块，一切能力经 `window.pantry`（preload）；`net/`、`store/` 互不感知且零 Electron 依赖（保证可单元测试），业务编排在 `services/`；`shared/` 零运行时依赖。
 
+> 更详细的目录树、各模块职责、数据流，以及「想做某项改动从哪下手」的扩展点清单，见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
 ## 打包与发布
 
 - GitHub Actions `release.yml`：构建 Windows 7 x64、Debian 10 / UOS 20 x64 等产物并上传；推送 `v*` tag 时自动创建 Release。
