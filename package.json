@@ -1,7 +1,7 @@
 {
   "name": "pantry",
   "productName": "茶话间",
-  "version": "0.24.7",
+  "version": "0.25.0",
   "description": "茶话间（Teahouse）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
   "private": true,
   "main": "./out/main/index.js",
@@ -9,10 +9,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@tesseract.js-data/chi_sim": "1.0.0",
-    "@tesseract.js-data/eng": "1.0.0",
-    "better-sqlite3": "9.6.0",
-    "tesseract.js": "6.0.1"
+    "better-sqlite3": "9.6.0"
   },
   "scripts": {
     "postinstall": "node node_modules/@electron/rebuild/lib/cli.js -o better-sqlite3",
@@ -164,6 +161,7 @@
     "electron": "22.3.27",
     "electron-builder": "24.13.3",
     "electron-vite": "2.3.0",
+    "onnxruntime-web": "1.20.1",
     "opentype.js": "2.0.0",
     "pinia": "2.2.6",
     "png2icons": "2.0.1",

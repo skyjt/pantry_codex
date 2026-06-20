@@ -15,6 +15,19 @@ export default defineConfig({
   },
   renderer: {
     build: { target: 'chrome108' },
-    plugins: [vue()]
+    plugins: [
+      vue(),
+      {
+        // onnxruntime-web 的 bundle 版用 new URL 触发 vite 又复制一份 ~11MB 的 wasm 到 assets/，
+        // 但运行时我们用 env.wasm.wasmPaths 指向 public/ocr/ 那份（file:// 下最可靠，同 tesseract 机制），
+        // assets/ 这份纯冗余，打包时删掉省体积。
+        name: 'pantry-drop-bundled-ort-wasm',
+        generateBundle(_options, bundle) {
+          for (const fileName of Object.keys(bundle)) {
+            if (/ort-wasm.*\.wasm$/.test(fileName)) delete bundle[fileName]
+          }
+        }
+      }
+    ]
   }
 })

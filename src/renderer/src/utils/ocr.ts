@@ -1,13 +1,19 @@
 import type { ImageOcrSource } from '../../../shared/ipc'
+import { PaddleOcrService, type OrtModule, type RecognitionResult } from './paddleocr'
 
 export const OCR_AUTO_MAX_PIXELS = 1_500_000
 export const OCR_AUTO_MAX_BYTES = 3 * 1024 * 1024
 
+// 超大图先降采样：省内存、提速；PaddleOCR 检测内部还会缩到 960，识别用此分辨率裁剪。
 const OCR_MAX_SIDE = 2200
-const OCR_MIN_CONFIDENCE = 18
-const OCR_WORKER_PATH = 'ocr/worker.min.js'
-const OCR_CORE_PATH = 'ocr/core'
-const OCR_LANG_PATH = 'ocr/lang'
+// PaddleOCR 置信度为 0~1，低于此判为误检丢弃。
+const OCR_MIN_CONFIDENCE = 0.3
+
+// public/ocr/ 下的模型与 onnxruntime wasm —— 由 scripts/prepare-ocr-assets.mjs 就位，纯本地、不联网。
+const OCR_ASSET_BASE = 'ocr/'
+const OCR_DET_MODEL = `${OCR_ASSET_BASE}PP-OCRv6_tiny_det.onnx`
+const OCR_REC_MODEL = `${OCR_ASSET_BASE}PP-OCRv6_tiny_rec.onnx`
+const OCR_DICT_PATH = `${OCR_ASSET_BASE}ppocrv6_dict.txt`
 
 export interface OcrBox {
   x0: number
@@ -43,75 +49,15 @@ export interface OcrResult {
 
 type ProgressListener = (progress: number, status: string) => void
 
-interface TesseractLoggerMessage {
-  progress: number
-  status: string
+interface PreparedImage {
+  width: number
+  height: number
+  data: Uint8Array
+  scale: number
 }
 
-interface TesseractBbox {
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-}
-
-interface TesseractSymbol {
-  text: string
-  confidence: number
-  bbox: TesseractBbox
-}
-
-interface TesseractWord {
-  text: string
-  confidence: number
-  bbox: TesseractBbox
-  symbols?: TesseractSymbol[]
-}
-
-interface TesseractLine {
-  text: string
-  bbox: TesseractBbox
-  words?: TesseractWord[]
-}
-
-interface TesseractParagraph {
-  lines?: TesseractLine[]
-}
-
-interface TesseractBlock {
-  paragraphs?: TesseractParagraph[]
-}
-
-interface TesseractPage {
-  text?: string
-  blocks?: TesseractBlock[] | null
-}
-
-interface TesseractRecognizeResult {
-  data: TesseractPage
-}
-
-interface OcrWorker {
-  recognize(
-    image: Blob | HTMLCanvasElement,
-    options?: Record<string, unknown>,
-    output?: { text?: boolean; blocks?: boolean }
-  ): Promise<TesseractRecognizeResult>
-  setParameters(params: Record<string, string>): Promise<unknown>
-}
-
-interface TesseractModule {
-  createWorker(
-    langs?: string | string[],
-    oem?: number,
-    options?: Record<string, unknown>,
-    config?: Record<string, string>
-  ): Promise<OcrWorker>
-}
-
-const progressListeners = new Set<ProgressListener>()
 const resultCache = new Map<string, OcrResult>()
-let workerPromise: Promise<OcrWorker> | null = null
+let servicePromise: Promise<PaddleOcrService> | null = null
 
 export function getCachedOcrResult(cacheKey: string): OcrResult | null {
   return resultCache.get(cacheKey) ?? null
@@ -165,85 +111,159 @@ export async function recognizeImageText(params: {
     return cached
   }
 
-  progressListeners.add(params.onProgress)
-  try {
-    params.onProgress(0, 'preparing image')
-    const sourceBlob = new Blob([params.source.bytes], { type: mimeFromName(params.source.name) })
-    const prepared = await prepareImageForOcr(sourceBlob, params.naturalWidth, params.naturalHeight)
-    const worker = await getWorker()
-    params.onProgress(0.08, 'recognizing text')
-    const recognized = await worker.recognize(prepared.blob, {}, { text: true, blocks: true })
-    const result = normalizeOcrResult(recognized.data, prepared.scale)
-    resultCache.set(params.cacheKey, result)
-    params.onProgress(1, 'ready')
-    return result
-  } finally {
-    progressListeners.delete(params.onProgress)
-  }
+  params.onProgress(0, 'preparing image')
+  const prepared = await prepareImageForOcr(
+    params.source.bytes,
+    params.source.name,
+    params.naturalWidth,
+    params.naturalHeight
+  )
+
+  params.onProgress(0.05, 'initializing models')
+  const service = await getService()
+
+  params.onProgress(0.1, 'recognizing text')
+  const results = await service.recognize(
+    { width: prepared.width, height: prepared.height, data: prepared.data },
+    {
+      onProgress: (event) => {
+        const frac = event.progress.total > 0 ? event.progress.current / event.progress.total : 0
+        // 检测占 0.1~0.3，识别占 0.3~0.95
+        const progress = event.type === 'det' ? 0.1 + frac * 0.2 : 0.3 + frac * 0.65
+        params.onProgress(progress, 'recognizing text')
+      }
+    }
+  )
+
+  const result = toOcrResult(results, prepared.scale)
+  resultCache.set(params.cacheKey, result)
+  params.onProgress(1, 'ready')
+  return result
 }
 
-async function getWorker(): Promise<OcrWorker> {
-  if (!workerPromise) {
-    workerPromise = loadTesseract().then(async (tesseract) => {
-      const worker = await tesseract.createWorker(['chi_sim', 'eng'], 1, {
-        workerPath: OCR_WORKER_PATH,
-        corePath: OCR_CORE_PATH,
-        langPath: OCR_LANG_PATH,
-        workerBlobURL: false,
-        cacheMethod: 'write',
-        logger: (message: TesseractLoggerMessage): void => {
-          const progress = normalizeProgress(message.progress, message.status)
-          for (const listener of progressListeners) listener(progress, message.status)
-        }
-      })
-      await worker.setParameters({
-        tessedit_pageseg_mode: '11',
-        preserve_interword_spaces: '1',
-        user_defined_dpi: '150'
-      })
-      return worker
+async function getService(): Promise<PaddleOcrService> {
+  if (!servicePromise) {
+    servicePromise = createService()
+  }
+  return servicePromise
+}
+
+async function createService(): Promise<PaddleOcrService> {
+  // onnxruntime-web：纯本地 wasm，单线程主线程跑（规避 worker / SharedArrayBuffer / COOP-COEP），
+  // wasm 文件由 prepare-ocr-assets 放到 public/ocr/，与渲染入口同源。
+  // 动态 import：把 ort + wasm 切到按需 chunk，首屏不加载；测试加载本模块也不会触发 ort。
+  const ort = await import('onnxruntime-web')
+  ort.env.wasm.wasmPaths = OCR_ASSET_BASE
+  ort.env.wasm.numThreads = 1
+  ort.env.wasm.proxy = false
+
+  const [detBuffer, recBuffer, dictText] = await Promise.all([
+    fetchArrayBuffer(OCR_DET_MODEL),
+    fetchArrayBuffer(OCR_REC_MODEL),
+    fetchText(OCR_DICT_PATH)
+  ])
+
+  // PaddleOCR CTC 约定：index 0 是 blank 占位，字典末尾补一个空格类。
+  const chars = dictText.replace(/\n+$/, '').split('\n')
+  const charactersDictionary = ['', ...chars, ' ']
+
+  return PaddleOcrService.createInstance({
+    ort: ort as unknown as OrtModule,
+    detection: { modelBuffer: detBuffer },
+    recognition: { modelBuffer: recBuffer, charactersDictionary }
+  })
+}
+
+async function fetchArrayBuffer(path: string): Promise<ArrayBuffer> {
+  const res = await fetch(path)
+  if (!res.ok) throw new Error(`OCR 资源加载失败：${path}`)
+  return res.arrayBuffer()
+}
+
+async function fetchText(path: string): Promise<string> {
+  const res = await fetch(path)
+  if (!res.ok) throw new Error(`OCR 资源加载失败：${path}`)
+  return res.text()
+}
+
+// PaddleOCR 输出按行（检测框 + 整行文字），转成既有 OcrResult 结构；
+// 当前界面只消费整段 text，token/line 以行粒度填充，保持缓存 IPC 结构完整。
+function toOcrResult(results: RecognitionResult[], scale: number): OcrResult {
+  const divisor = scale > 0 ? scale : 1
+  const tokens: OcrToken[] = []
+  const lines: OcrLine[] = []
+  const textLines: string[] = []
+
+  let lineIndex = 0
+  for (const item of results) {
+    const text = normalizeText(item.text)
+    if (!text || item.confidence < OCR_MIN_CONFIDENCE) continue
+    // 还原到原图坐标（PaddleOCR 坐标相对降采样后的图）。
+    const bbox: OcrBox = {
+      x0: item.box.x / divisor,
+      y0: item.box.y / divisor,
+      x1: (item.box.x + item.box.width) / divisor,
+      y1: (item.box.y + item.box.height) / divisor
+    }
+    const tokenId = `ocr-${lineIndex}`
+    tokens.push({
+      id: tokenId,
+      text,
+      confidence: Math.round(item.confidence * 100),
+      bbox,
+      lineIndex,
+      wordIndex: 0,
+      tokenIndex: lineIndex
     })
+    lines.push({ id: `line-${lineIndex}`, text, bbox, tokenIds: [tokenId], lineIndex })
+    textLines.push(text)
+    lineIndex += 1
   }
-  return workerPromise
-}
 
-async function loadTesseract(): Promise<TesseractModule> {
-  return (await import('tesseract.js')) as unknown as TesseractModule
+  return { text: textLines.join('\n'), tokens, lines, scale: 1 }
 }
 
 async function prepareImageForOcr(
-  blob: Blob,
+  bytes: ArrayBuffer,
+  name: string,
   naturalWidth: number,
   naturalHeight: number
-): Promise<{ blob: Blob; scale: number }> {
-  const longestSide = Math.max(naturalWidth, naturalHeight)
+): Promise<PreparedImage> {
+  const blob = new Blob([bytes], { type: mimeFromName(name) })
+  const { source, width: natW, height: natH } = await decodeImage(blob, naturalWidth, naturalHeight)
+  const longestSide = Math.max(natW, natH) || 1
   const scale = longestSide <= OCR_MAX_SIDE ? 1 : OCR_MAX_SIDE / longestSide
-  const width = Math.max(1, Math.round(naturalWidth * scale))
-  const height = Math.max(1, Math.round(naturalHeight * scale))
+  const width = Math.max(1, Math.round(natW * scale))
+  const height = Math.max(1, Math.round(natH * scale))
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d', { alpha: false })
-  if (!ctx) throw new Error('OCR 图片预处理失败')
-  await drawBlobToCanvas(ctx, blob, width, height)
-  const downscaled = await canvasToBlob(canvas)
-  return { blob: downscaled, scale }
+  if (!ctx) {
+    if (source instanceof ImageBitmap) source.close()
+    throw new Error('OCR 图片预处理失败')
+  }
+  ctx.drawImage(source, 0, 0, width, height)
+  if (source instanceof ImageBitmap) source.close()
+  const imageData = ctx.getImageData(0, 0, width, height)
+  return { width, height, data: new Uint8Array(imageData.data.buffer), scale }
 }
 
-async function drawBlobToCanvas(
-  ctx: CanvasRenderingContext2D,
+async function decodeImage(
   blob: Blob,
-  width: number,
-  height: number
-): Promise<void> {
+  fallbackWidth: number,
+  fallbackHeight: number
+): Promise<{ source: ImageBitmap | HTMLImageElement; width: number; height: number }> {
   try {
     const bitmap = await createImageBitmap(blob)
-    ctx.drawImage(bitmap, 0, 0, width, height)
-    bitmap.close()
-    return
+    return { source: bitmap, width: bitmap.width, height: bitmap.height }
   } catch {
     const image = await loadBlobImage(blob)
-    ctx.drawImage(image, 0, 0, width, height)
+    return {
+      source: image,
+      width: image.naturalWidth || fallbackWidth,
+      height: image.naturalHeight || fallbackHeight
+    }
   }
 }
 
@@ -263,103 +283,8 @@ function loadBlobImage(blob: Blob): Promise<HTMLImageElement> {
   })
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob)
-      else reject(new Error('OCR 图片转换失败'))
-    }, 'image/png')
-  })
-}
-
-function normalizeOcrResult(page: TesseractPage, scale: number): OcrResult {
-  const tokens: OcrToken[] = []
-  const lines: OcrLine[] = []
-  let lineIndex = 0
-  let tokenIndex = 0
-
-  for (const block of page.blocks ?? []) {
-    for (const paragraph of block.paragraphs ?? []) {
-      for (const line of paragraph.lines ?? []) {
-        const lineTokens: string[] = []
-        const lineId = `line-${lineIndex}`
-        let wordIndex = 0
-        for (const word of line.words ?? []) {
-          const units = splitWordIntoTokens(word)
-          for (const unit of units) {
-            const text = normalizeText(unit.text)
-            if (!text || unit.confidence < OCR_MIN_CONFIDENCE) continue
-            const token: OcrToken = {
-              id: `ocr-${tokenIndex}`,
-              text,
-              confidence: unit.confidence,
-              bbox: scaleBox(unit.bbox, scale),
-              lineIndex,
-              wordIndex,
-              tokenIndex
-            }
-            tokens.push(token)
-            lineTokens.push(token.id)
-            tokenIndex += 1
-          }
-          wordIndex += 1
-        }
-        if (lineTokens.length > 0) {
-          lines.push({
-            id: lineId,
-            text: normalizeText(line.text),
-            bbox: scaleBox(line.bbox, scale),
-            tokenIds: lineTokens,
-            lineIndex
-          })
-          lineIndex += 1
-        }
-      }
-    }
-  }
-
-  return {
-    text: normalizePageText(page.text, tokens),
-    tokens,
-    lines,
-    scale
-  }
-}
-
-function splitWordIntoTokens(word: TesseractWord): Array<{
-  text: string
-  confidence: number
-  bbox: TesseractBbox
-}> {
-  const symbols = word.symbols ?? []
-  if (symbols.length > 0) {
-    return symbols.map((symbol) => ({
-      text: symbol.text,
-      confidence: symbol.confidence,
-      bbox: symbol.bbox
-    }))
-  }
-  return [{ text: word.text, confidence: word.confidence, bbox: word.bbox }]
-}
-
-function scaleBox(box: TesseractBbox, scale: number): OcrBox {
-  const divisor = scale > 0 ? scale : 1
-  return {
-    x0: box.x0 / divisor,
-    y0: box.y0 / divisor,
-    x1: box.x1 / divisor,
-    y1: box.y1 / divisor
-  }
-}
-
 function normalizeText(text: string | undefined): string {
   return (text ?? '').replace(/\s+/g, ' ').trim()
-}
-
-function normalizePageText(text: string | undefined, tokens: OcrToken[]): string {
-  const cleaned = (text ?? '').trim()
-  if (cleaned) return cleaned
-  return getSelectedOcrText(tokens, new Set(tokens.map((token) => token.id)))
 }
 
 function shouldInsertSpace(previous: OcrToken | null, next: OcrToken): boolean {
@@ -376,12 +301,4 @@ function mimeFromName(name: string): string {
   if (lower.endsWith('.gif')) return 'image/gif'
   if (lower.endsWith('.svg')) return 'image/svg+xml'
   return 'image/png'
-}
-
-function normalizeProgress(progress: number, status: string): number {
-  const safe = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0
-  if (status.includes('loading')) return Math.max(0.05, safe * 0.25)
-  if (status.includes('initializing')) return Math.max(0.1, Math.min(0.35, safe * 0.35))
-  if (status.includes('recognizing')) return 0.35 + safe * 0.6
-  return safe
 }

@@ -1,32 +1,26 @@
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const out = join(root, 'src/renderer/public/ocr')
 
+// OCR 资源（纯本地、不联网，决议 #158）：
+// - PP-OCRv6_tiny 检测/识别 ONNX + 字典：仓库内 build/ocr/（git 跟踪，CI 直接可用）。
+// - onnxruntime-web 的 wasm 运行时：随 npm 包就位，构建时从 node_modules 取。
 const files = [
-  ['node_modules/tesseract.js/dist/worker.min.js', 'worker.min.js'],
-  ['node_modules/tesseract.js-core/tesseract-core.wasm.js', 'core/tesseract-core.wasm.js'],
-  ['node_modules/tesseract.js-core/tesseract-core-simd.wasm.js', 'core/tesseract-core-simd.wasm.js'],
-  ['node_modules/tesseract.js-core/tesseract-core-lstm.wasm.js', 'core/tesseract-core-lstm.wasm.js'],
-  [
-    'node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm.js',
-    'core/tesseract-core-simd-lstm.wasm.js'
-  ],
-  ['node_modules/tesseract.js-core/tesseract-core.wasm', 'core/tesseract-core.wasm'],
-  ['node_modules/tesseract.js-core/tesseract-core-simd.wasm', 'core/tesseract-core-simd.wasm'],
-  ['node_modules/tesseract.js-core/tesseract-core-lstm.wasm', 'core/tesseract-core-lstm.wasm'],
-  [
-    'node_modules/tesseract.js-core/tesseract-core-simd-lstm.wasm',
-    'core/tesseract-core-simd-lstm.wasm'
-  ],
-  ['node_modules/@tesseract.js-data/eng/4.0.0/eng.traineddata.gz', 'lang/eng.traineddata.gz'],
-  [
-    'node_modules/@tesseract.js-data/chi_sim/4.0.0/chi_sim.traineddata.gz',
-    'lang/chi_sim.traineddata.gz'
-  ]
+  ['build/ocr/PP-OCRv6_tiny_det.onnx', 'PP-OCRv6_tiny_det.onnx'],
+  ['build/ocr/PP-OCRv6_tiny_rec.onnx', 'PP-OCRv6_tiny_rec.onnx'],
+  ['build/ocr/ppocrv6_dict.txt', 'ppocrv6_dict.txt'],
+  ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.wasm'],
+  ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.mjs']
 ]
+
+// 清理历史残留（旧 tesseract 的 core/ lang/ worker.min.js），避免打进产物。
+for (const stale of ['core', 'lang', 'worker.min.js']) {
+  const stalePath = join(out, stale)
+  if (existsSync(stalePath)) rmSync(stalePath, { recursive: true, force: true })
+}
 
 function shouldCopy(src, dest) {
   if (!existsSync(dest)) return true
