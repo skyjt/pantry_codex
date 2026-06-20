@@ -41,7 +41,7 @@ async function finish(): Promise<void> {
   <div class="mask">
     <div class="card">
       <div class="brand">
-        <PantryBrandLogo variant="icon" :size="52" class="brand-logo" />
+        <PantryBrandLogo variant="color" :size="52" class="brand-logo" />
         <div class="brand-name">茶话间<span class="brand-latin">Teahouse</span></div>
       </div>
       <div class="dots">

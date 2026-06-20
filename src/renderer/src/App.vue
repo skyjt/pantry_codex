@@ -376,7 +376,7 @@ onUnmounted(() => {
       />
       <ChatPane v-else-if="chatStore.activeConv" />
       <div v-else class="empty">
-        <PantryBrandLogo variant="icon" :size="92" class="empty-logo" />
+        <PantryBrandLogo variant="color" :size="92" class="empty-logo" />
         <div class="brand-title">茶话间</div>
         <p class="quote">{{ quote.text }}</p>
         <p class="quote-author">{{ quote.author }}</p>
