@@ -85,7 +85,3 @@ export function openSettingsWindow(parent: BrowserWindow | null): void {
     void win.loadFile(join(__dirname, '../renderer/index.html'), { hash: '/settings' })
   }
 }
-
-export function settingsWindow(): BrowserWindow | null {
-  return win && !win.isDestroyed() ? win : null
-}

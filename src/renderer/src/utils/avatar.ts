@@ -21,8 +21,6 @@ export const AVATAR_EMOJIS = [
   '🐙'
 ]
 
-export const BUILTIN_AVATARS = AVATAR_EMOJIS
-
 export const AVATAR_COLORS = [
   { name: '茶青', bg: '#3D8B6B', fg: '#FFFFFF' },
   { name: '湖蓝', bg: '#2F80A7', fg: '#FFFFFF' },

@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto'
+import { randomInt } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   MSG_TYPES,
@@ -522,10 +522,6 @@ export class ChatService extends EventEmitter {
     bucket.set(peerId, recent)
     return { ok: true }
   }
-}
-
-export function newMsgId(): string {
-  return randomUUID()
 }
 
 function makePkRef(game: PkGame): PkRefView {
