@@ -7,13 +7,13 @@
 <p><b>纯内网、基于 IP 的局域网即时通讯与文件传输工具</b></p>
 
 <p>
-  <a href="https://github.com/skyjt/pantry/releases/latest">
-    <img src="https://img.shields.io/github/v/release/skyjt/pantry?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
+  <a href="https://github.com/skyjt/teahouse/releases/latest">
+    <img src="https://img.shields.io/github/v/release/skyjt/teahouse?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-3D8B6B?style=flat-square" alt="MIT License" />
   </a>
-  <a href="https://github.com/skyjt/pantry/releases">
+  <a href="https://github.com/skyjt/teahouse/releases">
     <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%207%2B%20%7C%20Linux%20%7C%20macOS-0366d6?style=flat-square" alt="平台" />
   </a>
   <img src="https://img.shields.io/badge/Electron-22-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron 22" />
@@ -65,7 +65,7 @@
 
 ## 安装
 
-前往 [**Releases**](https://github.com/skyjt/pantry/releases) 下载对应平台的安装包。
+前往 [**Releases**](https://github.com/skyjt/teahouse/releases) 下载对应平台的安装包。
 
 **Windows** — 运行 NSIS 安装包，或解压便携版直接使用。Windows 7 需为 **SP1 且 64 位**；若启用了代码签名，未打补丁的 Win7 需先安装系统更新 KB4474419。
 
@@ -116,7 +116,7 @@ xattr -dr com.apple.quarantine /Applications/Teahouse.app
 
 欢迎参与。源码构建、开发约定与本机联调说明见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
-如遇问题或有功能建议，请在 [Issues](https://github.com/skyjt/pantry/issues) 提交。
+如遇问题或有功能建议，请在 [Issues](https://github.com/skyjt/teahouse/issues) 提交。
 
 ## 参考项目
 

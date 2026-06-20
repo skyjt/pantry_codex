@@ -976,8 +976,8 @@ async function removeRange(cidr: string): Promise<void> {
               <div class="about-row">
                 <dt>源码</dt>
                 <dd>
-                  <a class="about-link" @click="openUrl('https://github.com/skyjt/pantry')">
-                    github.com/skyjt/pantry
+                  <a class="about-link" @click="openUrl('https://github.com/skyjt/teahouse')">
+                    github.com/skyjt/teahouse
                     <PantryIcon name="external" :size="13" />
                   </a>
                 </dd>
