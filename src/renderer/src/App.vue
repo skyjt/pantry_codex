@@ -299,32 +299,29 @@ onUnmounted(() => {
         <PantryIcon name="contacts" :size="25" />
       </button>
       <div class="spacer"></div>
-      <div class="rail-scan">
-        <button
-          type="button"
-          class="rail-btn rail-hint"
-          :class="{
-            scanning: scanProgress.running,
-            'is-disabled': !canScanAllRanges,
-            'show-hint': activeRailHint === 'scan'
-          }"
-          :aria-disabled="!canScanAllRanges"
-          :data-label="scanButtonTitle"
-          :aria-label="scanButtonTitle"
-          @pointermove="scheduleRailHint('scan')"
-          @pointerleave="hideRailHint('scan')"
-          @click="refreshAllUsers($event)"
-        >
-          <PantryIcon :name="scanProgress.running ? 'loader' : 'refresh'" :size="21" />
-        </button>
-        <div
-          class="rail-progress"
+      <button
+        type="button"
+        class="rail-btn rail-hint"
+        :class="{
+          scanning: scanProgress.running,
+          'is-disabled': !canScanAllRanges,
+          'show-hint': activeRailHint === 'scan'
+        }"
+        :aria-disabled="!canScanAllRanges"
+        :data-label="scanButtonTitle"
+        :aria-label="scanProgress.running ? scanProgressTitle : scanButtonTitle"
+        @pointermove="scheduleRailHint('scan')"
+        @pointerleave="hideRailHint('scan')"
+        @click="refreshAllUsers($event)"
+      >
+        <span
+          class="scan-ring"
           :class="{ visible: scanProgressVisible }"
-          :aria-label="scanProgressTitle"
-        >
-          <div class="rail-progress-fill" :style="{ width: `${scanPercent}%` }"></div>
-        </div>
-      </div>
+          :style="{ '--scan-p': scanPercent }"
+          aria-hidden="true"
+        ></span>
+        <PantryIcon name="refresh" :size="21" />
+      </button>
       <button
         type="button"
         class="rail-btn rail-hint"
@@ -599,13 +596,26 @@ onUnmounted(() => {
   background: transparent;
   color: var(--text-2);
 }
-.rail-btn.scanning {
-  background: var(--primary-weak);
+.rail-btn.scanning,
+.rail-btn.scanning:hover {
+  /* 扫描态不再用方块底/图标旋转，进度改由图标外圈环形表达（决议 #162） */
+  background: transparent;
   color: var(--primary);
   opacity: 1;
 }
-.rail-btn.scanning .pantry-icon {
-  animation: rail-spin 1s linear infinite;
+.scan-ring {
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: conic-gradient(var(--primary) calc(var(--scan-p, 0) * 1%), var(--line) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent 72%, #000 76%);
+  mask: radial-gradient(closest-side, transparent 72%, #000 76%);
+  opacity: 0;
+  transition: opacity 180ms ease;
+  pointer-events: none;
+}
+.scan-ring.visible {
+  opacity: 1;
 }
 .rail-badge {
   position: absolute;
@@ -624,47 +634,11 @@ onUnmounted(() => {
 .spacer {
   flex: 1;
 }
-.rail-scan {
-  width: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 2px;
-}
-.rail-progress {
-  width: 34px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--line);
-  overflow: hidden;
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
-.rail-progress.visible {
-  opacity: 1;
-}
-.rail-progress-fill {
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--primary);
-  transition: width 160ms linear;
-}
-@keyframes rail-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .rail-hint::after,
   .self-card,
-  .rail-progress,
-  .rail-progress-fill {
+  .scan-ring {
     transition: none;
-  }
-  .rail-btn.scanning .pantry-icon {
-    animation: none;
   }
 }
 

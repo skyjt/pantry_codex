@@ -1803,7 +1803,7 @@ async function confirmRemove(cidr: string): Promise<void> {
 .range-row {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 56px 64px;
+  grid-template-columns: minmax(0, 1fr) 84px 72px;
   align-items: center;
   gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
@@ -1825,6 +1825,10 @@ async function confirmRemove(cidr: string): Promise<void> {
 
 .range-head > span:nth-child(2) {
   text-align: center;
+}
+
+.range-head > span:nth-child(3) {
+  text-align: right;
 }
 
 .range-cidr {
@@ -1877,6 +1881,7 @@ async function confirmRemove(cidr: string): Promise<void> {
 
 .range-ops {
   display: flex;
+  justify-content: flex-end;
   gap: var(--sp-1);
 }
 
