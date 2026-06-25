@@ -74,6 +74,8 @@ const scanProgress = ref<ScanProgressView>({
   finishedAt: 0
 })
 const scanProgressVisible = ref(false)
+// 环形进度显示值：刷新前归零（环隐藏时瞬间）、扫描中随 scanPercent 平滑增长（决议 #163）
+const scanRingPct = ref(0)
 const hasScanRanges = computed(() => (settings.value?.scanRanges.length ?? 0) > 0)
 const canScanAllRanges = computed(() => hasScanRanges.value && !scanProgress.value.running)
 const scanPercent = computed(() => {
@@ -167,6 +169,7 @@ function releaseInitialRailFocus(): void {
 
 function applyScanProgress(next: ScanProgressView): void {
   scanProgress.value = next
+  scanRingPct.value = scanPercent.value
   clearScanProgressHideTimer()
   if (next.running) {
     scanProgressVisible.value = true
@@ -192,6 +195,7 @@ function activateTab(next: Tab, event: Event): void {
 async function refreshAllUsers(event?: Event): Promise<void> {
   releaseRailFocus(event)
   if (!canScanAllRanges.value) return
+  scanRingPct.value = 0 // 新扫描前归零（此刻环隐藏、无过渡），避免从上次满环倒退
   applyScanProgress(await window.pantry.scanAllRanges())
 }
 
@@ -317,7 +321,7 @@ onUnmounted(() => {
         <span
           class="scan-ring"
           :class="{ visible: scanProgressVisible }"
-          :style="{ '--scan-p': scanPercent }"
+          :style="{ '--scan-p': scanRingPct }"
           aria-hidden="true"
         ></span>
         <PantryIcon name="refresh" :size="21" />
@@ -603,6 +607,12 @@ onUnmounted(() => {
   color: var(--primary);
   opacity: 1;
 }
+/* 进度数值注册为可过渡的 typed 属性，让环形进度平滑增长而非跳变（决议 #163） */
+@property --scan-p {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
 .scan-ring {
   position: absolute;
   inset: 2px;
@@ -611,11 +621,14 @@ onUnmounted(() => {
   -webkit-mask: radial-gradient(closest-side, transparent 72%, #000 76%);
   mask: radial-gradient(closest-side, transparent 72%, #000 76%);
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity 180ms ease; /* 非扫描态：进度值瞬间归零、不倒退 */
   pointer-events: none;
 }
 .scan-ring.visible {
   opacity: 1;
+  transition:
+    opacity 180ms ease,
+    --scan-p 0.4s linear; /* 扫描中：进度平滑增长 */
 }
 .rail-badge {
   position: absolute;
@@ -637,7 +650,8 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .rail-hint::after,
   .self-card,
-  .scan-ring {
+  .scan-ring,
+  .scan-ring.visible {
     transition: none;
   }
 }
