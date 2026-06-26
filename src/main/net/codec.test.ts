@@ -9,7 +9,8 @@ import {
   type MsgPayload,
   type Profile,
   type ProfilePayload,
-  type ScanRangesPayload
+  type ScanRangesPayload,
+  type UpdateReqPayload
 } from '../../shared/protocol'
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {
@@ -42,6 +43,21 @@ describe('codec', () => {
     expect(result.env.type).toBe('entry')
     expect(result.env.from).toBe('node-aaaa')
     expect((result.env.payload as ProfilePayload).profile.nick).toBe('张三')
+  })
+
+  it('update 自更新请求报文：合法往返 + 坏报文白名单拒绝', () => {
+    const ok = decode(
+      encode(makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, 'node-aaaa', { op: 'req', platform: 'win' }))
+    )
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.known).toBe(true)
+      expect((ok.env.payload as UpdateReqPayload).platform).toBe('win')
+    }
+    // op 非 req / platform 非法 / 缺字段 → 丢弃
+    expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'x', platform: 'win' }))).ok).toBe(false)
+    expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'req', platform: 'bad' }))).ok).toBe(false)
+    expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'req' }))).ok).toBe(false)
   })
 
   it('未知类型：信封合法即接受，标记 known=false（向前兼容）', () => {

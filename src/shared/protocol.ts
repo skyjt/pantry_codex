@@ -289,6 +289,14 @@ export interface FileCtlSimple {
 
 export type FileCtlPayload = FileCtlOffer | FileCtlSimple
 
+/** 局域网自更新控制报文（§8.1，决议 #166）：B 请求 A 发来其平台安装包 */
+export interface UpdateReqPayload {
+  op: 'req'
+  /** 请求方平台，供 A 复核同平台、拒绝跨平台请求 */
+  platform: Platform
+}
+export type UpdatePayload = UpdateReqPayload
+
 /** TCP 控制帧（4 字节大端长度前缀 + UTF-8 JSON；pull-ok 后紧跟 len 字节裸流） */
 export interface PullFrame {
   type: 'pull'
@@ -343,6 +351,7 @@ export const MSG_TYPES = {
   msg: 'msg',
   ack: 'ack',
   fileCtl: 'file-ctl',
-  group: 'group'
+  group: 'group',
+  update: 'update'
 } as const
 import type { PkGame, PkResult } from './pk'

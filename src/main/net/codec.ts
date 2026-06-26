@@ -21,7 +21,8 @@ import {
   type PresencePayload,
   type Profile,
   type ProfilePayload,
-  type ScanRangesPayload
+  type ScanRangesPayload,
+  type UpdateReqPayload
 } from '../../shared/protocol'
 import { PEERS_PER_PACKET } from '../../shared/protocol'
 import { isPkGame, isPkRef } from '../../shared/pk'
@@ -261,6 +262,13 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
           isInt(r.addedAt) &&
           r.addedAt > 0
       )
+    }
+    case MSG_TYPES.update: {
+      // 自更新请求（§8.1，决议 #166）：只认 op:'req' + 合法平台，其余字段忽略
+      if (!isRecord(payload)) return false
+      const u = payload as Partial<UpdateReqPayload>
+      if (u.op !== 'req') return false
+      return u.platform === 'win' || u.platform === 'mac' || u.platform === 'linux'
     }
     case MSG_TYPES.exit:
       return isRecord(payload)
