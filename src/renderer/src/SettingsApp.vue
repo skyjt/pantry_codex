@@ -55,6 +55,23 @@ const info = ref<AppInfo | null>(null)
 // 关于页「更多信息」折叠（决议 #90）：默认收起开发者向运行时信息
 const showAboutDetails = ref(false)
 
+// 检测内网更新（决议 #167）：主动调既有 checkUpdate 查同平台更高版本的在线源
+const checkingUpdate = ref(false)
+const updateCheckMsg = ref('')
+async function checkForUpdate(): Promise<void> {
+  if (checkingUpdate.value) return
+  checkingUpdate.value = true
+  updateCheckMsg.value = ''
+  try {
+    const result = await window.pantry.checkUpdate()
+    updateCheckMsg.value = result
+      ? `内网有新版 v${result.version}（来自 ${result.fromName}）`
+      : '当前已是内网最新版本'
+  } finally {
+    checkingUpdate.value = false
+  }
+}
+
 // 我的资料表单
 const nick = ref('')
 const company = ref('')
@@ -1011,6 +1028,14 @@ async function confirmRemove(cidr: string): Promise<void> {
                 </dd>
               </div>
             </dl>
+
+            <!-- 检测内网更新（决议 #167）：主动查同平台更高版本的在线源，与主界面被动提示互补 -->
+            <div class="about-update">
+              <button class="ghost compact" :disabled="checkingUpdate" @click="checkForUpdate">
+                {{ checkingUpdate ? '检测中…' : '检测内网更新' }}
+              </button>
+              <span v-if="updateCheckMsg" class="about-update-msg">{{ updateCheckMsg }}</span>
+            </div>
 
             <!-- 开发者向运行时信息收进折叠区（决议 #90）：就地展开，Chrome 108 无原生 popover -->
             <button
@@ -2116,6 +2141,17 @@ async function confirmRemove(cidr: string): Promise<void> {
   text-decoration: underline;
 }
 
+.about-update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.about-update-msg {
+  font-size: 13px;
+  color: var(--text-2);
+}
 .about-more {
   width: 100%;
   height: 42px;
