@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import type { AppInfo, ScanProgressView, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
+import { useUpdateStore } from './stores/update'
 import PeerList from './components/PeerList.vue'
 import ConvList from './components/ConvList.vue'
 import ChatPane from './components/ChatPane.vue'
@@ -48,6 +49,19 @@ async function chatWith(nodeId: string): Promise<void> {
 function openSettings(event?: Event): void {
   releaseRailFocus(event)
   void window.pantry.openSettings()
+}
+
+// 局域网自更新提示（决议 #166 第一步）：发现同平台更高版本的在线源时，导航栏出现升级入口
+const updateStore = useUpdateStore()
+const showUpdatePanel = ref(false)
+const updateHintLabel = computed(() =>
+  updateStore.available
+    ? `内网有新版 v${updateStore.available.version}（来自 ${updateStore.available.fromName}）`
+    : ''
+)
+function toggleUpdatePanel(event?: Event): void {
+  releaseRailFocus(event)
+  showUpdatePanel.value = !showUpdatePanel.value
 }
 const info = ref<AppInfo | null>(null)
 // 主界面空态随机名言（决议 #82）：组件创建（每次打开软件）时随机一条，纯本地内置
@@ -203,6 +217,7 @@ onMounted(async () => {
   void peersStore.init()
   void chatStore.init()
   void groupsStore.init()
+  void updateStore.init()
   document.addEventListener('visibilitychange', onVisibilityChange)
   info.value = await window.pantry.getAppInfo()
   settings.value = await window.pantry.getSettings()
@@ -304,6 +319,26 @@ onUnmounted(() => {
       </button>
       <div class="spacer"></div>
       <button
+        v-if="updateStore.available"
+        type="button"
+        class="rail-btn rail-update"
+        :class="{ active: showUpdatePanel }"
+        :title="updateHintLabel"
+        :aria-label="updateHintLabel"
+        @click="toggleUpdatePanel($event)"
+      >
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M12 19V7M7 12l5-5 5 5"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <span class="rail-dot" aria-hidden="true"></span>
+      </button>
+      <button
         type="button"
         class="rail-btn rail-hint"
         :class="{
@@ -339,6 +374,15 @@ onUnmounted(() => {
         <PantryIcon name="settings" :size="21" />
       </button>
     </nav>
+
+    <div v-if="showUpdatePanel && updateStore.available" class="update-pop" role="dialog">
+      <div class="update-pop-head">内网有新版</div>
+      <div class="update-pop-ver">v{{ updateStore.available.version }}</div>
+      <div class="update-pop-from">来自 {{ updateStore.available.fromName }}</div>
+      <div class="update-pop-cur">当前版本 v{{ updateStore.available.currentVersion }}</div>
+      <p class="update-pop-hint">一键同步更新即将上线，敬请期待。</p>
+      <button type="button" class="update-pop-ok" @click="showUpdatePanel = false">知道了</button>
+    </div>
 
     <aside class="list">
       <div class="search-box">
@@ -607,6 +651,75 @@ onUnmounted(() => {
   color: var(--primary);
   opacity: 1;
 }
+/* 局域网自更新提示入口（决议 #166 第一步） */
+.rail-update {
+  color: var(--primary);
+}
+.rail-update.active,
+.rail-update:hover {
+  background: var(--primary-weak);
+}
+.rail-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 1.5px solid var(--rail-bg);
+}
+.update-pop {
+  position: fixed;
+  left: 76px;
+  bottom: 16px;
+  z-index: 60;
+  width: 192px;
+  padding: 14px 16px;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-pop-head {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.update-pop-ver {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--primary);
+  line-height: 1.2;
+}
+.update-pop-from {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-1);
+}
+.update-pop-cur {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.update-pop-hint {
+  margin: 8px 0 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.update-pop-ok {
+  align-self: flex-end;
+  padding: 5px 14px;
+  font-size: 13px;
+  color: #fff;
+  background: var(--primary);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
 /* 进度数值注册为可过渡的 typed 属性，让环形进度平滑增长而非跳变（决议 #163） */
 @property --scan-p {
   syntax: '<number>';

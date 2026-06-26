@@ -28,7 +28,8 @@ import {
   type ScanProgressView,
   type SettingsView,
   type StickerView,
-  type TransferView
+  type TransferView,
+  type UpdateAvailability
 } from '../shared/ipc'
 
 function subscribe<T>(channel: string, listener: (data: T) => void): () => void {
@@ -43,6 +44,7 @@ const api: PantryApi = {
   openUrl: (url: string): Promise<boolean> => ipcRenderer.invoke(IpcChannels.appOpenUrl, url),
   getNetState: (): Promise<NetState> => ipcRenderer.invoke(IpcChannels.netState),
   getPeers: (): Promise<PeerView[]> => ipcRenderer.invoke(IpcChannels.peersList),
+  checkUpdate: (): Promise<UpdateAvailability | null> => ipcRenderer.invoke(IpcChannels.updateCheck),
   probePeer: (nodeId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.peersProbe, nodeId),
   listConversations: (): Promise<ConversationView[]> => ipcRenderer.invoke(IpcChannels.convList),
@@ -170,6 +172,8 @@ const api: PantryApi = {
   sendSticker: (peerNodeId: string, stickerId: string): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.stickerSend, peerNodeId, stickerId),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
+  onUpdateAvailable: (listener) =>
+    subscribe<UpdateAvailability | null>(IpcEvents.updateAvailable, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
   onNudgeReceived: (listener) => subscribe<NudgeEvent>(IpcEvents.nudgeReceived, listener),

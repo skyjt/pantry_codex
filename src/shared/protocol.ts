@@ -113,6 +113,12 @@ export interface Profile {
   caps: string[]
 }
 
+/** caps 能力位（protocol §3 / 决议 #166）：声明本节点能力，供对端探测；入站未知位忽略。 */
+export const CAPS = {
+  /** 可作为本平台更新源：运行于可分发形态（nsis 自留安装器 / deb 自重打包），能向同平台低版本节点提供安装包。 */
+  updateSource: 'upd1'
+} as const
+
 /** 报文信封（protocol §4） */
 export interface Envelope<T = unknown> {
   v: number

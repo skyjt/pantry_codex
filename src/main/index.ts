@@ -39,11 +39,13 @@ import {
   type ProfileSubmit,
   type ScanProgressView,
   type SettingsView,
-  type TransferView
+  type TransferView,
+  type UpdateAvailability
 } from '../shared/ipc'
 import {
   DEFAULT_TCP_PORT,
   DEFAULT_UDP_PORT,
+  CAPS,
   LIMITS,
   TIMINGS,
   type ScanRangeSummary
@@ -90,6 +92,8 @@ import { ImageOcrResultCache } from './services/image-ocr-cache'
 import type { PeerRecord } from './net/peer-registry'
 import { isPathInsideAny, PathGrantStore } from './util/path-policy'
 import { resolveDevRendererUrl } from './util/renderer-url'
+import { canServeUpdates } from './util/release-format'
+import { pickUpdateSource } from './services/updater'
 
 // Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠；UOS/Debian 目标机多国产 GPU 或旧驱动，
 // GPU 进程频报 ContextResult::kTransientFailure —— 两者默认软渲染（tech-design §9，决议 #55）
@@ -499,7 +503,8 @@ if (!gotLock) {
       platform: record.profile.platform,
       ip: record.ip,
       online: record.online,
-      lastSeen: record.lastSeen
+      lastSeen: record.lastSeen,
+      ver: record.profile.ver
     }
   }
 
@@ -511,6 +516,25 @@ if (!gotLock) {
 
   function peerViews(): PeerView[] {
     return registry ? registry.list().map(toPeerView) : []
+  }
+
+  /** 局域网自更新（决议 #166）：在线节点里同平台、更高版本、可作源的最佳更新来源，无则 null。 */
+  function currentUpdateAvailability(): UpdateAvailability | null {
+    if (!appState || !registry) return null
+    const self = { version: appState.profile.ver, platform: appState.profile.platform }
+    const candidates = registry.list().map((r) => ({
+      profile: r.profile,
+      online: r.online,
+      displayName: resolvePeerDisplayName(r.profile.nodeId)
+    }))
+    const src = pickUpdateSource(self, candidates)
+    if (!src) return null
+    return {
+      nodeId: src.nodeId,
+      fromName: src.fromName,
+      version: src.version,
+      currentVersion: self.version
+    }
   }
 
   function scanRangeItems(): SettingsView['scanRangeItems'] {
@@ -856,6 +880,7 @@ if (!gotLock) {
       pushTimer = setTimeout(() => {
         pushTimer = null
         mainWindow?.webContents.send(IpcEvents.peersUpdated, peerViews())
+        mainWindow?.webContents.send(IpcEvents.updateAvailable, currentUpdateAvailability())
       }, 200)
       // 落库节流 1s：≤1000 行整表 upsert 在事务内毫秒级
       if (!persistTimer) {
@@ -1124,6 +1149,8 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.netState, (): NetState => netState)
 
   ipcMain.handle(IpcChannels.peersList, (): PeerView[] => peerViews())
+
+  ipcMain.handle(IpcChannels.updateCheck, (): UpdateAvailability | null => currentUpdateAvailability())
 
   ipcMain.handle(IpcChannels.peersProbe, (_event, nodeId: unknown): boolean => {
     if (typeof nodeId !== 'string' || nodeId.length === 0 || nodeId.length > 64) return false
@@ -1839,7 +1866,14 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort)
+    const updateCaps = canServeUpdates({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      env: process.env
+    })
+      ? [CAPS.updateSource]
+      : []
+    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort, updateCaps)
     udpPort = envUdpPort ?? appState.config.udpPort
     tcpPort = envTcpPort ?? appState.config.tcpPort
     netState.udpPort = udpPort

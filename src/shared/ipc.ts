@@ -80,7 +80,9 @@ export const IpcChannels = {
   winClose: 'win:close',
   /** Linux JS 拖拽（决议 #52）：CSS 拖拽区在 Linux 不可靠，主进程跟随光标移窗 */
   winBeginDrag: 'win:begin-drag',
-  winEndDrag: 'win:end-drag'
+  winEndDrag: 'win:end-drag',
+  /** 局域网自更新：查询当前可用更新源（决议 #166） */
+  updateCheck: 'update:check'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -106,7 +108,9 @@ export const IpcEvents = {
   /** 主窗收到 Command/Ctrl+V；renderer 只在输入框聚焦时兜底读图片剪贴板 */
   clipboardPasteImage: 'clipboard:paste-image',
   /** 窗口最大化状态变化 → 自绘控制按钮切换图标（决议 #49） */
-  winMaximizeChanged: 'win:maximized-changed'
+  winMaximizeChanged: 'win:maximized-changed',
+  /** 局域网自更新：可用更新源变化（决议 #166） */
+  updateAvailable: 'update:available'
 } as const
 
 /** 全局快捷键出厂默认（决议 #57）：设置页"恢复默认"与主进程默认值的唯一来源 */
@@ -138,6 +142,20 @@ export interface PeerView {
   ip: string
   online: boolean
   lastSeen: number
+  /** 应用版本（决议 #166，自更新版本比对依据） */
+  ver: string
+}
+
+/** 局域网自更新：当前可用的更新源（决议 #166）；无更新源时主进程返回 null。 */
+export interface UpdateAvailability {
+  /** 来源节点 nodeId */
+  nodeId: string
+  /** 来源节点展示名（备注优先，其次昵称） */
+  fromName: string
+  /** 来源节点的应用版本（高于本机） */
+  version: string
+  /** 本机当前版本 */
+  currentVersion: string
 }
 
 export interface NetState {
@@ -463,6 +481,10 @@ export interface PantryApi {
   openUrl(url: string): Promise<boolean>
   getPeers(): Promise<PeerView[]>
   getNetState(): Promise<NetState>
+  /** 局域网自更新：查询当前可用更新源，无则 null（决议 #166） */
+  checkUpdate(): Promise<UpdateAvailability | null>
+  /** 局域网自更新：可用更新源变化推送（决议 #166） */
+  onUpdateAvailable(listener: (info: UpdateAvailability | null) => void): () => void
   /** 按需探活（F-DISC-8）；返回是否已发出 */
   probePeer(nodeId: string): Promise<boolean>
   listConversations(): Promise<ConversationView[]>

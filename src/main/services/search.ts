@@ -71,7 +71,8 @@ export class SearchService {
         platform: r.profile.platform,
         ip: r.ip,
         online: r.online,
-        lastSeen: r.lastSeen
+        lastSeen: r.lastSeen,
+        ver: r.profile.ver
       }))
 
     // 聊天记录：FTS 短语匹配，按会话聚合 + 各会话最新命中作摘要

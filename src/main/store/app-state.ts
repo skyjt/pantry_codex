@@ -274,7 +274,8 @@ export function loadAppState(
   dataDir: string,
   appVersion: string,
   tcpPort = DEFAULT_TCP_PORT,
-  udpPort = DEFAULT_UDP_PORT
+  udpPort = DEFAULT_UDP_PORT,
+  caps: string[] = []
 ): AppState {
   const identityPath = join(dataDir, 'identity.json')
   const configPath = join(dataDir, 'config.json')
@@ -427,7 +428,7 @@ export function loadAppState(
     platform: detectPlatform(),
     tcpPort,
     ver: appVersion,
-    caps: []
+    caps
   }
 
   return { nodeId: identity.nodeId, profile, config, configPath }
