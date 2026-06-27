@@ -146,11 +146,7 @@ export class Messenger extends EventEmitter {
     if (!result.ok || !result.known) return false
     const env = result.env
     if (env.from === this.selfId) return false
-    if (
-      env.type !== MSG_TYPES.msg &&
-      env.type !== MSG_TYPES.fileCtl &&
-      env.type !== MSG_TYPES.group
-    ) {
+    if (!isReliableControlType(env.type)) {
       return false
     }
     if (this.dedup.has(env.id)) return true
@@ -261,12 +257,8 @@ export class Messenger extends EventEmitter {
       return
     }
 
-    // 可靠类型（msg / file-ctl / group）：无条件回 ACK（含重复），让对端停止重传
-    if (
-      env.type === MSG_TYPES.msg ||
-      env.type === MSG_TYPES.fileCtl ||
-      env.type === MSG_TYPES.group
-    ) {
+    // 可靠类型：无条件回 ACK（含重复），让对端停止重传
+    if (isReliableControlType(env.type)) {
       if (this.registry.get(env.from)) {
         const record = this.registry.touch(env.from, rinfo.address, rinfo.port)
         if (!record) return
@@ -283,4 +275,13 @@ export class Messenger extends EventEmitter {
 
 function isDatabaseClosedError(err: unknown): boolean {
   return err instanceof Error && /database connection is not open/i.test(err.message)
+}
+
+function isReliableControlType(type: string): boolean {
+  return (
+    type === MSG_TYPES.msg ||
+    type === MSG_TYPES.fileCtl ||
+    type === MSG_TYPES.group ||
+    type === MSG_TYPES.update
+  )
 }

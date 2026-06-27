@@ -135,8 +135,9 @@ class FakeTransferRepo {
     // no-op
   }
 
-  updateFiles(): void {
-    // no-op
+  updateFiles(transferId: string, filesJson: string): void {
+    const row = this.rows.get(transferId)
+    if (row) row.files = filesJson
   }
 
   get(transferId: string): TransferRow | undefined {
@@ -161,6 +162,121 @@ function waitTick(): Promise<void> {
 }
 
 describe('FilesService 群聊媒体', () => {
+  it('发送更新包 offer 不进入聊天与普通传输视图', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-update-send-'))
+    tmpDirs.push(dir)
+    const pkgPath = join(dir, 'Teahouse-0.28.0-linux-amd64.deb')
+    writeFileSync(pkgPath, 'deb')
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const convRepo = new FakeConvRepo()
+    const svc = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: convRepo as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      getUpdateDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    await expect(svc.offerUpdatePackage('node-bob', pkgPath)).resolves.toBe(true)
+
+    expect(msgRepo.rows.size).toBe(0)
+    expect(convRepo.bumped).toHaveLength(0)
+    expect(transferRepo.rows.size).toBe(1)
+    const row = [...transferRepo.rows.values()][0]
+    expect(row.direction).toBe('out')
+    expect(row.msg_id).toMatch(/^update:/)
+    expect(row.status).toBe('offering')
+    expect(JSON.parse(row.files)).toMatchObject({
+      name: 'Teahouse-0.28.0-linux-amd64.deb',
+      savedPath: pkgPath,
+      purpose: 'update'
+    })
+    expect(svc.transferView(row.transfer_id)).toBeNull()
+    expect(messenger.sent[0]).toMatchObject({
+      peerId: 'node-bob',
+      env: {
+        type: MSG_TYPES.fileCtl,
+        payload: {
+          op: 'offer',
+          rootName: 'Teahouse-0.28.0-linux-amd64.deb',
+          purpose: 'update'
+        }
+      }
+    })
+  })
+
+  it('更新包 offer 不进入聊天与接收目录，并尝试自动 accept', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
+    const updateDir = mkdtempSync(join(tmpdir(), 'pantry-update-service-'))
+    tmpDirs.push(dir, updateDir)
+
+    const messenger = new FakeMessenger()
+    const baseSend = messenger.sendReliable.bind(messenger)
+    messenger.sendReliable = async (peerId: string, env: Envelope<FileCtlPayload>) => {
+      await baseSend(peerId, env)
+      return env.payload.op !== 'accept'
+    }
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const convRepo = new FakeConvRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: convRepo as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      getUpdateDir: () => updateDir,
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-update',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: 'Teahouse-0.28.0-linux-x64.deb', size: 1024 }],
+        totalSize: 1024,
+        fileCount: 1,
+        rootName: 'Teahouse-0.28.0-linux-x64.deb',
+        purpose: 'update'
+      })
+    )
+    await waitTick()
+
+    expect(msgRepo.rows.size).toBe(0)
+    expect(convRepo.bumped).toHaveLength(0)
+    expect(transferRepo.rows.size).toBe(1)
+    const row = transferRepo.get('t-update')
+    expect(row?.msg_id).toBe('update:t-update')
+    expect(row?.status).toBe('failed')
+    expect(JSON.parse(row!.files)).toMatchObject({
+      name: 'Teahouse-0.28.0-linux-x64.deb',
+      purpose: 'update',
+      savedPath: join(updateDir, 'Teahouse-0.28.0-linux-x64.deb')
+    })
+    expect(messenger.sent[0]).toMatchObject({
+      peerId: 'node-bob',
+      env: { payload: { op: 'accept', transferId: 't-update' } }
+    })
+  })
+
   it('拒绝声明总大小与文件清单不一致的图片 offer', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pantry-files-service-'))
     tmpDirs.push(dir)

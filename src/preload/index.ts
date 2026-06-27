@@ -45,6 +45,7 @@ const api: PantryApi = {
   getNetState: (): Promise<NetState> => ipcRenderer.invoke(IpcChannels.netState),
   getPeers: (): Promise<PeerView[]> => ipcRenderer.invoke(IpcChannels.peersList),
   checkUpdate: (): Promise<UpdateAvailability | null> => ipcRenderer.invoke(IpcChannels.updateCheck),
+  requestUpdate: (): Promise<boolean> => ipcRenderer.invoke(IpcChannels.updateRequest),
   probePeer: (nodeId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.peersProbe, nodeId),
   listConversations: (): Promise<ConversationView[]> => ipcRenderer.invoke(IpcChannels.convList),

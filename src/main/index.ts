@@ -47,8 +47,12 @@ import {
   DEFAULT_UDP_PORT,
   CAPS,
   LIMITS,
+  MSG_TYPES,
   TIMINGS,
-  type ScanRangeSummary
+  type Envelope,
+  type Platform,
+  type ScanRangeSummary,
+  type UpdateReqPayload
 } from '../shared/protocol'
 import {
   addSharedScanRanges,
@@ -87,13 +91,18 @@ import { Discovery, type ManualPeer } from './net/discovery'
 import { RangeSync } from './net/range-sync'
 import { Messenger } from './net/messenger'
 import { PeerClock } from './net/peer-clock'
+import { makeEnvelope } from './net/codec'
 import { ChatService } from './services/chat'
 import { ImageOcrResultCache } from './services/image-ocr-cache'
 import type { PeerRecord } from './net/peer-registry'
 import { isPathInsideAny, PathGrantStore } from './util/path-policy'
 import { resolveDevRendererUrl } from './util/renderer-url'
 import { canServeUpdates } from './util/release-format'
-import { pickUpdateSource } from './services/updater'
+import {
+  findLocalUpdatePackage,
+  pickUpdateSource,
+  shouldServeUpdateRequest
+} from './services/updater'
 
 // Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠；UOS/Debian 目标机多国产 GPU 或旧驱动，
 // GPU 进程频报 ContextResult::kTransientFailure —— 两者默认软渲染（tech-design §9，决议 #55）
@@ -147,6 +156,7 @@ if (!gotLock) {
   const rendererPathGrants = new PathGrantStore()
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
+  let messenger: Messenger | null = null
   const remarks = new Map<string, string>()
   let db: AppDatabase | null = null
   let peersRepo: PeersRepo | null = null
@@ -238,6 +248,7 @@ if (!gotLock) {
   // 中文目录名在部分系统/命令行/跨平台工具链下编码兼容差，且收到的文件属长期归档、放文档更合语义。
   const defaultFileDir = (): string => join(app.getPath('documents'), 'teahouse')
   const imagesDir = (): string => join(app.getPath('userData'), 'data', 'images')
+  const updatesDir = (): string => join(app.getPath('userData'), 'data', 'updates')
   const importedMediaDir = (): string => join(app.getPath('userData'), 'data', 'imported-media')
   const stickersDir = (): string => join(app.getPath('userData'), 'data', 'stickers')
   const managedMediaRoots = (): string[] => [imagesDir(), importedMediaDir(), stickersDir()]
@@ -519,7 +530,7 @@ if (!gotLock) {
   }
 
   /** 局域网自更新（决议 #166）：在线节点里同平台、更高版本、可作源的最佳更新来源，无则 null。 */
-  function currentUpdateAvailability(): UpdateAvailability | null {
+  function currentUpdateSource(): ReturnType<typeof pickUpdateSource> {
     if (!appState || !registry) return null
     const self = { version: appState.profile.ver, platform: appState.profile.platform }
     const candidates = registry.list().map((r) => ({
@@ -527,7 +538,14 @@ if (!gotLock) {
       online: r.online,
       displayName: resolvePeerDisplayName(r.profile.nodeId)
     }))
-    const src = pickUpdateSource(self, candidates)
+    return pickUpdateSource(self, candidates)
+  }
+
+  /** 局域网自更新（决议 #166）：在线节点里同平台、更高版本、可作源的最佳更新来源，无则 null。 */
+  function currentUpdateAvailability(): UpdateAvailability | null {
+    if (!appState) return null
+    const self = { version: appState.profile.ver, platform: appState.profile.platform }
+    const src = currentUpdateSource()
     if (!src) return null
     return {
       nodeId: src.nodeId,
@@ -535,6 +553,68 @@ if (!gotLock) {
       version: src.version,
       currentVersion: self.version
     }
+  }
+
+  async function requestUpdatePackage(): Promise<boolean> {
+    if (!appState || !messenger) return false
+    const src = currentUpdateSource()
+    if (!src) return false
+    return messenger.sendReliable(
+      src.nodeId,
+      makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, appState.nodeId, {
+        op: 'req',
+        platform: appState.profile.platform
+      })
+    )
+  }
+
+  function currentProtocolPlatform(): Platform {
+    if (process.platform === 'win32') return 'win'
+    if (process.platform === 'darwin') return 'mac'
+    return 'linux'
+  }
+
+  function updatePackagePath(version: string, platform: Platform): string | null {
+    return findLocalUpdatePackage({
+      dirs: [updatesDir(), join(app.getAppPath(), 'release')],
+      version,
+      platform
+    })
+  }
+
+  function localUpdatePackagePath(): string | null {
+    if (!appState) return null
+    return updatePackagePath(appState.profile.ver, appState.profile.platform)
+  }
+
+  function canAdvertiseUpdateSource(): boolean {
+    if (
+      !canServeUpdates({
+        platform: process.platform,
+        isPackaged: app.isPackaged,
+        env: process.env
+      })
+    ) {
+      return false
+    }
+    return updatePackagePath(app.getVersion(), currentProtocolPlatform()) !== null
+  }
+
+  function handleUpdateRequest(env: Envelope<UpdateReqPayload>): void {
+    if (!appState || !files || !registry) return
+    const peer = registry.get(env.from)
+    if (
+      !shouldServeUpdateRequest(
+        { version: appState.profile.ver, platform: appState.profile.platform },
+        peer ?? null,
+        env.payload.platform
+      )
+    ) {
+      return
+    }
+    const packagePath = localUpdatePackagePath()
+    if (!packagePath) return
+    void files.offerUpdatePackage(env.from, packagePath)
   }
 
   function scanRangeItems(): SettingsView['scanRangeItems'] {
@@ -773,12 +853,15 @@ if (!gotLock) {
       registry.seed(peersRepo.loadAll()) // 历史联系人以离线态回灌（F-DISC-7）
       for (const [id, remark] of peersRepo.loadRemarks()) remarks.set(id, remark)
 
-      const messenger = new Messenger({
+      messenger = new Messenger({
         udp,
         registry,
         selfId: state.nodeId,
         queue: new QueueRepo(db),
         dedup: new DedupRepo(db)
+      })
+      messenger.on('incoming', (env: Envelope) => {
+        if (env.type === MSG_TYPES.update) handleUpdateRequest(env as Envelope<UpdateReqPayload>)
       })
       chat = new ChatService({
         selfId: state.nodeId,
@@ -825,7 +908,8 @@ if (!gotLock) {
         tcpPort,
         getSaveDir: () =>
           appState?.config.fileDir || defaultFileDir(),
-        getImagesDir: imagesDir
+        getImagesDir: imagesDir,
+        getUpdateDir: updatesDir
       })
       files.on('message', onMessage)
       files.on('status', onStatus)
@@ -1151,6 +1235,8 @@ if (!gotLock) {
   ipcMain.handle(IpcChannels.peersList, (): PeerView[] => peerViews())
 
   ipcMain.handle(IpcChannels.updateCheck, (): UpdateAvailability | null => currentUpdateAvailability())
+
+  ipcMain.handle(IpcChannels.updateRequest, (): Promise<boolean> => requestUpdatePackage())
 
   ipcMain.handle(IpcChannels.peersProbe, (_event, nodeId: unknown): boolean => {
     if (typeof nodeId !== 'string' || nodeId.length === 0 || nodeId.length > 64) return false
@@ -1866,13 +1952,7 @@ if (!gotLock) {
   })
 
   app.whenReady().then(() => {
-    const updateCaps = canServeUpdates({
-      platform: process.platform,
-      isPackaged: app.isPackaged,
-      env: process.env
-    })
-      ? [CAPS.updateSource]
-      : []
+    const updateCaps = canAdvertiseUpdateSource() ? [CAPS.updateSource] : []
     appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort, updateCaps)
     udpPort = envUdpPort ?? appState.config.udpPort
     tcpPort = envTcpPort ?? appState.config.tcpPort

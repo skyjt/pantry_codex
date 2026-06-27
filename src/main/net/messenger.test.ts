@@ -5,7 +5,8 @@ import {
   type Envelope,
   type MsgPayload,
   type Profile,
-  type Timings
+  type Timings,
+  type UpdateReqPayload
 } from '../../shared/protocol'
 import { makeEnvelope } from './codec'
 import { UdpChannel } from './udp'
@@ -319,6 +320,30 @@ describe('messenger 回环集成', () => {
     expect(b.incoming).toHaveLength(1)
     expect(c.incoming).toHaveLength(1)
     expect(a.queue.items).toHaveLength(0)
+  })
+
+  it('update 请求走可靠控制报文 ACK 并投递', async () => {
+    nextPort += 2
+    const a = await makeStack('alice', nextPort)
+    const b = await makeStack('bob', nextPort + 1, [{ host: '127.0.0.1', port: a.port }])
+    a.discovery.start()
+    b.discovery.start()
+    await waitFor(() => a.registry.get(b.profile.nodeId)?.online === true)
+
+    const ok = await a.messenger.sendReliable(
+      b.profile.nodeId,
+      makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, a.profile.nodeId, {
+        op: 'req',
+        platform: 'linux'
+      })
+    )
+
+    expect(ok).toBe(true)
+    expect(b.incoming).toHaveLength(1)
+    expect(b.incoming[0]).toMatchObject({
+      type: MSG_TYPES.update,
+      payload: { op: 'req', platform: 'linux' }
+    })
   })
 
   it('离线入队 → 对方上线自动补发（含跨"重启"）', async () => {

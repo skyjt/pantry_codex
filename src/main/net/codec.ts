@@ -205,11 +205,22 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       if (!isInt(o.fileCount) || o.fileCount! < 1 || o.fileCount! > MAX_FILES_PER_TRANSFER)
         return false
       if (!isStr(o.rootName, 255)) return false
-      if (o.purpose !== undefined && o.purpose !== 'image' && o.purpose !== 'sticker') return false
+      if (
+        o.purpose !== undefined &&
+        o.purpose !== 'image' &&
+        o.purpose !== 'sticker' &&
+        o.purpose !== 'update'
+      ) {
+        return false
+      }
+      if (o.purpose === 'update' && (o.groupId !== undefined || o.fileCount !== 1 || o.totalSize! <= 0)) {
+        return false
+      }
       if (o.groupId !== undefined) {
         if (!isStr(o.groupId, LIMITS.id)) return false
         if (!isInt(o.groupRev) || o.groupRev < 0) return false
-        if (o.purpose !== undefined && o.totalSize! > GROUP_IMG_AUTO_ACCEPT) return false
+        if (o.purpose !== undefined && o.purpose !== 'update' && o.totalSize! > GROUP_IMG_AUTO_ACCEPT)
+          return false
       } else if (o.groupRev !== undefined) {
         return false
       }

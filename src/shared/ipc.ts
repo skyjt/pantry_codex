@@ -82,7 +82,9 @@ export const IpcChannels = {
   winBeginDrag: 'win:begin-drag',
   winEndDrag: 'win:end-drag',
   /** 局域网自更新：查询当前可用更新源（决议 #166） */
-  updateCheck: 'update:check'
+  updateCheck: 'update:check',
+  /** 局域网自更新：向当前最佳更新源请求安装包（决议 #170） */
+  updateRequest: 'update:request'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -483,6 +485,8 @@ export interface PantryApi {
   getNetState(): Promise<NetState>
   /** 局域网自更新：查询当前可用更新源，无则 null（决议 #166） */
   checkUpdate(): Promise<UpdateAvailability | null>
+  /** 局域网自更新：向当前最佳更新源请求安装包，返回请求是否已送达 */
+  requestUpdate(): Promise<boolean>
   /** 局域网自更新：可用更新源变化推送（决议 #166） */
   onUpdateAvailable(listener: (info: UpdateAvailability | null) => void): () => void
   /** 按需探活（F-DISC-8）；返回是否已发出 */

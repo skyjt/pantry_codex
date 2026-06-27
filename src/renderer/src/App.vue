@@ -54,6 +54,8 @@ function openSettings(event?: Event): void {
 // 局域网自更新提示（决议 #166 第一步）：发现同平台更高版本的在线源时，导航栏出现升级入口
 const updateStore = useUpdateStore()
 const showUpdatePanel = ref(false)
+const updateRequesting = ref(false)
+const updateRequestMsg = ref('')
 const updateHintLabel = computed(() =>
   updateStore.available
     ? `内网有新版 v${updateStore.available.version}（来自 ${updateStore.available.fromName}）`
@@ -62,6 +64,21 @@ const updateHintLabel = computed(() =>
 function toggleUpdatePanel(event?: Event): void {
   releaseRailFocus(event)
   showUpdatePanel.value = !showUpdatePanel.value
+}
+async function requestUpdatePackage(): Promise<void> {
+  if (updateRequesting.value) return
+  updateRequesting.value = true
+  updateRequestMsg.value = '正在向更新源请求安装包。'
+  try {
+    const ok = await window.pantry.requestUpdate()
+    updateRequestMsg.value = ok
+      ? '已发出同步请求，收到安装包后会先拉取到本机临时目录。'
+      : '请求未送达或当前更新源暂不可用，请稍后重试。'
+  } catch {
+    updateRequestMsg.value = '请求更新失败，请稍后重试。'
+  } finally {
+    updateRequesting.value = false
+  }
 }
 const info = ref<AppInfo | null>(null)
 // 主界面空态随机名言（决议 #82）：组件创建（每次打开软件）时随机一条，纯本地内置
@@ -380,8 +397,16 @@ onUnmounted(() => {
       <div class="update-pop-ver">v{{ updateStore.available.version }}</div>
       <div class="update-pop-from">来自 {{ updateStore.available.fromName }}</div>
       <div class="update-pop-cur">当前版本 v{{ updateStore.available.currentVersion }}</div>
-      <p class="update-pop-hint">一键同步更新即将上线，敬请期待。</p>
-      <button type="button" class="update-pop-ok" @click="showUpdatePanel = false">知道了</button>
+      <p class="update-pop-hint">{{ updateRequestMsg || '将从内网同平台节点请求安装包，不访问外网。' }}</p>
+      <button
+        type="button"
+        class="update-pop-ok"
+        :disabled="updateRequesting"
+        :aria-busy="updateRequesting"
+        @click="requestUpdatePackage"
+      >
+        {{ updateRequesting ? '请求中' : '同步更新' }}
+      </button>
     </div>
 
     <aside class="list">
@@ -718,6 +743,11 @@ onUnmounted(() => {
   border: none;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.update-pop-ok:disabled {
+  opacity: 0.62;
+  cursor: default;
 }
 
 /* 进度数值注册为可过渡的 typed 属性，让环形进度平滑增长而非跳变（决议 #163） */

@@ -294,6 +294,55 @@ describe('codec', () => {
     })
   })
 
+  it('file-ctl 更新包 offer 允许 purpose=update 且不套用群聊图片上限', () => {
+    const updateOffer = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-update-1',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'Teahouse-0.28.0-linux-x64.deb', size: GROUP_IMG_AUTO_ACCEPT + 1 }],
+      totalSize: GROUP_IMG_AUTO_ACCEPT + 1,
+      fileCount: 1,
+      rootName: 'Teahouse-0.28.0-linux-x64.deb',
+      purpose: 'update'
+    })
+    expect(decode(encode(updateOffer))).toMatchObject({ ok: true, known: true })
+
+    const badPurpose = makeEnvelope(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-update-2',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'x.bin', size: 1 }],
+      totalSize: 1,
+      fileCount: 1,
+      rootName: 'x.bin',
+      purpose: 'installer'
+    })
+    expect(decode(encode(badPurpose))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
+
+    const groupedUpdate = makeEnvelope(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-update-3',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'x.deb', size: 1 }],
+      totalSize: 1,
+      fileCount: 1,
+      rootName: 'x.deb',
+      purpose: 'update',
+      groupId: 'group-1',
+      groupRev: 1
+    })
+    expect(decode(encode(groupedUpdate))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
+  })
+
   it('缺 payload 拒收', () => {
     const raw = { v: 1, type: 'exit', id: 'x', from: 'node-aaaa', ts: Date.now() }
     const result = decode(Buffer.from(JSON.stringify(raw), 'utf8'))

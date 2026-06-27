@@ -275,8 +275,8 @@ export interface FileCtlOffer {
   fileCount: number
   /** 展示名：单文件=文件名，文件夹=目录名，多文件=首文件名 */
   rootName: string
-  /** image/sticker：单聊单文件 ≤20MB、群聊图片 ≤10MB 时收端免确认进图片缓存（§7.1）；缺省按普通文件 */
-  purpose?: 'image' | 'sticker'
+  /** image/sticker：聊天媒体；update：局域网自更新安装包（不入聊天/接收目录） */
+  purpose?: 'image' | 'sticker' | 'update'
   /** 群聊媒体上下文；存在时收端把本地消息写入 group:<groupId> 会话 */
   groupId?: string
   groupRev?: number

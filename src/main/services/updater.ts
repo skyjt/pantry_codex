@@ -1,9 +1,9 @@
-// 局域网 P2P 自更新编排（决议 #166）。本文件第一阶段只含「发现与择源」纯逻辑：
-// 从在线节点里挑出同平台、版本更高、且声明可作更新源（caps upd1）的最佳来源。
-// 拉包（第二步）与安装重启（第三步）见 tech-design §12 后续里程碑。
+// 局域网 P2P 自更新编排（决议 #166）。
 import type { Platform, Profile } from '../../shared/protocol'
 import { CAPS } from '../../shared/protocol'
 import { compareSemver } from '../util/semver'
+import { readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 export interface UpdateSource {
   nodeId: string
@@ -26,6 +26,11 @@ export interface SourceCandidate {
   displayName: string
 }
 
+export interface UpdateRequester {
+  profile: Profile
+  online: boolean
+}
+
 /**
  * 从候选里挑「同平台、声明可作更新源、版本严格高于本机」的最高版本在线节点。
  * 无合适来源返回 null。
@@ -46,4 +51,56 @@ export function pickUpdateSource(self: SelfRelease, candidates: SourceCandidate[
     }
   }
   return best
+}
+
+/** A 端收到 B 的 update req 后的最小安全复核：同平台、在线、本机版本更高。 */
+export function shouldServeUpdateRequest(
+  self: SelfRelease,
+  requester: UpdateRequester | null | undefined,
+  requestedPlatform: Platform
+): boolean {
+  if (!requester?.online) return false
+  if (requestedPlatform !== self.platform) return false
+  if (requester.profile.platform !== self.platform) return false
+  return compareSemver(self.version, requester.profile.ver) > 0
+}
+
+export function findLocalUpdatePackage(opts: {
+  dirs: string[]
+  version: string
+  platform: Platform
+}): string | null {
+  const versionNeedle = opts.version.toLowerCase()
+  for (const dir of opts.dirs) {
+    let names: string[]
+    try {
+      names = readdirSync(dir)
+    } catch {
+      continue
+    }
+    const matches = names
+      .filter((name) => {
+        const lower = name.toLowerCase()
+        return lower.includes(versionNeedle) && isPackageNameForPlatform(lower, opts.platform)
+      })
+      .sort()
+    for (const name of matches) {
+      const path = join(dir, name)
+      try {
+        const st = statSync(path)
+        if (st.isFile() && st.size > 0) return path
+      } catch {
+        // 忽略扫描期间消失的文件
+      }
+    }
+  }
+  return null
+}
+
+function isPackageNameForPlatform(lowerName: string, platform: Platform): boolean {
+  if (platform === 'win') {
+    return lowerName.endsWith('.exe') && lowerName.includes('setup') && !lowerName.includes('portable')
+  }
+  if (platform === 'linux') return lowerName.endsWith('.deb')
+  return false
 }

@@ -1,7 +1,16 @@
-import { describe, it, expect } from 'vitest'
-import { pickUpdateSource } from './updater'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, it, expect } from 'vitest'
+import { findLocalUpdatePackage, pickUpdateSource, shouldServeUpdateRequest } from './updater'
 import type { SourceCandidate } from './updater'
 import type { Profile } from '../../shared/protocol'
+
+const tmpDirs: string[] = []
+
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
 
 function prof(over: Partial<Profile>): Profile {
   return {
@@ -60,5 +69,40 @@ describe('pickUpdateSource', () => {
     expect(
       pickUpdateSource(self, [cand({ nodeId: 'a', ver: '0.27.0', caps: ['upd1'], nick: '张三' }, true, '')])?.fromName
     ).toBe('张三')
+  })
+})
+
+describe('自更新请求复核与本地包查找', () => {
+  it('只响应同平台、在线、且本机版本更高的请求方', () => {
+    const self = { version: '0.28.0', platform: 'linux' as const }
+    const requester = { profile: prof({ platform: 'linux', ver: '0.27.5' }), online: true }
+    expect(shouldServeUpdateRequest(self, requester, 'linux')).toBe(true)
+    expect(shouldServeUpdateRequest(self, { ...requester, online: false }, 'linux')).toBe(false)
+    expect(shouldServeUpdateRequest(self, requester, 'win')).toBe(false)
+    expect(
+      shouldServeUpdateRequest(self, { profile: prof({ platform: 'win', ver: '0.27.5' }), online: true }, 'linux')
+    ).toBe(false)
+    expect(
+      shouldServeUpdateRequest(self, { profile: prof({ platform: 'linux', ver: '0.28.0' }), online: true }, 'linux')
+    ).toBe(false)
+  })
+
+  it('按平台与版本从候选目录查找安装包', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-update-pkg-'))
+    tmpDirs.push(dir)
+    writeFileSync(join(dir, 'Teahouse-0.28.0-linux-x86_64.AppImage'), 'appimage')
+    writeFileSync(join(dir, 'Teahouse-0.28.0-linux-amd64.deb'), 'deb')
+    writeFileSync(join(dir, 'Teahouse-0.28.0-win-x64-portable.exe'), 'portable')
+    writeFileSync(join(dir, 'Teahouse-0.27.9-win-x64-setup.exe'), 'old')
+    writeFileSync(join(dir, 'Teahouse-0.28.0-win-x64-setup.exe'), 'exe')
+
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'linux' })).toBe(
+      join(dir, 'Teahouse-0.28.0-linux-amd64.deb')
+    )
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'win' })).toBe(
+      join(dir, 'Teahouse-0.28.0-win-x64-setup.exe')
+    )
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'mac' })).toBeNull()
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.29.0', platform: 'linux' })).toBeNull()
   })
 })

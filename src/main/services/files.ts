@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { readdirSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   GROUP_IMG_AUTO_ACCEPT,
@@ -53,7 +54,7 @@ interface AssemblingOffer {
   totalSize: number
   fileCount: number
   rootName: string
-  purpose?: 'image' | 'sticker'
+  purpose?: FileCtlOffer['purpose']
   groupId?: string
   groupRev?: number
   timer: ReturnType<typeof setTimeout>
@@ -70,6 +71,7 @@ interface IncomingState {
 interface FilesBlob {
   name: string
   savedPath?: string
+  purpose?: 'update'
 }
 
 interface PreparedOutgoing {
@@ -79,7 +81,7 @@ interface PreparedOutgoing {
   fileCount: number
   hasDir: boolean
   rootName: string
-  purpose?: 'image' | 'sticker'
+  purpose?: FileCtlOffer['purpose']
   savedPath?: string
 }
 
@@ -100,6 +102,8 @@ export interface FilesDeps {
   getSaveDir: () => string
   /** 图片缓存目录（免确认接收的落点） */
   getImagesDir: () => string
+  /** 更新包临时目录（决议 #166）：不进聊天接收目录 */
+  getUpdateDir?: () => string
   bindAddress?: string
 }
 
@@ -185,7 +189,7 @@ export class FilesService extends EventEmitter {
       convId,
       senderId: this.deps.selfId,
       isMine: true,
-      kind: prepared.purpose ?? 'file',
+      kind: messageKindForPurpose(prepared.purpose),
       content:
         prepared.purpose === 'sticker'
           ? '[表情]'
@@ -273,7 +277,7 @@ export class FilesService extends EventEmitter {
       convId,
       senderId: this.deps.selfId,
       isMine: true,
-      kind: prepared.purpose ?? 'file',
+      kind: messageKindForPurpose(prepared.purpose),
       content:
         prepared.purpose === 'sticker'
           ? '[表情]'
@@ -336,6 +340,46 @@ export class FilesService extends EventEmitter {
     return row ? msgRowToView(row) : null
   }
 
+  /** 自更新包：隐藏传输，不写聊天消息，不进入普通传输列表（决议 #170）。 */
+  async offerUpdatePackage(peerId: string, path: string): Promise<boolean> {
+    const peer = this.deps.registry.get(peerId)
+    if (!peer || !peer.online) return false
+    const prepared = this.prepareUpdatePackage(path)
+    if (!prepared) return false
+    const transferId = randomUUID()
+    const msgId = `update:${transferId}`
+    const now = Date.now()
+    this.deps.transferRepo.insert({
+      transferId,
+      msgId,
+      peerId,
+      direction: 'out',
+      files: JSON.stringify({
+        name: prepared.rootName,
+        savedPath: path,
+        purpose: 'update'
+      } satisfies FilesBlob),
+      status: 'offering',
+      total: prepared.totalSize,
+      ts: now
+    })
+    this.outgoing.set(transferId, {
+      peerId,
+      msgId,
+      files: new Map(prepared.outFiles),
+      totalSize: prepared.totalSize,
+      bytesDone: 0,
+      accepted: false
+    })
+
+    const ok = await this.sendOfferPackets(peerId, transferId, prepared)
+    if (ok) return true
+    const row = this.deps.transferRepo.get(transferId)
+    if (row && (row.status === 'accepted' || row.status === 'done')) return true
+    this.finish(transferId, 'failed')
+    return false
+  }
+
   private prepareOutgoing(
     paths: string[],
     want: 'file' | 'image' | 'sticker',
@@ -381,6 +425,27 @@ export class FilesService extends EventEmitter {
       rootName,
       purpose,
       ...(paths.length === 1 ? { savedPath: paths[0] } : {})
+    }
+  }
+
+  private prepareUpdatePackage(path: string): PreparedOutgoing | null {
+    try {
+      const st = statSync(path)
+      if (!st.isFile() || st.size <= 0) return null
+      const fileId = randomUUID()
+      return {
+        metas: [{ fileId, path: basename(path), size: st.size }],
+        outFiles: new Map([[fileId, { fileId, absPath: path, size: st.size }]]),
+        totalSize: st.size,
+        fileCount: 1,
+        hasDir: false,
+        rootName: basename(path),
+        purpose: 'update',
+        savedPath: path
+      }
+    } catch (err) {
+      console.warn('[files] 读取更新包失败：', err)
+      return null
     }
   }
 
@@ -538,6 +603,7 @@ export class FilesService extends EventEmitter {
     } catch {
       // 留默认
     }
+    if (blob.purpose === 'update') return null
     const msg = this.deps.msgRepo.get(row.msg_id)
     const live = this.outgoing.get(transferId)?.bytesDone ?? this.incoming.get(transferId)?.bytesDone
     const fileRefCount = ((): number => {
@@ -649,6 +715,11 @@ export class FilesService extends EventEmitter {
       return
     }
 
+    if (asm.purpose === 'update') {
+      this.onUpdateOffer(peerId, offer, asm, plans, trustedTotalSize)
+      return
+    }
+
     // 图片/表情免确认条件复核（不信任发送方标记；群聊图片走 10MB 上限——决议 #33）
     const imageLimit = asm.groupId ? GROUP_IMG_AUTO_ACCEPT : IMG_AUTO_ACCEPT
     const inPurpose =
@@ -715,6 +786,47 @@ export class FilesService extends EventEmitter {
     if (asImage) void this.accept(offer.transferId, this.deps.getImagesDir())
   }
 
+  private onUpdateOffer(
+    peerId: string,
+    offer: FileCtlOffer,
+    asm: AssemblingOffer,
+    plans: IncomingFilePlan[],
+    trustedTotalSize: number
+  ): void {
+    const plan = plans[0]
+    if (
+      asm.groupId ||
+      asm.fileCount !== 1 ||
+      plans.length !== 1 ||
+      !plan ||
+      plan.isDir ||
+      plan.relPath.includes('/') ||
+      trustedTotalSize <= 0
+    ) {
+      void this.declineUnknown(peerId, offer.transferId)
+      return
+    }
+    const msgId = `update:${offer.transferId}`
+    this.deps.transferRepo.insert({
+      transferId: offer.transferId,
+      msgId,
+      peerId,
+      direction: 'in',
+      files: JSON.stringify({ name: asm.rootName, purpose: 'update' } satisfies FilesBlob),
+      status: 'offering',
+      total: trustedTotalSize,
+      ts: Date.now()
+    })
+    this.incoming.set(offer.transferId, {
+      peerId,
+      msgId,
+      plans,
+      bytesDone: 0,
+      cancelRef: { canceled: false, socket: null }
+    })
+    void this.accept(offer.transferId, this.updateDir())
+  }
+
   private requestGroupMetaIfNeeded(
     peerId: string,
     groupId: string | undefined,
@@ -765,6 +877,10 @@ export class FilesService extends EventEmitter {
     this.deps.transferRepo.updateFiles(transferId, JSON.stringify(merged))
   }
 
+  private updateDir(): string {
+    return this.deps.getUpdateDir?.() ?? join(tmpdir(), 'teahouse-updates')
+  }
+
   /** 节流 250ms 推卡片状态；force 用于状态切换（必达） */
   private emitTransfer(transferId: string, force: boolean): void {
     const now = Date.now()
@@ -788,6 +904,10 @@ export class FilesService extends EventEmitter {
   private emitConvs(): void {
     this.emit('convs', this.deps.convRepo.list().map(convRowToView))
   }
+}
+
+function messageKindForPurpose(purpose: FileCtlOffer['purpose']): 'file' | 'image' | 'sticker' {
+  return purpose === 'image' || purpose === 'sticker' ? purpose : 'file'
 }
 
 /** 递归展开文件夹（含空目录条目），相对路径以 rootName 开头 */

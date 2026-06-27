@@ -55,21 +55,80 @@ const info = ref<AppInfo | null>(null)
 // 关于页「更多信息」折叠（决议 #90）：默认收起开发者向运行时信息
 const showAboutDetails = ref(false)
 
-// 检测内网更新（决议 #167）：主动调既有 checkUpdate 查同平台更高版本的在线源
+// 检测内网更新（决议 #167/#168/#170/#171）：主动查同平台更高版本在线源，并可发起索包请求。
+type UpdateCheckKind = 'idle' | 'checking' | 'found' | 'requesting' | 'requested' | 'none' | 'error'
 const checkingUpdate = ref(false)
-const updateCheckMsg = ref('')
+const requestingUpdate = ref(false)
+const updateCheckKind = ref<UpdateCheckKind>('idle')
+const updateCheckMsg = ref('只从已发现的在线同事中查找，不访问外网。')
+const updateActionBusy = computed(() => checkingUpdate.value || requestingUpdate.value)
+const updateCheckSummary = computed(() => {
+  if (updateCheckKind.value === 'checking') return '正在检测'
+  if (updateCheckKind.value === 'found') return '有新版'
+  if (updateCheckKind.value === 'requesting') return '正在请求'
+  if (updateCheckKind.value === 'requested') return '请求已发出'
+  if (updateCheckKind.value === 'none') return '已是最新'
+  if (updateCheckKind.value === 'error') return '检测失败'
+  return '未检查'
+})
 async function checkForUpdate(): Promise<void> {
-  if (checkingUpdate.value) return
+  if (updateActionBusy.value) return
   checkingUpdate.value = true
-  updateCheckMsg.value = ''
+  updateCheckKind.value = 'checking'
+  updateCheckMsg.value = '正在比对已发现的在线节点版本。'
   try {
     const result = await window.pantry.checkUpdate()
-    updateCheckMsg.value = result
-      ? `内网有新版 v${result.version}（来自 ${result.fromName}）`
-      : '当前已是内网最新版本'
+    if (result) {
+      updateCheckKind.value = 'found'
+      updateCheckMsg.value = `v${result.version}，来自 ${result.fromName}。`
+    } else {
+      updateCheckKind.value = 'none'
+      updateCheckMsg.value = '当前未发现同平台更高版本的在线更新源。'
+    }
+  } catch {
+    updateCheckKind.value = 'error'
+    updateCheckMsg.value = '检测失败，请稍后重试。'
   } finally {
     checkingUpdate.value = false
   }
+}
+async function requestDetectedUpdate(): Promise<void> {
+  if (updateActionBusy.value) return
+  requestingUpdate.value = true
+  updateCheckKind.value = 'requesting'
+  updateCheckMsg.value = '正在向当前最佳更新源请求安装包。'
+  try {
+    const ok = await window.pantry.requestUpdate()
+    if (ok) {
+      updateCheckKind.value = 'requested'
+      updateCheckMsg.value = '已发出同步请求，收到安装包后会先拉取到本机临时目录。'
+    } else {
+      updateCheckKind.value = 'error'
+      updateCheckMsg.value = '请求未送达或当前更新源暂不可用，请稍后重试。'
+    }
+  } catch {
+    updateCheckKind.value = 'error'
+    updateCheckMsg.value = '请求更新失败，请稍后重试。'
+  } finally {
+    requestingUpdate.value = false
+  }
+}
+const updateActionIcon = computed(() => {
+  if (updateActionBusy.value) return 'loader'
+  return updateCheckKind.value === 'found' ? 'check' : 'refresh'
+})
+const updateActionLabel = computed(() => {
+  if (checkingUpdate.value) return '检测中'
+  if (requestingUpdate.value) return '请求中'
+  if (updateCheckKind.value === 'found') return '同步更新'
+  return '检测内网更新'
+})
+function runUpdateAction(): void {
+  if (updateCheckKind.value === 'found') {
+    void requestDetectedUpdate()
+    return
+  }
+  void checkForUpdate()
 }
 
 // 我的资料表单
@@ -1008,7 +1067,7 @@ async function confirmRemove(cidr: string): Promise<void> {
               </div>
             </div>
 
-            <!-- 默认只露版本 / 许可 / 源码（决议 #90）：面向普通用户的核心信息 -->
+            <!-- 默认只露版本 / 许可 / 源码 / 内网更新（决议 #90/#171）：面向普通用户的核心信息 -->
             <dl class="about-rows">
               <div class="about-row">
                 <dt>版本</dt>
@@ -1027,15 +1086,26 @@ async function confirmRemove(cidr: string): Promise<void> {
                   </a>
                 </dd>
               </div>
+              <div class="about-row about-update-row" :class="'is-' + updateCheckKind">
+                <dt>内网更新</dt>
+                <dd aria-live="polite">
+                  <div class="about-update-main">
+                    <strong>{{ updateCheckSummary }}</strong>
+                    <button
+                      class="ghost compact about-update-action"
+                      :class="{ 'is-primary': updateCheckKind === 'found' }"
+                      :disabled="updateActionBusy"
+                      :aria-busy="updateActionBusy"
+                      @click="runUpdateAction"
+                    >
+                      <PantryIcon :name="updateActionIcon" :size="13" />
+                      <span>{{ updateActionLabel }}</span>
+                    </button>
+                  </div>
+                  <small>{{ updateCheckMsg }}</small>
+                </dd>
+              </div>
             </dl>
-
-            <!-- 检测内网更新（决议 #167）：主动查同平台更高版本的在线源，与主界面被动提示互补 -->
-            <div class="about-update">
-              <button class="ghost compact" :disabled="checkingUpdate" @click="checkForUpdate">
-                {{ checkingUpdate ? '检测中…' : '检测内网更新' }}
-              </button>
-              <span v-if="updateCheckMsg" class="about-update-msg">{{ updateCheckMsg }}</span>
-            </div>
 
             <!-- 开发者向运行时信息收进折叠区（决议 #90）：就地展开，Chrome 108 无原生 popover -->
             <button
@@ -2141,16 +2211,59 @@ async function confirmRemove(cidr: string): Promise<void> {
   text-decoration: underline;
 }
 
-.about-update {
+.about-update-row dd {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
 }
-.about-update-msg {
+
+.about-update-main {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.about-update-main strong {
+  color: var(--text-1);
   font-size: 13px;
-  color: var(--text-2);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.about-update-row small {
+  max-width: 360px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.about-update-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.about-update-action.is-primary {
+  border-color: transparent;
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+
+.about-update-row.is-checking .about-update-action .pantry-icon,
+.about-update-row.is-requesting .about-update-action .pantry-icon {
+  animation: update-spin 0.9s linear infinite;
+}
+
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .about-more {
   width: 100%;
@@ -2193,7 +2306,9 @@ async function confirmRemove(cidr: string): Promise<void> {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .about-detail {
+  .about-detail,
+  .about-update-row.is-checking .pantry-icon,
+  .about-update-row.is-requesting .pantry-icon {
     animation: none;
   }
 }
@@ -2215,6 +2330,23 @@ async function confirmRemove(cidr: string): Promise<void> {
   .field-grid,
   .port-grid {
     grid-template-columns: 1fr;
+  }
+
+  .about-update-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .about-update-row dd {
+    width: 100%;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .about-update-main {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
