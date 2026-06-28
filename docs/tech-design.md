@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.91，P1 本地交付候选；Linux arm64 发布包进入构建矩阵 |
+| 状态 | v0.92，P1 本地交付候选；Linux arm64 发布脚本独立化 |
 | 日期 | 2026-06-28 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -231,7 +231,7 @@ media/stickers/...  # 自定义表情包媒体
 - electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（x64 + arm64，决议 #181；Debian 10 / UOS 20 基线）；mac=`dmg`+`zip`（**arm64 / Apple Silicon，决议 #69**；CI `macos-14` 原生打包，未签名/未公证内网自用；Intel x64 / universal 后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；appId `com.pantry.app`。
 - **productName=`Teahouse`，安装路径全 ASCII（决议 #60）**：Linux 装 `/opt/Teahouse`、Windows 默认 `Teahouse` 目录；显示名经 Linux desktop `Name`、NSIS `shortcutName`、mac `extendInfo` 保持「茶话间」；主进程启动最早处 `app.setName('茶话间')` 固定 userData 与通知名（已有用户数据零迁移）。**Linux 打包必须 `USE_HARD_LINKS=false`**（dist:linux 与 CI 均已内置）：electron-builder 复制硬链接优化会让 deb 出现跨 `/usr`↔`/opt` 硬链接条目，UOS 深度安装器解包报"断开的管道"；窗口图标 extraResources 用独立物理文件 `build/icons/window-icon.png`，CI 解 deb data.tar 校验无硬链接条目、无中文路径。
 - 品牌资源：`build/icons/` 保存可审阅 SVG 源和生成后的 `.png` / `.ico` / `.icns` 打包图标；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
-- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows / Linux x64 / Linux arm64 / macOS arm64 四条发布线（决议 #69/#86/#181）。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux x64 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查最终包内 native 模块最高 GLIBC 符号不超过 `GLIBC_2.28`，输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物；Linux arm64 用 QEMU 跑 Debian 10 arm64 容器，在目标架构内执行同样的 npm ci / native 重建 / 五连验证 / GLIBC 校验 / deb 归档校验，输出 `Teahouse-<version>-linux-arm64.deb` 与 `Teahouse-<version>-linux-arm64.AppImage`；`.deb` 维护者元数据固定为 `Teahouse Maintainers <teahouse-maintainers@example.invalid>`；macOS 用 `macos-14` 原生 arm64 runner 构建 dmg + zip。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
+- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows / Linux x64 / Linux arm64 / macOS arm64 四条发布线（决议 #69/#86/#181/#182）。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux x64 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查最终包内 native 模块最高 GLIBC 符号不超过 `GLIBC_2.28`，输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物；Linux arm64 用 QEMU 跑 Debian 10 arm64 容器，调用 `scripts/ci-linux-arm64.sh` 在目标架构内执行同样的 npm ci / native 重建 / 五连验证 / GLIBC 校验 / deb 归档校验，输出 `Teahouse-<version>-linux-arm64.deb` 与 `Teahouse-<version>-linux-arm64.AppImage`，容器结束后打印 host `release/` 文件列表辅助定位路径问题；`.deb` 维护者元数据固定为 `Teahouse Maintainers <teahouse-maintainers@example.invalid>`；macOS 用 `macos-14` 原生 arm64 runner 构建 dmg + zip。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
 - Release workflow 权限按最小化原则配置（决议 #132）：默认 `contents: read`；构建 job 的 checkout 不持久化 GitHub 凭证；只有发布 GitHub Release 的 job 显式授予 `contents: write`。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。**每轮迭代（每个增量 commit）按决议 #73 递增版本号**：功能更新 minor +1 且 patch 归 0，bug 修复 / 微调 patch +1；deb/NSIS 按版本号判断升级，同版本号在 UOS 上会被 dpkg 以"已安装同样版本"拒装；artifactName 含 `${version}`，产物名随之区分。
 - 内网分发：产物 + SHA-256 校验清单一并产出。
@@ -350,3 +350,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-28 v0.89 决议 #179：默认文件接收目录统一。`FilesService.accept()` 未传另存目录时使用 `getSaveDir()/联系人名称`，手动接收与直接发送自动接收共享该逻辑；`saveDirOverride` 另存为直接使用用户选择目录；失败重试优先沿用已记录 `savedPath` 的目录。版本 0.28.4 → 0.28.5。
 - 2026-06-28 v0.90 决议 #180：修复第三方截图工具粘贴重复发送。移除 `ChatPane.onKeydown` 的立即图片剪贴板兜底，改由主进程 `clipboard:paste-image` 事件延迟触发；浏览器 paste 事件处理过文件 / 文本 / 图片时记录并取消该次兜底。版本 0.28.5 → 0.28.6。
 - 2026-06-28 v0.91 决议 #181：Debian 10 / UOS 20 arm64 进入发布矩阵。`package.json` Linux deb/AppImage target 增加 arm64，新增 `dist:linux:arm64`；Release workflow 新增 QEMU + Debian 10 arm64 容器 job，执行五连验证、源码重建 better-sqlite3、GLIBC_2.28 校验、deb 无硬链接/无中文路径校验，并上传 arm64 deb/AppImage 与 SHA-256 清单。自更新安装包查找增加架构匹配，`update req` 携带可选 `arch`，避免 x64/arm64 deb 混用。版本 0.28.6 → 0.29.0。
+- 2026-06-28 v0.92 决议 #182：arm64 发布 job 的容器内长脚本独立为 `scripts/ci-linux-arm64.sh`，workflow 改为调用脚本并在 host 侧打印 `release/` 文件列表，修复 v0.29.0 首次发布时上传阶段找不到 arm64 产物的问题。版本 0.29.0 → 0.29.1。
