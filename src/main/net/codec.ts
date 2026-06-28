@@ -195,7 +195,9 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       if (!isRecord(payload)) return false
       const f = payload as Partial<FileCtlPayload>
       if (!isStr(f.transferId, LIMITS.id)) return false
-      if (f.op === 'accept' || f.op === 'decline' || f.op === 'cancel') return true
+      if (f.op === 'accept' || f.op === 'decline' || f.op === 'cancel' || f.op === 'direct') {
+        return true
+      }
       if (f.op !== 'offer') return false
       const o = f as Partial<FileCtlOffer>
       if (!isInt(o.seq) || !isInt(o.total) || o.seq! < 1 || o.total! < 1 || o.seq! > o.total!)

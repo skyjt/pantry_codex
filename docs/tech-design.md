@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| 状态 | v0.78，P1 本地交付候选；PK 分歧解决技术方案与 UI 打磨已落地，目标平台真实打包/运行冒烟待 Windows / Debian / UOS 执行 |
-| 日期 | 2026-06-17 |
+| 状态 | v0.90，P1 本地交付候选；第三方截图粘贴不再重复发送 |
+| 日期 | 2026-06-28 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
 ## 1. 选型决策总表
@@ -108,7 +108,7 @@ src/
 | `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` / `peers:scan-all-ranges` / `peers:set-remark` | 通讯录、探活（F-DISC-8）、手动 IP、单网段扫描、全部已保存网段扫描、本地备注；同步来的网段来源随 `SettingsView.scanRangeItems` 展示 |
 | `conv:list` / `conv:pin` / `conv:mute` / `conv:markRead` / `conv:remove` | 会话列表操作 |
 | `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` / `msg:nudge` / `msg:pk` / `msg:search` | 消息分页（倒序游标）、发送、重发、撤回、私聊窗口震动、PK 分歧解决、当前会话历史搜索 |
-| `file:offer` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；群聊发送为多条点对点 transfer 的发送侧编排 |
+| `file:grant-paths` / `file:offer` / `file:direct` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；`file:grant-paths` 只为拖拽 / 粘贴产生的本地路径登记一次性授权，`file:offer` / `group-file:offer` 仍必须消耗授权；`file:direct` 由发送方文件卡片触发，在已有私聊普通文件 transfer 上发送 `file-ctl {op:"direct"}`；群聊发送为多条点对点 transfer 的发送侧编排且不支持直接发送 |
 | `group:create` / `group:update` | 讨论组 |
 | `search:query(q, scope)` | 全局搜索（联系人/组/记录/文件 四分类一次返回） |
 | `sticker:addFromMessage` / `sticker:list` / `sticker:remove` / `sticker:reorder` | 表情包 |
@@ -160,7 +160,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 ├─ images/                   # 图片消息缓存（收+发）
 ├─ stickers/                 # 表情包（压缩后的 WebP/GIF）
 ├─ logs/                     # 按天滚动，留 7 天
-└─ config.json               # 设置（原子写）；含 manualPeers / scanRanges / scanRangeSources / ignoredScanRanges
+└─ config.json               # 设置（原子写）；含 manualPeers / scanRanges / scanRangeSources / ignoredScanRanges / allowDirectFileSend
 ```
 
 整体数据目录迁移流程（v1.0 打磨项）：校验目标可写 → 关闭 db → 复制（带进度）→ 校验文件数/大小 → 写新路径入旧位置的 `redirect.json` 与全局配置 → 重开 db；失败自动回滚。
@@ -169,14 +169,19 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 主界面全局网段刷新（决议 #115）仍属于显式手动扫描：`peers:scan-all-ranges` 在主进程读取当前 `config.scanRanges`，归一化合法 CIDR 后展开并按 IP 去重，再以 8ms 间隔逐个调用 `Discovery.probe()`；进度通过 `net:scan-progress` 推给主窗口，含 `done/total/rangeCount/status`。该扫描不改配置、不入 SQLite、不新增线上协议；运行中重复调用只返回当前进度，避免并发扫描。
 
+私聊文件直接发送（决议 #174）属于本机配置 + 现有传输状态机增强，不新增 SQLite 表或迁移：`config.allowDirectFileSend` 为接收侧总开关，老配置缺省视为 `true`。发送端先走普通 `file:offer`，文件卡片出现后，若该 transfer 为私聊普通文件、对端在线且 `profile.caps` 含 `fd1`，发送方卡片显示「直接发送」按钮；点击后 `file:direct` 调用服务层 `requestDirect(transferId)`，通过 `file-ctl {op:"direct", transferId}` 请求接收端自动 accept。接收端仅在该 transfer 是入站私聊普通文件、状态仍为 `offering` 且本机开关允许时调用 `accept(transferId)`；否则保持普通 `offering` 文件卡片。群聊文件收到 direct 控制帧必须忽略；群文件仍按在线成员逐个普通 offer，收端手动接收。
+
+默认文件接收目录（决议 #179）由服务层统一生成：`accept(transferId)` 未传 `saveDirOverride` 时，以 `getSaveDir()/sanitizeFileName(displayName)` 作为基础目录，displayName 优先本地备注、其次 peer 昵称；私聊直接发送自动接收与普通手动「接收」都走这条逻辑。`file:accept(transferId, true)` 另存为会先由主进程目录选择器得到 `saveDirOverride`，服务层直接使用用户选择目录，不再额外套联系人子目录。若 transfer 是失败重试且 `files.savedPath` 已存在，优先沿用 `dirname(savedPath)`，避免同一传输重试时改变落点。目录不存在时由拉取写盘流程递归创建；重名仍由根级 dedupe 处理，不覆盖既有文件。群聊文件虽然不支持直接发送，但手动接收同样按发送人显示名进入联系人子目录。
+
 ## 7. 渲染进程要点
 
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标与 emoji 兼容渲染**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色。头像模板走 `AvatarMark` / `AvatarGlyph`，按原 `avatar:number` 下标加载 Twemoji 本地 SVG 动物图标；emoji 面板、聊天输入框镜像层与消息正文对内置 emoji 子集走 `CompatEmoji` 加载 `src/renderer/src/assets/twemoji/*.svg`。发送、复制、存储仍是原 UTF-8 字符。输入框仍以原生 textarea 承担键盘、选区、粘贴与提交，只在草稿包含内置 emoji 时用透明文字 + 镜像层显示 SVG，避免 contenteditable 引入编辑风险。`splitEmojiText` 按 emoji 首 UTF-16 单元建候选表，文本扫描时只检查可能命中的内置 emoji，避免长消息按字符重复遍历完整表（决议 #131）。粘贴分流先处理真实文件路径；若剪贴板有 `text/plain`，不拦截原生文本粘贴，避免富文本 emoji 同时携带的图片副本误走截图发送（决议 #135）。该路径不引入远程图片、字体、CDN 或新依赖，解决 Win7 / UOS 系统 emoji 缺字方框问题（决议 #45/#47/#48）。Twemoji 图形按 CC-BY 4.0 在 README、`THIRD_PARTY_NOTICES.md` 和设置 About 页署名。
 - **品牌 logo 源文件**（决议 #107）：用户提供的 SVG 套件是品牌唯一源。`build/icons/pantry-logo-icon.svg` 使用 taskbar/dock 版本并生成 `pantry-logo-icon.png` / `.ico` / `.icns`（`scripts/gen-app-icons.mjs`：rsvg-convert 渲染高清主位图 → png2icons 出 `.ico`[BMP，兼容 Win7] / `.icns`，链式重跑 gen-linux-icons）；`pantry-logo-standard.svg`、`pantry-logo-small.svg`、`pantry-logo-menu.svg`、`pantry-logo-mono.svg`、`pantry-mark.svg`、`pantry-horizontal-logo.svg` 保留为可审阅 SVG 源。渲染层 `PantryBrandLogo` 直接加载 `src/renderer/src/assets/brand/*.svg`，不再手写 path。托盘图标由 `scripts/gen-tray-icon.mjs` 从 `pantry-logo-mono.svg` / `pantry-logo-menu.svg` 渲染 32×32 PNG 后内嵌到 `src/main/windows/tray-icon.ts`；同时导出彩色 RGBA 底图，`tray-badge.ts` 在该底图上叠未读角标，保证 Win/Linux 闪烁帧与 SVG 源一致。**Linux 桌面图标**（决议 #58）：`build/icons/linux/` 多尺寸 png（由 `scripts/gen-linux-icons.mjs` 从品牌 png 缩放生成）装入 deb 的 hicolor；desktop 文件带 `StartupWMClass`；主/设置窗在 Linux 显式设置 `BrowserWindow` icon（extraResources 分发 256px png），任务栏图标不依赖桌面环境关联。
 - **托盘未读提示**：`ChatService` / `FilesService` 的 `convs` 事件统一汇总未读数后调用 `updateTrayUnread`（决议 #42）。macOS 使用 `Tray.setTitle` + `dock.setBadge` 显示数字；Windows 使用 `BrowserWindow.setOverlayIcon` 叠加 16×16 数字，并让托盘图标在原图与带数字角标图之间闪烁；Linux 调 `app.setBadgeCount` 作为 best effort，同时以托盘闪烁兜底。动态图标由 `tray-badge.ts` 纯 Node PNG 编码生成，不引入图片库或 native 依赖。
-- **图片管线（renderer canvas + 主进程剪贴板读写）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。聊天图片 / 表情消息右键「复制」复用 `fetchStickerSource(transferId)` 受限读取源文件，渲染层解码后转 `image/png`，经 `clipboard:write-image` IPC 交主进程 `nativeImage` + `clipboard.writeImage` 写系统图片剪贴板并读回校验；输入框粘贴若浏览器 `ClipboardEvent` 未带图片项，则经 `clipboard:read-image` 从主进程 `clipboard.readImage().toPNG()` 兜底读取后发送（决议 #137/#138）。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
+- **图片管线（renderer canvas + 主进程剪贴板读写）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。聊天图片 / 表情消息右键「复制」复用 `fetchStickerSource(transferId)` 受限读取源文件，渲染层解码后转 `image/png`，经 `clipboard:write-image` IPC 交主进程 `nativeImage` + `clipboard.writeImage` 写系统图片剪贴板并读回校验；输入框粘贴先处理真实文件、文本和浏览器 `ClipboardEvent.items` 图片。主进程 `before-input-event` 的 `clipboard:paste-image` 只负责 Electron 原生图片剪贴板兜底：渲染层收到事件后延迟读取 `clipboard:read-image`，若同一次浏览器 paste 已处理文件 / 文本 / 图片，则取消兜底，避免第三方截图工具同时暴露两路图片时重复发送（决议 #137/#138/#180）。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
+- **文件卡 UI / 状态管线（决议 #174/#176/#177/#178/#179）**：`ChatPane` 的文件 / 文件夹按钮保持普通发送。`FileCard` 在发送方私聊普通文件卡片 `offering` 状态下显示「直接发送」按钮；按钮 enabled 由消息 offer 已送达、peer online、caps `fd1`、非群聊决定。点击后卡片 direct 标记写入 transfer `files` JSON 并推送 transfer 更新；发送侧 `offering` 将「等待接收 / 发送中」作为文件名同行固定状态片，meta 只保留大小 / 文件数 / 速率，右侧只保留一行动作，避免新增直接发送后卡片变高且状态被截断；发送完成统一显示「发送成功」。普通入站文件 `offering` 接收态右侧为一行动作组：`accept` 主按钮、`accept(..., true)` 文件夹图标另存、`decline` 的 `x` 图标拒绝，避免三按钮纵向堆叠撑高卡片；主按钮默认落到 `文件保存位置/联系人名称/`，文件夹图标另存直接落到用户选择目录。接收侧 accepted 显示「接收中」，direct done 只显示「已保存本地」，不展示完整路径或发送人目录名。群聊文件卡永远不显示「直接发送」。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。会话打开额外携带渲染层滚动意图（restore / latest / target）：会话列表前台切换按 convId 恢复 scrollTop，首次打开/通知托盘/震动直达/回到最新走 latest，历史搜索跳转走 target 交给高亮消息居中；主窗隐藏时清掉本轮滚动缓存，使恢复后重新点开会话默认看最新（决议 #111）。渲染层 `chatStore` 对已加载会话额外维护内存级 `MessageCache`（`Set<msgId>` + `Map<msgId, MessageView>`），用于追加去重、状态事件 O(1) 定位、历史页去重和删除会话后的缓存清理；文件 / 图片 / 表情发送完成后按返回的 `MessageView.convId` 回填，避免发送期间切换会话造成列表错位（决议 #130）。联系人在线计数、单聊 peer 查找、群在线收件人数、群添加成员候选和群发文件卡片传输统计均避免重复数组遍历或临时数组分配，联系人 / 群成员规模上升时仍保持按既有状态投影单次计算（决议 #131）。该状态只在 renderer 内存中存在，不写库、不经 IPC。
 - **PK 渲染状态**：`MessageView.kind` 增加 `pk`，并携带 `pkRef`。`ChatPane` 对他人的 PK 消息始终渲染气泡外侧参与按钮：猜拳为「我也来」，骰子为「掷一下」；自己的 PK 消息不显示按钮。按钮可反复点击，每次都走 `msg:pk` 发送新的独立消息，不建参与状态表、不按回合聚合。按钮 enabled 由当前在线状态决定：单聊对方在线才可点；群聊至少一位其他成员在线才可点，否则灰显并提示「PK 只能和在线的人玩」。动画播放状态只存在组件内存中：新发 / 新收消息播放一次约 1.5s，分页历史直接显示最终结果，`prefers-reduced-motion` 直接跳到结果。骰子用 CSS/SVG 自绘真实点数组合；猜拳使用本地 Twemoji 原色手势资源（缺资源时补 SVG 并同步署名）。工具栏 PK 入口、玩法浮层和参与按钮均复用现有 `PantryIcon` / CSS token，不新增依赖；动效只用 transform / opacity。不引入 GIF、第三方动画库、远程图片或远程字体。
 - **输入提示层级**：渲染层所有 `input/textarea::placeholder` 统一读取 `--text-placeholder`（决议 #38），该 token 低于 `--text-3`，用于占位 hint；真实输入、标签、错误仍使用既有文字 token，避免把提示当内容。
@@ -233,7 +238,7 @@ media/stickers/...  # 自定义表情包媒体
 
 ## 11. 测试策略
 
-- **vitest 单测**（开发机 Node 跑，不依赖 Electron）：codec 编解码与坏报文模糊样本、补发队列裁剪规则、按字分词、文件名清洗、导入身份映射/去重——纯函数全覆盖。
+- **vitest 单测**（开发机 Node 跑，不依赖 Electron）：codec 编解码与坏报文模糊样本、补发队列裁剪规则、按字分词、文件名清洗、导入身份映射/去重——纯函数全覆盖。私聊直接发送覆盖 codec 用例（合法 `op:"direct"`、缺 transferId 拒绝）与 FilesService 用例（发送侧卡片请求 direct、接收侧收到 direct 自动 accept 到联系人目录、关闭开关或群聊 transfer 忽略 direct）；默认接收目录覆盖手动「接收」落到联系人子目录、另存为不额外套子目录。
 - **数据库自测**（`npm run test:db`）：esbuild 打包自测脚本后用 `ELECTRON_RUN_AS_NODE=1 electron` 执行——在 **Electron 内置 Node（ABI 110）** 上验证迁移/repo/FTS，与生产运行时完全一致。vitest 跑在开发机新版 Node 上加载不了 Electron ABI 的原生模块，故 DB 层测试必须走这条通道。
 - **协议联调**：两个主进程实例本地回环（127.0.0.1 + 不同端口）跑发现/消息/补发/文件全流程脚本，模拟丢包（随机丢 10% UDP）。
 - **三平台冒烟清单**（人工，发布前必过）：Win7 x64 VM（与生产环境一致）、Debian 10、macOS 26 各过一遍 README 红线场景 + 收发文件 + 截图 + 通知。
@@ -249,6 +254,7 @@ media/stickers/...  # 自定义表情包媒体
 | v0.4 | 撤回、断点续传、导出/导入、深色主题 | messenger、transfer、porter、tokens |
 | v0.5 | P1 交付补齐：转发、群内 @、长文本 TCP、截图标注、核心设置、备份包媒体迁移 | services、settings、porter、renderer |
 | v0.27 | 局域网 P2P 自更新（分三步）：①发现与提示（caps `upd1` / 运行形态自检 / `ver` 投影 / 同平台版本比对 / 「内网有新版」提示）②拉包（`update` 可靠请求 / 已有本地包隐藏回传 / nsis 自留包·deb `dpkg-deb` 自重打包 / 拉临时目录 + SHA-256 + 版本核对）③应用更新（nsis 静默装·deb pkexec / 替换重启 / 保留包接力成源）；mac 暂缓 | services/updater、transfer 复用、discovery（caps/ver）、util/self-package·apply-update、提示 UI |
+| v0.28 | 私聊文件直接发送：发送端文件卡片「直接发送」入口、caps `fd1`、`file-ctl {op:"direct"}`、接收端自动 accept；默认文件接收统一到 `文件保存位置/联系人名称/`，另存为除外；群聊文件不支持直接发送 | shared/protocol、net/codec、services/files、settings、renderer FileCard |
 | v1.0 | 三平台安装包打磨、冒烟全过、文档定稿 | CI/builder |
 
 ## 13. 变更记录
@@ -336,3 +342,10 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-26 v0.80 决议 #166：设计局域网 P2P 自更新（分三步，本轮交付第一步·发现与提示）。新增 `services/updater.ts`（运行形态自检 / 同平台 semver 比对择源 / 请求拉包 / SHA-256 + 版本核对 / 触发安装重启）与 `util/self-package`（Linux deb 运行态 `dpkg-deb` 自重打包、Windows 定位安装时自留的 nsis 安装器）、`util/apply-update`（替换自身 + 接力重启：nsis per-user 静默装、deb pkexec 授权装）；复用 `net/transfer`（拉包 + SHA-256）与 discovery 已携带的 `caps/ver/platform`；`profile.ver` 投影到 `PeerView` 供 UI 比对提示。第一步仅做发现与提示（caps 能力位 `upd1` / 形态自检 / `ver` 投影 / 版本比对择源 / 主界面「内网有新版」提示），不含拉包与安装。安全见 §9 风险表新增行；纯内网零外网、不违反红线 #5，mac 暂缓。详见 §12 v0.27 里程碑、protocol §3/§5/§8.1、requirements F-SYS-5 / 决议 #166。
 - 2026-06-27 v0.81 决议 #169：自更新拉包入口接入文件传输通道：`file-ctl offer` 的 `purpose:"update"` 进入 shared 类型与 codec 白名单，要求单文件、非群聊、正大小；`FilesService` 收到后不建聊天消息 / 不 bump 会话 / 不加未读 / 不进普通传输记录，登记隐藏 transfer 并自动 accept 到 `userData/data/updates` 临时目录。该步只解决“更新包如何安全进入本机临时落点”，包格式 / 版本核对与安装重启仍留后续。
 - 2026-06-27 v0.82 决议 #170：自更新拉包请求闭环推进：`update{op:"req"}` 纳入 Messenger 可靠控制报文集合（UDP ACK / TCP 控制帧），新增 `update:request` IPC，主界面弹层与设置-关于检测区发现新版后可发起索包；`services/updater.ts` 补请求方复核与本地安装包查找，主进程仅在本地已有匹配本机版本的 nsis/deb 包时声明 `upd1` 并响应请求；`FilesService.offerUpdatePackage` 以隐藏 `purpose:"update"` transfer 发包，不建聊天消息也不进普通传输列表。nsis 自留包、deb 自重打包、包内版本核对、安装重启与失败重试 UI 仍留后续。
+- 2026-06-28 v0.84 决议 #174：私聊文件直接发送实现。新增 caps `fd1` 与 `file-ctl {op:"direct"}`；新增 `file:direct` IPC，由发送方已有文件卡片触发，只允许单聊在线且对端支持时使用。接收侧以 `config.allowDirectFileSend` 控制是否自动 accept，缺省 true；自动保存目录为 `getSaveDir()/sanitizeFileName(发送人显示名)`，显示名优先本地备注、其次昵称。群聊 direct 控制帧在服务层忽略，群文件仍手动接收。版本 0.27.8 → 0.28.0。
+- 2026-06-28 v0.85 决议 #175：修复拖拽 / 粘贴文件路径没有选择器授权导致发送失败。新增 `file:grant-paths` IPC，`ChatPane` 在 drop / paste 读取 Electron `File.path` 后先向主进程登记一次性授权，再调用既有文件或图片发送 IPC；`file:offer`、`group-file:offer` 与 `img:offer-path` 继续要求消耗授权。版本 0.28.0 → 0.28.1。
+- 2026-06-28 v0.86 决议 #176：文件卡片直接发送 UI 收紧。`FileCard` 将发送等待态并入 meta 行，双动作时右侧改为「直接发送」主按钮 + `x` 取消图标同排；接收方直接发送完成态从「已保存到 发送人 文件夹」改为「已保存本地」。纯渲染层 UI / 文案微调，不改传输协议、IPC、保存目录或服务层状态机。版本 0.28.1 → 0.28.2。
+- 2026-06-28 v0.87 决议 #177：继续收紧文件卡片短状态文案。`FileCard` 将「等待接收 / 发送中」移到文件名同行固定状态片，meta 回到大小等短信息；发送方 `done` 状态统一显示「发送成功」。纯渲染层 UI / 文案微调，不改传输协议、IPC、保存目录或服务层状态机。版本 0.28.2 → 0.28.3。
+- 2026-06-28 v0.88 决议 #178：普通入站文件接收态 UI 收紧。`FileCard` 的 `showRecvActions` 从纵向三按钮改为一行动作组：主按钮接收、文件夹图标另存、`x` 图标拒绝；仅改渲染层模板和 CSS，不改 accept / decline IPC 调用。版本 0.28.3 → 0.28.4。
+- 2026-06-28 v0.89 决议 #179：默认文件接收目录统一。`FilesService.accept()` 未传另存目录时使用 `getSaveDir()/联系人名称`，手动接收与直接发送自动接收共享该逻辑；`saveDirOverride` 另存为直接使用用户选择目录；失败重试优先沿用已记录 `savedPath` 的目录。版本 0.28.4 → 0.28.5。
+- 2026-06-28 v0.90 决议 #180：修复第三方截图工具粘贴重复发送。移除 `ChatPane.onKeydown` 的立即图片剪贴板兜底，改由主进程 `clipboard:paste-image` 事件延迟触发；浏览器 paste 事件处理过文件 / 文本 / 图片时记录并取消该次兜底。版本 0.28.5 → 0.28.6。

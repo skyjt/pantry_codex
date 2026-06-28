@@ -5,7 +5,7 @@ import { useChatStore } from '../stores/chat'
 import { useGroupsStore } from '../stores/groups'
 import { useTransfersStore } from '../stores/transfers'
 import { splitEmojiText } from '../utils/compat-emoji'
-import { hasClipboardText } from '../utils/clipboard'
+import { hasClipboardText, shouldSuppressNativeImageFallback } from '../utils/clipboard'
 import { emojiAdvanceWidth, fontOfStyle, setTextMeasurer } from '../utils/emoji-metrics'
 import { emojiToTwemojiCode, twemojiUrl } from '../utils/twemoji-assets'
 import { listTime, separatorTime } from '../utils/time'
@@ -111,6 +111,8 @@ const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
 let stopClipboardPaste: (() => void) | null = null
 let clipboardImagePasteBusy = false
+let clipboardImageFallbackTimer: ReturnType<typeof setTimeout> | null = null
+let lastClipboardPasteHandledAt = 0
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
 // 历史搜索结果点图片：单击放大 / 双击定位的延时区分（决议 #74）
 let hitClickTimer: ReturnType<typeof setTimeout> | null = null
@@ -155,6 +157,7 @@ let nudgeFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 let nudgeRetryTimer: ReturnType<typeof setInterval> | null = null
 let applyingConversationScroll = false
 const SCROLL_BOTTOM_THRESHOLD = 24
+const CLIPBOARD_NATIVE_FALLBACK_DELAY_MS = 80
 // 贴底意图（决议 #133）：用户处于"看最新"状态时，图片 / 文件卡片等异步撑高后继续贴底
 let stickBottom = false
 let bottomKeeper: ResizeObserver | null = null
@@ -215,8 +218,8 @@ const mentionMembers = computed(() =>
 const inputPlaceholder = computed(() => {
   if (!canSend.value) return '你已不在该讨论组，无法发言'
   return settings.value?.sendKey === 'ctrlEnter'
-    ? '输入消息，Ctrl+Enter 发送，Enter 换行；粘贴截图/文件直接发送'
-    : '输入消息，Enter 发送，Ctrl+Enter 换行；粘贴截图/文件直接发送'
+    ? '输入消息，Ctrl+Enter 发送，Enter 换行；可粘贴截图/文件'
+    : '输入消息，Enter 发送，Ctrl+Enter 换行；可粘贴截图/文件'
 })
 const draftEmojiParts = computed(() => splitEmojiText(draft.value))
 const draftUsesEmojiMirror = computed(() => draftEmojiParts.value.some((part) => part.emoji))
@@ -320,7 +323,7 @@ onMounted(async () => {
     if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
       if (active !== inputEl.value) return
     }
-    if (canSendMedia.value) void sendClipboardImageFallback()
+    if (canSendMedia.value) scheduleClipboardImageFallback()
   })
   // 内容异步撑高（图片 / 文件卡片加载完成、消息渲染）后，若处于贴底意图则继续贴到最新（决议 #133）
   if (msgsContent.value && typeof ResizeObserver !== 'undefined') {
@@ -343,6 +346,7 @@ onUnmounted(() => {
   if (nudgeFeedbackTimer) clearTimeout(nudgeFeedbackTimer)
   if (nudgeRetryTimer) clearInterval(nudgeRetryTimer)
   if (recallCountdownTimer) clearInterval(recallCountdownTimer)
+  if (clipboardImageFallbackTimer) clearTimeout(clipboardImageFallbackTimer)
   historySearchRun += 1
   stopSettings?.()
   stopClipboardPaste?.()
@@ -844,11 +848,30 @@ async function sendClipboardImageFallback(event?: Event): Promise<boolean> {
     const bytes = await window.pantry.readImageFromClipboard()
     if (!bytes) return false
     event?.preventDefault()
+    markClipboardPasteHandled()
     await chatStore.sendImageBytes('粘贴图片.png', bytes)
     return true
   } finally {
     clipboardImagePasteBusy = false
   }
+}
+
+function markClipboardPasteHandled(): void {
+  lastClipboardPasteHandledAt = Date.now()
+  if (clipboardImageFallbackTimer) {
+    clearTimeout(clipboardImageFallbackTimer)
+    clipboardImageFallbackTimer = null
+  }
+}
+
+function scheduleClipboardImageFallback(): void {
+  if (shouldSuppressNativeImageFallback(lastClipboardPasteHandledAt)) return
+  if (clipboardImageFallbackTimer) clearTimeout(clipboardImageFallbackTimer)
+  clipboardImageFallbackTimer = setTimeout(() => {
+    clipboardImageFallbackTimer = null
+    if (shouldSuppressNativeImageFallback(lastClipboardPasteHandledAt) || !canSendMedia.value) return
+    void sendClipboardImageFallback()
+  }, CLIPBOARD_NATIVE_FALLBACK_DELAY_MS)
 }
 
 function setNudgeFeedback(text: string, kind: 'ok' | 'warn' = 'ok'): void {
@@ -906,10 +929,6 @@ async function sendPk(game: PkGame): Promise<void> {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'v') {
-    void sendClipboardImageFallback(event)
-    return
-  }
   if (event.key === '@' && isGroup.value && canSend.value && mentionMembers.value.length > 0) {
     pendingMentionAt.value = inputEl.value?.selectionStart ?? draft.value.length
     showMentionPicker.value = true
@@ -1091,6 +1110,12 @@ function isImagePath(path: string): boolean {
   return IMG_EXTS.some((ext) => lower.endsWith(ext))
 }
 
+async function grantLocalFilePaths(paths: string[]): Promise<string[]> {
+  const unique = Array.from(new Set(paths.filter((p) => p.length > 0)))
+  if (unique.length === 0) return []
+  return window.pantry.grantFilePaths(unique)
+}
+
 async function sendFiles(directory: boolean): Promise<void> {
   if (!canSendMedia.value) return
   const paths = await window.pantry.pickFiles(directory)
@@ -1119,18 +1144,24 @@ async function onPaste(event: ClipboardEvent): Promise<void> {
       if (p) paths.push(p)
     }
     if (paths.length > 0) {
+      markClipboardPasteHandled()
       event.preventDefault()
-      if (paths.length === 1 && isImagePath(paths[0])) await chatStore.sendImagePath(paths[0])
-      else await chatStore.sendFilePaths(paths)
+      const granted = await grantLocalFilePaths(paths)
+      if (granted.length === 1 && isImagePath(granted[0])) await chatStore.sendImagePath(granted[0])
+      else if (granted.length > 0) await chatStore.sendFilePaths(granted)
       return
     }
     // 复制网页 / 富文本 emoji 时，剪贴板常同时带 text/plain 和 image/png；文本交给 textarea 原生粘贴。
-    if (hasClipboardText(data)) return
+    if (hasClipboardText(data)) {
+      markClipboardPasteHandled()
+      return
+    }
     // 2) 截图位图（无对应文件路径）：直接按图片 bytes 发送
     for (const item of Array.from(data.items)) {
       if (!item.type.startsWith('image/')) continue
       const file = item.getAsFile()
       if (!file) continue
+      markClipboardPasteHandled()
       event.preventDefault()
       const bytes = await file.arrayBuffer()
       const ext = item.type === 'image/jpeg' ? '.jpg' : '.png'
@@ -1146,6 +1177,13 @@ function onDragOver(event: DragEvent): void {
   if (canSendMedia.value) dragging.value = true
 }
 
+function onDragLeave(event: DragEvent): void {
+  const current = event.currentTarget
+  const related = event.relatedTarget
+  if (current instanceof Node && related instanceof Node && current.contains(related)) return
+  dragging.value = false
+}
+
 async function onDrop(event: DragEvent): Promise<void> {
   event.preventDefault()
   dragging.value = false
@@ -1156,17 +1194,25 @@ async function onDrop(event: DragEvent): Promise<void> {
     if (p) paths.push(p)
   }
   if (paths.length === 0) return
+  const granted = await grantLocalFilePaths(paths)
+  if (granted.length === 0) return
   // 单张图片拖入 → 按图片消息发；其余按文件
-  if (paths.length === 1 && isImagePath(paths[0])) {
-    await chatStore.sendImagePath(paths[0])
+  if (granted.length === 1 && isImagePath(granted[0])) {
+    await chatStore.sendImagePath(granted[0])
   } else {
-    await chatStore.sendFilePaths(paths)
+    await chatStore.sendFilePaths(granted)
   }
 }
 </script>
 
 <template>
-  <div class="chat" @click="msgMenu = null" @dragover="onDragOver" @dragleave="dragging = false" @drop="onDrop">
+  <div
+    class="chat"
+    @click="msgMenu = null"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
     <ForwardDialog v-if="forwardMsg" :msg="forwardMsg" @close="forwardMsg = null" />
     <div
       v-if="showHistorySearch"

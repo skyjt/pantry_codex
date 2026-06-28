@@ -49,6 +49,8 @@ export interface ConfigFile {
   fontScale: 100 | 110 | 125
   /** 通知横幅是否显示消息正文摘要 */
   showMessagePreview: boolean
+  /** 允许私聊直接发送；默认接收目录统一为“保存位置/联系人名称”（群聊不适用直接发送） */
+  allowDirectFileSend: boolean
   /** 提示音：none 默认静音，其余交给系统通知播放 */
   sound: 'none' | 'drop' | 'wood' | 'ding'
   /** 发送键行为 */
@@ -188,6 +190,7 @@ export function saveAppSettings(
       | 'theme'
       | 'fontScale'
       | 'showMessagePreview'
+      | 'allowDirectFileSend'
       | 'sound'
       | 'sendKey'
       | 'captureShortcut'
@@ -227,6 +230,9 @@ export function saveAppSettings(
   if (patch.fontScale !== undefined) state.config.fontScale = patch.fontScale
   if (patch.showMessagePreview !== undefined) {
     state.config.showMessagePreview = patch.showMessagePreview
+  }
+  if (patch.allowDirectFileSend !== undefined) {
+    state.config.allowDirectFileSend = patch.allowDirectFileSend
   }
   if (patch.sound !== undefined) state.config.sound = patch.sound
   if (patch.sendKey !== undefined) state.config.sendKey = patch.sendKey
@@ -316,6 +322,7 @@ export function loadAppState(
       theme: 'light',
       fontScale: 100,
       showMessagePreview: true,
+      allowDirectFileSend: true,
       sound: 'none',
       sendKey: 'enter',
       captureShortcut: 'CommandOrControl+Alt+A',
@@ -402,6 +409,7 @@ export function loadAppState(
   config.theme = config.theme === 'dark' ? 'dark' : 'light'
   config.fontScale = config.fontScale === 110 || config.fontScale === 125 ? config.fontScale : 100
   config.showMessagePreview = config.showMessagePreview !== false
+  config.allowDirectFileSend = config.allowDirectFileSend !== false
   config.sound =
     config.sound === 'drop' || config.sound === 'wood' || config.sound === 'ding'
       ? config.sound

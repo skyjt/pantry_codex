@@ -51,11 +51,12 @@ function openSettings(event?: Event): void {
   void window.pantry.openSettings()
 }
 
-// 局域网自更新提示（决议 #166 第一步）：发现同平台更高版本的在线源时，导航栏出现升级入口
+// 局域网自更新提示（决议 #166/#172）：发现同平台更高版本的在线源时，导航栏出现升级入口；机制说明收进问号提示。
 const updateStore = useUpdateStore()
 const showUpdatePanel = ref(false)
 const updateRequesting = ref(false)
 const updateRequestMsg = ref('')
+const updateHelpText = '将从内网同平台节点请求安装包，不访问外网；同步更新只发起索包，不会静默安装。'
 const updateHintLabel = computed(() =>
   updateStore.available
     ? `内网有新版 v${updateStore.available.version}（来自 ${updateStore.available.fromName}）`
@@ -68,12 +69,10 @@ function toggleUpdatePanel(event?: Event): void {
 async function requestUpdatePackage(): Promise<void> {
   if (updateRequesting.value) return
   updateRequesting.value = true
-  updateRequestMsg.value = '正在向更新源请求安装包。'
+  updateRequestMsg.value = ''
   try {
     const ok = await window.pantry.requestUpdate()
-    updateRequestMsg.value = ok
-      ? '已发出同步请求，收到安装包后会先拉取到本机临时目录。'
-      : '请求未送达或当前更新源暂不可用，请稍后重试。'
+    updateRequestMsg.value = ok ? '请求已发出。' : '请求未送达，请稍后重试。'
   } catch {
     updateRequestMsg.value = '请求更新失败，请稍后重试。'
   } finally {
@@ -393,11 +392,21 @@ onUnmounted(() => {
     </nav>
 
     <div v-if="showUpdatePanel && updateStore.available" class="update-pop" role="dialog">
-      <div class="update-pop-head">内网有新版</div>
+      <div class="update-pop-head">
+        <span>内网有新版</span>
+        <span class="update-pop-help">
+          <button type="button" class="update-help-trigger" aria-label="内网更新说明" aria-describedby="main-update-help">
+            ?
+          </button>
+          <span id="main-update-help" class="update-help-pop" role="tooltip">
+            {{ updateHelpText }}
+          </span>
+        </span>
+      </div>
       <div class="update-pop-ver">v{{ updateStore.available.version }}</div>
       <div class="update-pop-from">来自 {{ updateStore.available.fromName }}</div>
       <div class="update-pop-cur">当前版本 v{{ updateStore.available.currentVersion }}</div>
-      <p class="update-pop-hint">{{ updateRequestMsg || '将从内网同平台节点请求安装包，不访问外网。' }}</p>
+      <p v-if="updateRequestMsg" class="update-pop-hint">{{ updateRequestMsg }}</p>
       <button
         type="button"
         class="update-pop-ok"
@@ -710,8 +719,75 @@ onUnmounted(() => {
   gap: 2px;
 }
 .update-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font-size: 12px;
   color: var(--text-3);
+}
+.update-pop-help {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.update-help-trigger {
+  width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg-list);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.update-help-trigger:hover,
+.update-help-trigger:focus-visible {
+  border-color: rgba(61, 139, 107, 0.42);
+  background: var(--primary-weak);
+  color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(61, 139, 107, 0.1);
+}
+.update-help-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 70;
+  width: 238px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--text-1);
+  color: var(--bg-window);
+  box-shadow: 0 8px 24px rgba(34, 49, 42, 0.22);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s ease;
+}
+.update-pop-help:hover .update-help-pop,
+.update-pop-help:focus-within .update-help-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
 }
 .update-pop-ver {
   font-size: 20px;

@@ -46,6 +46,9 @@ export const useTransfersStore = defineStore('transfers', {
     cancel(transferId: string): void {
       void window.pantry.cancelTransfer(transferId)
     },
+    direct(transferId: string): void {
+      void window.pantry.directTransfer(transferId)
+    },
     reveal(transferId: string): void {
       void window.pantry.revealTransfer(transferId)
     }

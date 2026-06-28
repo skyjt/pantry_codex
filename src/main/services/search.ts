@@ -72,7 +72,8 @@ export class SearchService {
         ip: r.ip,
         online: r.online,
         lastSeen: r.lastSeen,
-        ver: r.profile.ver
+        ver: r.profile.ver,
+        caps: Array.isArray(r.profile.caps) ? r.profile.caps : []
       }))
 
     // 聊天记录：FTS 短语匹配，按会话聚合 + 各会话最新命中作摘要

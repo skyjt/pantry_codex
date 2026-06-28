@@ -27,7 +27,9 @@ export const IpcChannels = {
   settingsSaveProfile: 'settings:save-profile',
   settingsPickDir: 'settings:pick-dir',
   filePick: 'file:pick',
+  fileGrantPaths: 'file:grant-paths',
   fileOffer: 'file:offer',
+  fileDirect: 'file:direct',
   groupFileOffer: 'group-file:offer',
   fileAccept: 'file:accept',
   fileDecline: 'file:decline',
@@ -146,6 +148,8 @@ export interface PeerView {
   lastSeen: number
   /** 应用版本（决议 #166，自更新版本比对依据） */
   ver: string
+  /** 对端声明的能力位；未知位渲染层忽略。 */
+  caps: string[]
 }
 
 /** 局域网自更新：当前可用的更新源（决议 #166）；无更新源时主进程返回 null。 */
@@ -202,6 +206,8 @@ export interface FileRefView {
   size: number
   count: number
   dir: boolean
+  /** 是否由发送方文件卡片请求直接发送，接收方按本地设置自动保存。 */
+  direct?: boolean
 }
 
 export type { PkRefView }
@@ -237,6 +243,10 @@ export interface TransferView {
   name: string
   /** 完成后：接收侧的落盘根路径（用于"打开所在文件夹"） */
   savedPath: string
+  /** 是否为直接发送传输；群文件不会为 true。 */
+  direct: boolean
+  /** 直接发送入站保存目录使用的发送人目录名。 */
+  directPeerName?: string
 }
 
 /** 图片 OCR 只读源：主进程按 transferId 返回受限字节，不向渲染层暴露本地路径 */
@@ -418,6 +428,8 @@ export interface SettingsView {
   theme: 'light' | 'dark'
   fontScale: 100 | 110 | 125
   showMessagePreview: boolean
+  /** 是否允许私聊直接发送；默认接收落点为“保存位置/联系人名称”。 */
+  allowDirectFileSend: boolean
   sound: 'none' | 'drop' | 'wood' | 'ding'
   sendKey: 'enter' | 'ctrlEnter'
   /** Electron accelerator；空串 = 禁用 */
@@ -454,6 +466,7 @@ export interface AppSettingsPatch {
   theme?: SettingsView['theme']
   fontScale?: SettingsView['fontScale']
   showMessagePreview?: boolean
+  allowDirectFileSend?: boolean
   sound?: SettingsView['sound']
   sendKey?: SettingsView['sendKey']
   captureShortcut?: string
@@ -514,8 +527,12 @@ export interface PantryApi {
   pickDirectory(): Promise<string | null>
   /** 弹文件/文件夹选择框（发送用）；取消返回 null */
   pickFiles(directory: boolean): Promise<string[] | null>
+  /** 授权用户拖拽 / 粘贴产生的本地文件路径用于一次发送。 */
+  grantFilePaths(paths: string[]): Promise<string[]>
   /** 发起文件传输（对方离线直接失败，不入队——决议 #4）；返回本地文件消息 */
   offerFiles(peerNodeId: string, paths: string[]): Promise<MessageView | null>
+  /** 发送方在已有私聊文件卡片上请求直接发送。 */
+  directTransfer(transferId: string): Promise<boolean>
   /** 发起群聊文件传输：只投递给当前在线群成员 */
   offerGroupFiles(groupId: string, paths: string[]): Promise<MessageView | null>
   /** 接收（saveAs=true 先弹目录选择）；返回是否开始 */

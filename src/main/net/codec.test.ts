@@ -343,6 +343,22 @@ describe('codec', () => {
     })
   })
 
+  it('file-ctl 直接发送控制帧只需要 transferId', () => {
+    const direct = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'direct',
+      transferId: 'transfer-direct-1'
+    })
+    expect(decode(encode(direct))).toMatchObject({ ok: true, known: true })
+
+    const missingId = makeEnvelope(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'direct'
+    })
+    expect(decode(encode(missingId))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
+  })
+
   it('缺 payload 拒收', () => {
     const raw = { v: 1, type: 'exit', id: 'x', from: 'node-aaaa', ts: Date.now() }
     const result = decode(Buffer.from(JSON.stringify(raw), 'utf8'))

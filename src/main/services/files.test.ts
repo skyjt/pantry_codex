@@ -30,7 +30,10 @@ class FakeMessenger extends EventEmitter {
 }
 
 class FakeRegistry {
-  constructor(private readonly onlineIds: string[]) {}
+  constructor(
+    private readonly onlineIds: string[],
+    private readonly caps: string[] = []
+  ) {}
 
   get(nodeId: string): unknown {
     if (!this.onlineIds.includes(nodeId)) return undefined
@@ -38,7 +41,7 @@ class FakeRegistry {
       online: true,
       ip: '127.0.0.1',
       udpPort: 17878,
-      profile: { tcpPort: 17879 }
+      profile: { tcpPort: 17879, caps: this.caps, nick: nodeId }
     }
   }
 }
@@ -471,6 +474,305 @@ describe('FilesService 群聊媒体', () => {
     })
     expect('purpose' in messenger.sent[0].env.payload).toBe(false)
     expect([...transferRepo.rows.values()][0].status).toBe('offering')
+  })
+})
+
+describe('FilesService 默认接收目录', () => {
+  it('手动接收默认保存到联系人目录，另存为直接使用用户选择目录', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-default-recv-'))
+    tmpDirs.push(dir)
+    const saveAsDir = join(dir, '用户选择目录')
+
+    const messenger = new FakeMessenger()
+    const baseSend = messenger.sendReliable.bind(messenger)
+    messenger.sendReliable = async (peerId: string, env: Envelope<FileCtlPayload>) => {
+      await baseSend(peerId, env)
+      return env.payload.op !== 'accept'
+    }
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      peerDisplayName: () => '李四/研发',
+      bindAddress: '127.0.0.1'
+    })
+    const offer = (transferId: string, name: string): void => {
+      messenger.emit(
+        'incoming',
+        makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+          op: 'offer',
+          transferId,
+          seq: 1,
+          total: 1,
+          files: [{ fileId: `${transferId}-f`, path: name, size: 5 }],
+          totalSize: 5,
+          fileCount: 1,
+          rootName: name
+        })
+      )
+    }
+
+    offer('t-manual', '资料.txt')
+    await waitTick()
+    await expect(service.accept('t-manual')).resolves.toBe(false)
+    expect(JSON.parse(transferRepo.get('t-manual')!.files)).toMatchObject({
+      name: '资料.txt',
+      savedPath: join(dir, '李四 研发', '资料.txt')
+    })
+    expect(JSON.parse(transferRepo.get('t-manual')!.files)).not.toHaveProperty('direct')
+
+    offer('t-save-as', '方案.txt')
+    await waitTick()
+    await expect(service.accept('t-save-as', saveAsDir)).resolves.toBe(false)
+    expect(JSON.parse(transferRepo.get('t-save-as')!.files)).toMatchObject({
+      name: '方案.txt',
+      savedPath: join(saveAsDir, '方案.txt')
+    })
+    expect(messenger.sent.filter((item) => item.env.payload.op === 'accept')).toHaveLength(2)
+  })
+})
+
+describe('FilesService 私聊直接发送', () => {
+  it('发送侧在已有文件卡片上请求直接发送', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-direct-send-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '资料.txt')
+    writeFileSync(filePath, 'hello')
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob'], ['fd1']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerPaths('node-bob', [filePath])
+    expect(view?.fileRef?.direct).toBeUndefined()
+    await waitTick()
+    const row = [...transferRepo.rows.values()][0]
+    expect(messenger.sent[0]).toMatchObject({
+      peerId: 'node-bob',
+      env: {
+        type: MSG_TYPES.fileCtl,
+        payload: {
+          op: 'offer',
+          rootName: '资料.txt'
+        }
+      }
+    })
+    expect('receiveMode' in messenger.sent[0].env.payload).toBe(false)
+
+    await expect(service.requestDirect(row.transfer_id)).resolves.toBe(true)
+    expect(messenger.sent[1]).toMatchObject({
+      peerId: 'node-bob',
+      env: { payload: { op: 'direct', transferId: row.transfer_id } }
+    })
+    expect(JSON.parse(transferRepo.get(row.transfer_id)!.files)).toMatchObject({
+      name: '资料.txt',
+      direct: true
+    })
+    expect(service.transferView(row.transfer_id)?.direct).toBe(true)
+  })
+
+  it('接收侧收到 direct 控制帧后自动保存到发送人目录', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-direct-recv-'))
+    tmpDirs.push(dir)
+
+    const messenger = new FakeMessenger()
+    const baseSend = messenger.sendReliable.bind(messenger)
+    messenger.sendReliable = async (peerId: string, env: Envelope<FileCtlPayload>) => {
+      await baseSend(peerId, env)
+      return env.payload.op !== 'accept'
+    }
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      allowDirectFileSend: () => true,
+      peerDisplayName: () => '张三/设计',
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-direct',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: '资料.txt', size: 5 }],
+        totalSize: 5,
+        fileCount: 1,
+        rootName: '资料.txt'
+      })
+    )
+    await waitTick()
+
+    const msg = [...msgRepo.rows.values()][0]
+    expect(JSON.parse(msg.file_ref!)).not.toHaveProperty('direct')
+    expect(transferRepo.get('t-direct')?.status).toBe('offering')
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'direct',
+        transferId: 't-direct'
+      })
+    )
+    await waitTick()
+
+    const row = transferRepo.get('t-direct')
+    expect(row?.status).toBe('failed')
+    expect(JSON.parse(row!.files)).toMatchObject({
+      name: '资料.txt',
+      direct: true,
+      directPeerName: '张三 设计',
+      savedPath: join(dir, '张三 设计', '资料.txt')
+    })
+    expect(messenger.sent[0]).toMatchObject({
+      peerId: 'node-bob',
+      env: { payload: { op: 'accept', transferId: 't-direct' } }
+    })
+  })
+
+  it('接收侧关闭直接接收时忽略 direct 控制帧，保留普通文件卡片', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-direct-disabled-'))
+    tmpDirs.push(dir)
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      allowDirectFileSend: () => false,
+      peerDisplayName: () => '张三',
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-direct-disabled',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: '资料.txt', size: 5 }],
+        totalSize: 5,
+        fileCount: 1,
+        rootName: '资料.txt'
+      })
+    )
+    await waitTick()
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'direct',
+        transferId: 't-direct-disabled'
+      })
+    )
+    await waitTick()
+
+    const msg = [...msgRepo.rows.values()][0]
+    expect(JSON.parse(msg.file_ref!)).not.toHaveProperty('direct')
+    const row = transferRepo.get('t-direct-disabled')
+    expect(row?.status).toBe('offering')
+    expect(JSON.parse(row!.files)).not.toHaveProperty('direct')
+    expect(messenger.sent).toHaveLength(0)
+  })
+
+  it('群聊文件即使收到 direct 控制帧也不自动接收', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-direct-group-'))
+    tmpDirs.push(dir)
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      allowDirectFileSend: () => true,
+      peerDisplayName: () => '张三',
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-group-direct',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: '群资料.txt', size: 5 }],
+        totalSize: 5,
+        fileCount: 1,
+        rootName: '群资料.txt',
+        groupId: 'group-1',
+        groupRev: 1
+      })
+    )
+    await waitTick()
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'direct',
+        transferId: 't-group-direct'
+      })
+    )
+    await waitTick()
+
+    const msg = [...msgRepo.rows.values()][0]
+    expect(msg.conv_id).toBe('group:group-1')
+    const row = transferRepo.get('t-group-direct')
+    expect(row?.status).toBe('offering')
+    expect(JSON.parse(row!.files)).not.toHaveProperty('direct')
+    expect(messenger.sent.some((item) => item.env.payload.op === 'accept')).toBe(false)
   })
 })
 

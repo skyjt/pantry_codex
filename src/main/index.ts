@@ -515,7 +515,8 @@ if (!gotLock) {
       ip: record.ip,
       online: record.online,
       lastSeen: record.lastSeen,
-      ver: record.profile.ver
+      ver: record.profile.ver,
+      caps: Array.isArray(record.profile.caps) ? record.profile.caps : []
     }
   }
 
@@ -909,7 +910,9 @@ if (!gotLock) {
         getSaveDir: () =>
           appState?.config.fileDir || defaultFileDir(),
         getImagesDir: imagesDir,
-        getUpdateDir: updatesDir
+        getUpdateDir: updatesDir,
+        allowDirectFileSend: () => appState?.config.allowDirectFileSend !== false,
+        peerDisplayName: resolvePeerDisplayName
       })
       files.on('message', onMessage)
       files.on('status', onStatus)
@@ -1355,6 +1358,7 @@ if (!gotLock) {
       theme: c?.theme === 'dark' ? 'dark' : 'light',
       fontScale,
       showMessagePreview: c?.showMessagePreview !== false,
+      allowDirectFileSend: c?.allowDirectFileSend !== false,
       sound,
       sendKey: c?.sendKey === 'ctrlEnter' ? 'ctrlEnter' : 'enter',
       captureShortcut: c?.captureShortcut ?? DEFAULT_CAPTURE_SHORTCUT,
@@ -1430,6 +1434,16 @@ if (!gotLock) {
     return result.filePaths
   })
 
+  ipcMain.handle(IpcChannels.fileGrantPaths, (event, paths: unknown): string[] => {
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return []
+    const cleanPaths = paths.filter(
+      (p): p is string => typeof p === 'string' && p.length > 0 && p.length < 2048 && existsSync(p)
+    )
+    if (cleanPaths.length === 0) return []
+    rendererPathGrants.grant(event.sender.id, cleanPaths)
+    return cleanPaths
+  })
+
   ipcMain.handle(IpcChannels.fileOffer, async (event, peerId: unknown, paths: unknown) => {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (!Array.isArray(paths) || paths.length === 0 || paths.length > 100) return null
@@ -1437,6 +1451,13 @@ if (!gotLock) {
     const cleanPaths = paths as string[]
     if (!rendererPathGrants.consume(event.sender.id, cleanPaths)) return null
     return (await files?.offerPaths(peerId, cleanPaths)) ?? null
+  })
+
+  ipcMain.handle(IpcChannels.fileDirect, async (_event, transferId: unknown): Promise<boolean> => {
+    if (typeof transferId !== 'string' || transferId.length === 0 || transferId.length > 64) {
+      return false
+    }
+    return (await files?.requestDirect(transferId)) ?? false
   })
 
   ipcMain.handle(IpcChannels.groupFileOffer, async (event, groupId: unknown, paths: unknown) => {
@@ -1615,6 +1636,9 @@ if (!gotLock) {
       }
       if (typeof p.showMessagePreview === 'boolean') {
         clean.showMessagePreview = p.showMessagePreview
+      }
+      if (typeof p.allowDirectFileSend === 'boolean') {
+        clean.allowDirectFileSend = p.allowDirectFileSend
       }
       if (p.sound === 'none' || p.sound === 'drop' || p.sound === 'wood' || p.sound === 'ding') {
         clean.sound = p.sound
@@ -1953,7 +1977,10 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     const updateCaps = canAdvertiseUpdateSource() ? [CAPS.updateSource] : []
-    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort, updateCaps)
+    appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort, [
+      CAPS.fileDirect,
+      ...updateCaps
+    ])
     udpPort = envUdpPort ?? appState.config.udpPort
     tcpPort = envTcpPort ?? appState.config.tcpPort
     netState.udpPort = udpPort

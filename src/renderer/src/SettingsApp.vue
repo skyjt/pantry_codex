@@ -55,12 +55,13 @@ const info = ref<AppInfo | null>(null)
 // 关于页「更多信息」折叠（决议 #90）：默认收起开发者向运行时信息
 const showAboutDetails = ref(false)
 
-// 检测内网更新（决议 #167/#168/#170/#171）：主动查同平台更高版本在线源，并可发起索包请求。
+// 检测内网更新（决议 #167/#168/#170/#171/#172/#173）：主动查同平台更高版本在线源，并可发起索包请求。
 type UpdateCheckKind = 'idle' | 'checking' | 'found' | 'requesting' | 'requested' | 'none' | 'error'
 const checkingUpdate = ref(false)
 const requestingUpdate = ref(false)
 const updateCheckKind = ref<UpdateCheckKind>('idle')
-const updateCheckMsg = ref('只从已发现的在线同事中查找，不访问外网。')
+const updateCheckMsg = ref('')
+const updateHelpText = '只从已发现的在线同事中查找同平台更新源，不访问外网；同步更新只发起内网索包，不会静默安装。'
 const updateActionBusy = computed(() => checkingUpdate.value || requestingUpdate.value)
 const updateCheckSummary = computed(() => {
   if (updateCheckKind.value === 'checking') return '正在检测'
@@ -75,7 +76,7 @@ async function checkForUpdate(): Promise<void> {
   if (updateActionBusy.value) return
   checkingUpdate.value = true
   updateCheckKind.value = 'checking'
-  updateCheckMsg.value = '正在比对已发现的在线节点版本。'
+  updateCheckMsg.value = ''
   try {
     const result = await window.pantry.checkUpdate()
     if (result) {
@@ -83,7 +84,7 @@ async function checkForUpdate(): Promise<void> {
       updateCheckMsg.value = `v${result.version}，来自 ${result.fromName}。`
     } else {
       updateCheckKind.value = 'none'
-      updateCheckMsg.value = '当前未发现同平台更高版本的在线更新源。'
+      updateCheckMsg.value = ''
     }
   } catch {
     updateCheckKind.value = 'error'
@@ -96,15 +97,15 @@ async function requestDetectedUpdate(): Promise<void> {
   if (updateActionBusy.value) return
   requestingUpdate.value = true
   updateCheckKind.value = 'requesting'
-  updateCheckMsg.value = '正在向当前最佳更新源请求安装包。'
+  updateCheckMsg.value = ''
   try {
     const ok = await window.pantry.requestUpdate()
     if (ok) {
       updateCheckKind.value = 'requested'
-      updateCheckMsg.value = '已发出同步请求，收到安装包后会先拉取到本机临时目录。'
+      updateCheckMsg.value = ''
     } else {
       updateCheckKind.value = 'error'
-      updateCheckMsg.value = '请求未送达或当前更新源暂不可用，请稍后重试。'
+      updateCheckMsg.value = '请求未送达，请稍后重试。'
     }
   } catch {
     updateCheckKind.value = 'error'
@@ -312,6 +313,11 @@ async function toggleMessagePreview(): Promise<void> {
   await saveApp({ showMessagePreview: !settings.value.showMessagePreview })
 }
 
+async function toggleDirectFileReceive(): Promise<void> {
+  if (!settings.value) return
+  await saveApp({ allowDirectFileSend: !settings.value.allowDirectFileSend })
+}
+
 async function changeFontScale(event: Event): Promise<void> {
   const value = Number((event.target as HTMLSelectElement).value)
   if (value === 100 || value === 110 || value === 125) await saveApp({ fontScale: value })
@@ -338,6 +344,7 @@ async function resetAppSettings(): Promise<void> {
       theme: 'light',
       fontScale: 100,
       showMessagePreview: true,
+      allowDirectFileSend: true,
       sound: 'none',
       sendKey: 'enter',
       captureShortcut: DEFAULT_CAPTURE_SHORTCUT,
@@ -822,7 +829,7 @@ async function confirmRemove(cidr: string): Promise<void> {
           <div class="panel">
             <div class="panel-head">
               <h2>文件接收</h2>
-              <p>文件保存目录用于普通文件、图片缓存和迁移导入恢复。</p>
+              <p>不用另存为时，收到的文件会按联系人名称分目录保存。</p>
             </div>
             <div class="setting-line">
               <div>
@@ -830,6 +837,20 @@ async function confirmRemove(cidr: string): Promise<void> {
                 <small class="path">{{ fileDir || settings.defaultFileDir }}</small>
               </div>
               <button class="ghost" @click="pickFileDir">更改</button>
+            </div>
+            <div class="setting-line">
+              <div>
+                <strong>允许同事直接发送文件</strong>
+                <small>开启后，私聊文件可由发送方免确认发来，同样保存到联系人目录。</small>
+              </div>
+              <label class="switch">
+                <input
+                  type="checkbox"
+                  :checked="settings.allowDirectFileSend"
+                  @change="toggleDirectFileReceive"
+                />
+                <span></span>
+              </label>
             </div>
           </div>
 
@@ -1090,7 +1111,22 @@ async function confirmRemove(cidr: string): Promise<void> {
                 <dt>内网更新</dt>
                 <dd aria-live="polite">
                   <div class="about-update-main">
-                    <strong>{{ updateCheckSummary }}</strong>
+                    <span class="about-update-status">
+                      <strong>{{ updateCheckSummary }}</strong>
+                      <span class="about-update-help">
+                        <button
+                          type="button"
+                          class="about-help-trigger"
+                          aria-label="内网更新说明"
+                          aria-describedby="about-update-help"
+                        >
+                          ?
+                        </button>
+                        <span id="about-update-help" class="about-help-pop" role="tooltip">
+                          {{ updateHelpText }}
+                        </span>
+                      </span>
+                    </span>
                     <button
                       class="ghost compact about-update-action"
                       :class="{ 'is-primary': updateCheckKind === 'found' }"
@@ -1102,7 +1138,7 @@ async function confirmRemove(cidr: string): Promise<void> {
                       <span>{{ updateActionLabel }}</span>
                     </button>
                   </div>
-                  <small>{{ updateCheckMsg }}</small>
+                  <small v-if="updateCheckMsg">{{ updateCheckMsg }}</small>
                 </dd>
               </div>
             </dl>
@@ -2226,11 +2262,86 @@ async function confirmRemove(cidr: string): Promise<void> {
   gap: 10px;
 }
 
+.about-update-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .about-update-main strong {
   color: var(--text-1);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
+}
+
+.about-update-help {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.about-help-trigger {
+  width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg-list);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.about-help-trigger:hover,
+.about-help-trigger:focus-visible {
+  border-color: rgba(61, 139, 107, 0.42);
+  background: var(--primary-weak);
+  color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(61, 139, 107, 0.1);
+}
+
+.about-help-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 80;
+  width: 252px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--text-1);
+  color: var(--bg-window);
+  box-shadow: 0 8px 24px rgba(34, 49, 42, 0.22);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(3px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease,
+    visibility 0.14s ease;
+}
+
+.about-update-help:hover .about-help-pop,
+.about-update-help:focus-within .about-help-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
 }
 
 .about-update-row small {
@@ -2347,6 +2458,11 @@ async function confirmRemove(cidr: string): Promise<void> {
   .about-update-main {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .about-help-pop {
+    right: auto;
+    left: 0;
   }
 }
 

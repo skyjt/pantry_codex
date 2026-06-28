@@ -33,6 +33,7 @@ const transferList = computed(() =>
   transferIds.value.map((id) => transfers.byId[id]).filter((item): item is TransferView => !!item)
 )
 const transfer = computed(() => transferList.value[0])
+const directFile = computed(() => ref_.value?.direct === true || transfer.value?.direct === true)
 const multiOut = computed(
   () => transferIds.value.length > 1 && transferList.value.every((t) => t.direction === 'out')
 )
@@ -81,12 +82,23 @@ const metaText = computed(() => {
   if (inProgress.value && t) {
     return `${fmtBytes(t.bytesDone)} / ${fmtBytes(t.totalSize)} · ${fmtBytes(speed.value)}/s`
   }
+  if (directFile.value && t?.direction === 'in' && t.status === 'done') {
+    return '已保存本地'
+  }
   const r = ref_.value
   if (!r) return ''
   const base = r.count > 1 ? `${fmtBytes(r.size)} · ${r.count} 个文件` : fmtBytes(r.size)
   // 群发传输中：大小后附整体速率（群聊用「已接收 x/x」计数代替进度条，决议 #75）
   if (multiActive.value && speed.value > 0) return `${base} · ${fmtBytes(speed.value)}/s`
   return base
+})
+
+const stateChipText = computed(() => {
+  const t = transfer.value
+  if (!multiOut.value && t?.direction === 'out' && t.status === 'offering') {
+    return directFile.value ? '发送中' : '等待接收'
+  }
+  return ''
 })
 
 // 右侧状态徽标文字（仅在无操作按钮时显示）
@@ -103,19 +115,23 @@ const statusText = computed(() => {
   if (!t) return ''
   switch (t.status) {
     case 'done':
-      return '已完成'
+      return t.direction === 'out' ? '发送成功' : '已完成'
     case 'declined':
       return t.direction === 'out' ? '对方已拒收' : '已拒收'
     case 'canceled':
       return '已取消'
     default:
-      return '传输失败'
+      return directFile.value ? '直接发送失败' : '传输失败'
   }
 })
 
 // 右侧操作判定（决议 #89）：有操作显示按钮，否则显示状态徽标
 const showRecvActions = computed(
-  () => !multiOut.value && transfer.value?.status === 'offering' && transfer.value.direction === 'in'
+  () =>
+    !directFile.value &&
+    !multiOut.value &&
+    transfer.value?.status === 'offering' &&
+    transfer.value.direction === 'in'
 )
 const showCancel = computed(
   () =>
@@ -123,10 +139,30 @@ const showCancel = computed(
     (!multiOut.value &&
       (transfer.value?.status === 'offering' || transfer.value?.status === 'accepted'))
 )
-// 单发等待对方接收：取消按钮上方加「等待接收」小字
-const waitingOut = computed(
-  () => !multiOut.value && transfer.value?.status === 'offering' && transfer.value.direction === 'out'
+const directPeer = computed(() => (transfer.value ? peersStore.byId(transfer.value.peerId) : undefined))
+const showDirectButton = computed(
+  () =>
+    !multiOut.value &&
+    !props.msg.convId.startsWith('group:') &&
+    !directFile.value &&
+    props.msg.kind === 'file' &&
+    transfer.value?.direction === 'out' &&
+    transfer.value.status === 'offering'
 )
+const canRequestDirect = computed(
+  () =>
+    showDirectButton.value &&
+    props.msg.status === 'sent' &&
+    directPeer.value?.online === true &&
+    (directPeer.value?.caps ?? []).includes('fd1')
+)
+const directButtonTitle = computed(() => {
+  if (!showDirectButton.value) return ''
+  if (props.msg.status !== 'sent') return '文件信息送达后可直接发送'
+  if (!directPeer.value?.online) return '对方离线，无法直接发送'
+  if (!(directPeer.value?.caps ?? []).includes('fd1')) return '对方版本暂不支持直接发送'
+  return '让对方免确认保存到发送人目录'
+})
 const showReveal = computed(
   () => !multiOut.value && transfer.value?.status === 'done' && transfer.value.direction === 'in'
 )
@@ -156,6 +192,12 @@ onMounted(() => {
 function cancelActiveTransfers(): void {
   for (const id of transferIds.value) transfers.cancel(id)
 }
+
+function requestDirect(): void {
+  const t = transfer.value
+  if (!t || !canRequestDirect.value) return
+  transfers.direct(t.transferId)
+}
 </script>
 
 <template>
@@ -164,7 +206,13 @@ function cancelActiveTransfers(): void {
       <FileTypeIcon :name="ref_.name" :dir="ref_.dir" :size="36" />
     </div>
     <div class="info">
-      <div class="name" :title="ref_.name">{{ ref_.name }}</div>
+      <div class="name-line">
+        <div class="name" :title="ref_.name">{{ ref_.name }}</div>
+        <span v-if="directFile" class="direct-chip">直接</span>
+        <span v-if="stateChipText" class="state-chip" :class="{ direct: directFile }">
+          {{ stateChipText }}
+        </span>
+      </div>
       <div class="meta">{{ metaText }}</div>
       <div v-if="inProgress" class="bar">
         <div class="fill" :style="{ width: `${percent}%` }"></div>
@@ -179,13 +227,49 @@ function cancelActiveTransfers(): void {
     </div>
     <div class="tail">
       <template v-if="showRecvActions">
-        <button class="act primary" @click="transfers.accept(ref_.transferId)">接收</button>
-        <button class="act" @click="transfers.accept(ref_.transferId, true)">另存为</button>
-        <button class="act danger" @click="transfers.decline(ref_.transferId)">拒绝</button>
+        <div class="action-row recv-action-row">
+          <button class="act primary recv-primary" @click="transfers.accept(ref_.transferId)">
+            接收
+          </button>
+          <button
+            class="icon-act"
+            aria-label="另存为"
+            title="另存为"
+            @click="transfers.accept(ref_.transferId, true)"
+          >
+            <PantryIcon name="folder" :size="14" />
+          </button>
+          <button
+            class="icon-act danger"
+            aria-label="拒绝接收"
+            title="拒绝接收"
+            @click="transfers.decline(ref_.transferId)"
+          >
+            <PantryIcon name="x" :size="14" />
+          </button>
+        </div>
       </template>
       <template v-else-if="showCancel">
-        <span v-if="waitingOut" class="hint">等待接收</span>
-        <button class="act danger" @click="cancelActiveTransfers">取消</button>
+        <div class="action-row">
+          <button
+            v-if="showDirectButton"
+            class="act primary direct-act"
+            :disabled="!canRequestDirect"
+            :title="directButtonTitle"
+            @click="requestDirect"
+          >
+            直接发送
+          </button>
+          <button
+            :class="showDirectButton ? 'icon-act danger' : 'act danger'"
+            :aria-label="showDirectButton ? '取消发送' : undefined"
+            :title="showDirectButton ? '取消发送' : undefined"
+            @click="cancelActiveTransfers"
+          >
+            <PantryIcon v-if="showDirectButton" name="x" :size="14" />
+            <template v-else>取消</template>
+          </button>
+        </div>
       </template>
       <button v-else-if="showReveal" class="act" @click="transfers.reveal(ref_.transferId)">
         打开所在文件夹
@@ -203,11 +287,12 @@ function cancelActiveTransfers(): void {
 
 <style scoped>
 .card {
-  width: 260px;
+  width: 276px;
+  min-height: 58px;
   background: var(--bg-window);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 9px 10px;
   display: flex;
   /* 三栏共享同一垂直中心线（决议 #129）：图标、文件名/大小、右侧操作/状态高低一致，
      无论右侧是单徽标还是 3 个堆叠按钮都不再出现左上右中的错位 */
@@ -227,16 +312,53 @@ function cancelActiveTransfers(): void {
   flex: 1;
   min-width: 0;
 }
+.name-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .name {
+  min-width: 0;
+  flex: 1;
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.direct-chip {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.state-chip {
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-list);
+  color: var(--text-2);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.state-chip.direct {
+  background: var(--primary-weak);
+  color: var(--primary);
+}
 .meta {
   font-size: 11px;
   color: var(--text-3);
   margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bar {
   height: 4px;
@@ -283,39 +405,86 @@ function cancelActiveTransfers(): void {
 .recv:hover .recv-pop {
   display: block;
 }
-/* 右侧操作 / 状态区（决议 #89）：垂直居中；按钮组等宽，状态徽标靠右 */
+/* 右侧操作 / 状态区（决议 #89/#176）：垂直居中；直接发送双动作保持单行 */
 .tail {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .act {
   border: 1px solid var(--line);
   background: transparent;
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 3px 8px;
+  border-radius: 6px;
+  min-height: 26px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 24px;
   cursor: pointer;
   color: var(--text-2);
   white-space: nowrap;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.15s;
 }
 .act.primary {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+  font-weight: 600;
 }
 .act.danger {
   color: var(--danger);
 }
-.hint {
-  font-size: 10px;
-  color: var(--text-3);
-  text-align: center;
+.direct-act {
+  padding: 0 10px;
+}
+.recv-primary {
+  padding: 0 11px;
+}
+.icon-act {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-2);
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.15s;
+}
+.icon-act.danger {
+  color: var(--danger);
+}
+.act:not(.primary):hover,
+.icon-act:hover {
+  background: var(--primary-weak);
+}
+.act:active:not(:disabled),
+.icon-act:active {
+  transform: translateY(1px);
+}
+.act:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .badge {
-  align-self: flex-end;
   display: inline-flex;
   align-items: center;
   gap: 3px;

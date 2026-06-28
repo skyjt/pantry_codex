@@ -77,8 +77,12 @@ const api: PantryApi = {
   pickDirectory: (): Promise<string | null> => ipcRenderer.invoke(IpcChannels.settingsPickDir),
   pickFiles: (directory: boolean): Promise<string[] | null> =>
     ipcRenderer.invoke(IpcChannels.filePick, directory),
+  grantFilePaths: (paths: string[]): Promise<string[]> =>
+    ipcRenderer.invoke(IpcChannels.fileGrantPaths, paths),
   offerFiles: (peerNodeId: string, paths: string[]): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.fileOffer, peerNodeId, paths),
+  directTransfer: (transferId: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.fileDirect, transferId),
   offerGroupFiles: (groupId: string, paths: string[]): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.groupFileOffer, groupId, paths),
   acceptTransfer: (transferId: string, saveAs: boolean): Promise<boolean> =>

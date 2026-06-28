@@ -116,7 +116,9 @@ export interface Profile {
 /** caps 能力位（protocol §3 / 决议 #166）：声明本节点能力，供对端探测；入站未知位忽略。 */
 export const CAPS = {
   /** 可作为本平台更新源：运行于可分发形态（nsis 自留安装器 / deb 自重打包），能向同平台低版本节点提供安装包。 */
-  updateSource: 'upd1'
+  updateSource: 'upd1',
+  /** 私聊文件支持发送方在文件卡片上请求免确认直接接收（收端仍受本地开关控制）。 */
+  fileDirect: 'fd1'
 } as const
 
 /** 报文信封（protocol §4） */
@@ -283,7 +285,7 @@ export interface FileCtlOffer {
 }
 
 export interface FileCtlSimple {
-  op: 'accept' | 'decline' | 'cancel'
+  op: 'accept' | 'decline' | 'cancel' | 'direct'
   transferId: string
 }
 

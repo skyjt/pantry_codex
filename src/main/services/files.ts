@@ -10,6 +10,7 @@ import {
   MSG_TYPES,
   OFFER_ASSEMBLE_TIMEOUT,
   OFFER_FILES_PER_PACKET,
+  CAPS,
   type Envelope,
   type FileCtlOffer,
   type FileCtlPayload,
@@ -72,6 +73,8 @@ interface FilesBlob {
   name: string
   savedPath?: string
   purpose?: 'update'
+  direct?: boolean
+  directPeerName?: string
 }
 
 interface PreparedOutgoing {
@@ -104,6 +107,10 @@ export interface FilesDeps {
   getImagesDir: () => string
   /** 更新包临时目录（决议 #166）：不进聊天接收目录 */
   getUpdateDir?: () => string
+  /** 是否允许私聊直接发送自动接收；默认允许。 */
+  allowDirectFileSend?: () => boolean
+  /** 展示名：用于默认接收子目录（备注优先可由 main 注入）。 */
+  peerDisplayName?: (peerId: string) => string
   bindAddress?: string
 }
 
@@ -380,6 +387,29 @@ export class FilesService extends EventEmitter {
     return false
   }
 
+  /** 发送方在已有私聊文件卡片上请求直接发送；只升级当前 transfer，不重新建消息。 */
+  async requestDirect(transferId: string): Promise<boolean> {
+    const row = this.deps.transferRepo.get(transferId)
+    if (!row || row.direction !== 'out' || row.status !== 'offering') return false
+    const msg = this.deps.msgRepo.get(row.msg_id)
+    if (!msg || msg.kind !== 'file' || msg.conv_id.startsWith('group:')) return false
+    const peer = this.deps.registry.get(row.peer_id)
+    if (!peer || !peer.online) return false
+    if (!Array.isArray(peer.profile.caps) || !peer.profile.caps.includes(CAPS.fileDirect)) {
+      return false
+    }
+    const ok = await this.deps.messenger.sendReliable(
+      row.peer_id,
+      makeEnvelope(MSG_TYPES.fileCtl, this.deps.selfId, {
+        op: 'direct',
+        transferId
+      } satisfies FileCtlPayload)
+    )
+    if (!ok) return false
+    this.markDirect(transferId, '')
+    return true
+  }
+
   private prepareOutgoing(
     paths: string[],
     want: 'file' | 'image' | 'sticker',
@@ -501,7 +531,7 @@ export class FilesService extends EventEmitter {
     } catch {
       rememberedBase = ''
     }
-    const base = saveDirOverride || rememberedBase || this.deps.getSaveDir()
+    const base = saveDirOverride || rememberedBase || this.defaultReceiveDir(inc.peerId)
     // 根级重名避让：同名首段统一改名，保持目录结构（F-FILE-3）
     const rootMap = new Map<string, string>()
     for (const plan of inc.plans) {
@@ -606,14 +636,15 @@ export class FilesService extends EventEmitter {
     if (blob.purpose === 'update') return null
     const msg = this.deps.msgRepo.get(row.msg_id)
     const live = this.outgoing.get(transferId)?.bytesDone ?? this.incoming.get(transferId)?.bytesDone
-    const fileRefCount = ((): number => {
-      if (!msg?.file_ref) return 1
+    const fileRef = ((): FileRefView | null => {
+      if (!msg?.file_ref) return null
       try {
-        return (JSON.parse(msg.file_ref) as FileRefView).count
+        return JSON.parse(msg.file_ref) as FileRefView
       } catch {
-        return 1
+        return null
       }
     })()
+    const fileRefCount = fileRef?.count ?? 1
     return {
       transferId,
       msgId: row.msg_id,
@@ -625,7 +656,9 @@ export class FilesService extends EventEmitter {
       totalSize: row.total,
       fileCount: fileRefCount,
       name: blob.name,
-      savedPath: blob.savedPath ?? ''
+      savedPath: blob.savedPath ?? '',
+      direct: blob.direct === true || fileRef?.direct === true,
+      ...(blob.directPeerName ? { directPeerName: blob.directPeerName } : {})
     }
   }
 
@@ -666,7 +699,18 @@ export class FilesService extends EventEmitter {
       if (row.status === 'offering' || row.status === 'accepted') {
         this.finish(ctl.transferId, 'canceled')
       }
+    } else if (ctl.op === 'direct') {
+      this.onDirectRequest(env.from, ctl.transferId, row)
     }
+  }
+
+  private onDirectRequest(peerId: string, transferId: string, row: { direction: string; status: string; msg_id: string }): void {
+    if (row.direction !== 'in' || row.status !== 'offering') return
+    if (this.deps.allowDirectFileSend?.() === false) return
+    const msg = this.deps.msgRepo.get(row.msg_id)
+    if (!msg || msg.kind !== 'file' || msg.conv_id.startsWith('group:')) return
+    this.markDirect(transferId, this.peerDirName(peerId))
+    void this.accept(transferId)
   }
 
   private onOfferPart(peerId: string, offer: FileCtlOffer): void {
@@ -877,8 +921,24 @@ export class FilesService extends EventEmitter {
     this.deps.transferRepo.updateFiles(transferId, JSON.stringify(merged))
   }
 
+  private markDirect(transferId: string, directPeerName: string): void {
+    this.updateBlob(transferId, {
+      direct: true,
+      ...(directPeerName ? { directPeerName } : {})
+    })
+    this.emitTransfer(transferId, true)
+  }
+
   private updateDir(): string {
     return this.deps.getUpdateDir?.() ?? join(tmpdir(), 'teahouse-updates')
+  }
+
+  private peerDirName(peerId: string): string {
+    return sanitizeDirName(this.deps.peerDisplayName?.(peerId) || peerId)
+  }
+
+  private defaultReceiveDir(peerId: string): string {
+    return join(this.deps.getSaveDir(), this.peerDirName(peerId))
   }
 
   /** 节流 250ms 推卡片状态；force 用于状态切换（必达） */
@@ -908,6 +968,20 @@ export class FilesService extends EventEmitter {
 
 function messageKindForPurpose(purpose: FileCtlOffer['purpose']): 'file' | 'image' | 'sticker' {
   return purpose === 'image' || purpose === 'sticker' ? purpose : 'file'
+}
+
+// eslint-disable-next-line no-control-regex
+const BAD_DIR_SEGMENT_CHARS = /[<>:"|?*\u0000-\u001f/\\]+/g
+
+function sanitizeDirName(name: string): string {
+  const clean = name
+    .replace(BAD_DIR_SEGMENT_CHARS, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .trim()
+  if (!clean || clean === '.' || clean === '..') return '未知节点'
+  return clean
 }
 
 /** 递归展开文件夹（含空目录条目），相对路径以 rootName 开头 */
