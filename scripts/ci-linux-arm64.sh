@@ -27,6 +27,7 @@ npm run build
 # CI 容器以 root 运行，Electron 启动冒烟需关闭 Chromium sandbox；应用运行时安全配置不变。
 xvfb-run -a npm run smoke -- --no-sandbox
 
+gem install --no-document ffi -v 1.17.4
 gem install --no-document fpm -v 1.9.3
 USE_SYSTEM_FPM=true USE_SYSTEM_MKSQUASHFS=true USE_HARD_LINKS=false npm run dist:linux:arm64
 
