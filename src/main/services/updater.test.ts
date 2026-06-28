@@ -92,17 +92,21 @@ describe('自更新请求复核与本地包查找', () => {
     tmpDirs.push(dir)
     writeFileSync(join(dir, 'Teahouse-0.28.0-linux-x86_64.AppImage'), 'appimage')
     writeFileSync(join(dir, 'Teahouse-0.28.0-linux-amd64.deb'), 'deb')
+    writeFileSync(join(dir, 'Teahouse-0.28.0-linux-arm64.deb'), 'arm64-deb')
     writeFileSync(join(dir, 'Teahouse-0.28.0-win-x64-portable.exe'), 'portable')
     writeFileSync(join(dir, 'Teahouse-0.27.9-win-x64-setup.exe'), 'old')
     writeFileSync(join(dir, 'Teahouse-0.28.0-win-x64-setup.exe'), 'exe')
 
-    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'linux' })).toBe(
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'linux', arch: 'x64' })).toBe(
       join(dir, 'Teahouse-0.28.0-linux-amd64.deb')
     )
-    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'win' })).toBe(
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'linux', arch: 'arm64' })).toBe(
+      join(dir, 'Teahouse-0.28.0-linux-arm64.deb')
+    )
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'win', arch: 'x64' })).toBe(
       join(dir, 'Teahouse-0.28.0-win-x64-setup.exe')
     )
     expect(findLocalUpdatePackage({ dirs: [dir], version: '0.28.0', platform: 'mac' })).toBeNull()
-    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.29.0', platform: 'linux' })).toBeNull()
+    expect(findLocalUpdatePackage({ dirs: [dir], version: '0.29.0', platform: 'linux', arch: 'x64' })).toBeNull()
   })
 })

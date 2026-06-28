@@ -51,6 +51,7 @@ import {
   TIMINGS,
   type Envelope,
   type Platform,
+  type RuntimeArch,
   type ScanRangeSummary,
   type UpdateReqPayload
 } from '../shared/protocol'
@@ -564,7 +565,8 @@ if (!gotLock) {
       src.nodeId,
       makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, appState.nodeId, {
         op: 'req',
-        platform: appState.profile.platform
+        platform: appState.profile.platform,
+        arch: currentRuntimeArch()
       })
     )
   }
@@ -575,17 +577,17 @@ if (!gotLock) {
     return 'linux'
   }
 
-  function updatePackagePath(version: string, platform: Platform): string | null {
+  function currentRuntimeArch(): RuntimeArch {
+    return process.arch === 'arm64' ? 'arm64' : 'x64'
+  }
+
+  function updatePackagePath(version: string, platform: Platform, arch = currentRuntimeArch()): string | null {
     return findLocalUpdatePackage({
       dirs: [updatesDir(), join(app.getAppPath(), 'release')],
       version,
-      platform
+      platform,
+      arch
     })
-  }
-
-  function localUpdatePackagePath(): string | null {
-    if (!appState) return null
-    return updatePackagePath(appState.profile.ver, appState.profile.platform)
   }
 
   function canAdvertiseUpdateSource(): boolean {
@@ -613,7 +615,11 @@ if (!gotLock) {
     ) {
       return
     }
-    const packagePath = localUpdatePackagePath()
+    const packagePath = updatePackagePath(
+      appState.profile.ver,
+      appState.profile.platform,
+      env.payload.arch ?? currentRuntimeArch()
+    )
     if (!packagePath) return
     void files.offerUpdatePackage(env.from, packagePath)
   }

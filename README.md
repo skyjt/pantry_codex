@@ -66,9 +66,9 @@
 | 平台 | 支持范围 | 架构 | 安装包 | 真机实测 |
 |---|---|---|---|---|
 | Windows | 7 SP1 起（含 8 / 8.1 / 10 / 11），仅 64 位 | x64 | NSIS 安装包、便携版 | ✅ Windows 7 x64 |
-| 统信 UOS（信创） | UOS 20 及以上，深度安装器 | x64 | .deb | ✅ UOS 20 x64 |
+| 统信 UOS（信创） | UOS 20 及以上，深度安装器 | x64 / arm64 | .deb | ✅ UOS 20 x64；arm64 构建支持 |
 | macOS | 12（Monterey）起 | Apple Silicon | .dmg、.zip | ✅ macOS 26 |
-| Debian / Ubuntu 等 | Debian 10（buster）起 | x64 | .deb、AppImage | 构建支持 |
+| Debian / Ubuntu 等 | Debian 10（buster）起 | x64 / arm64 | .deb、AppImage | 构建支持 |
 
 > 「真机实测」这列标 ✅ 的，是真在那台系统上装好、跑通收发的组合，不是只在 CI 里编译过。
 >

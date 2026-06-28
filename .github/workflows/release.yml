@@ -121,6 +121,109 @@ jobs:
             release/Teahouse-*-linux-x86_64.AppImage
             release/SHA256SUMS-debian10-uos20-x64.txt
 
+  linux-debian10-uos20-arm64:
+    name: Debian 10 / UOS 20 arm64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 启用 arm64 QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: 在 Debian 10 arm64 容器内验证并打包
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'sudo chown -R "$(id -u):$(id -g)" release out node_modules public 2>/dev/null || true' EXIT
+
+          docker run --rm --platform linux/arm64 \
+            -e CI="true" \
+            -e NO_UPDATE_NOTIFIER="1" \
+            -e ELECTRON_MIRROR="${ELECTRON_MIRROR}" \
+            -e ELECTRON_BUILDER_BINARIES_MIRROR="${ELECTRON_BUILDER_BINARIES_MIRROR}" \
+            -e npm_config_build_from_source="true" \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            node:18-buster bash -s <<'EOF'
+          set -euo pipefail
+
+          cat >/etc/apt/sources.list <<'APT'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          deb http://archive.debian.org/debian buster-updates main contrib non-free
+          APT
+          printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99no-check-valid-until
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates python3 make g++ pkg-config dpkg fakeroot rpm \
+            xvfb xauth dbus-x11 libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 \
+            xdg-utils libatspi2.0-0 libuuid1 libfuse2 libasound2 libgbm1 \
+            libdrm2 libx11-xcb1
+          rm -rf /var/lib/apt/lists/*
+
+          npm ci
+
+          npm run rebuild:electron
+          node scripts/check-native-glibc.cjs node_modules/better-sqlite3/build/Release/better_sqlite3.node
+
+          npm test
+          npm run test:db
+          npm run typecheck
+          npm run build
+          # CI 容器以 root 运行，Electron 启动冒烟需关闭 Chromium sandbox；应用运行时安全配置不变。
+          xvfb-run -a npm run smoke -- --no-sandbox
+
+          USE_HARD_LINKS=false npm run dist:linux:arm64
+
+          native=$(find release -path '*/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node' -print | sort | head -1)
+          if [ -z "$native" ]; then
+            find release -maxdepth 3 -type f | sort
+            echo "未找到 arm64 打包产物中的 better_sqlite3.node" >&2
+            exit 1
+          fi
+          node scripts/check-native-glibc.cjs "$native"
+
+          deb=$(ls release/Teahouse-*-linux-arm64.deb)
+          mkdir -p /tmp/deb-verify
+          data=$(ar t "$deb" | grep '^data\.tar')
+          ar p "$deb" "$data" > "/tmp/deb-verify/$data"
+          listing=$(tar -tvf "/tmp/deb-verify/$data")
+          if grep -P '^h' <<< "$listing"; then
+            echo "deb 内含硬链接条目，UOS 深度安装器会失败" >&2
+            exit 1
+          fi
+          if grep -P '[\x{4e00}-\x{9fff}]' <<< "$listing"; then
+            echo "deb 安装路径含中文" >&2
+            exit 1
+          fi
+          echo "deb 校验通过：无硬链接、无中文路径"
+
+          cd release
+          shopt -s nullglob
+          files=(Teahouse-*-linux-arm64.deb Teahouse-*-linux-arm64.AppImage)
+          if [ "${#files[@]}" -lt 2 ]; then
+            ls -la
+            echo "Linux arm64 产物数量不足，期望 deb 与 AppImage 各一个。" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS-debian10-uos20-arm64.txt
+          EOF
+
+      - name: 上传 Linux arm64 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: pantry-debian10-uos20-arm64
+          if-no-files-found: error
+          path: |
+            release/Teahouse-*-linux-arm64.deb
+            release/Teahouse-*-linux-arm64.AppImage
+            release/SHA256SUMS-debian10-uos20-arm64.txt
+
   windows7-x64:
     name: Windows 7 x64
     runs-on: windows-2022
@@ -248,6 +351,7 @@ jobs:
       contents: write
     needs:
       - linux-debian10-uos20-x64
+      - linux-debian10-uos20-arm64
       - windows7-x64
       - macos-arm64
     if: startsWith(github.ref, 'refs/tags/')
@@ -320,6 +424,8 @@ jobs:
             echo "| Windows 7 SP1+ x64 | \`Teahouse-${VERSION}-win-x64-portable.exe\` | 便携版（免安装） |"
             echo "| Debian 10 / UOS 20 x64 | \`Teahouse-${VERSION}-linux-amd64.deb\` | dpkg 安装包（含信创） |"
             echo "| Debian 10 / UOS 20 x64 | \`Teahouse-${VERSION}-linux-x86_64.AppImage\` | 通用 AppImage |"
+            echo "| Debian 10 / UOS 20 arm64 | \`Teahouse-${VERSION}-linux-arm64.deb\` | dpkg 安装包（含信创） |"
+            echo "| Debian 10 / UOS 20 arm64 | \`Teahouse-${VERSION}-linux-arm64.AppImage\` | 通用 AppImage |"
             echo "| macOS arm64（M 系列） | \`Teahouse-${VERSION}-mac-arm64.dmg\` | 磁盘映像 |"
             echo "| macOS arm64（M 系列） | \`Teahouse-${VERSION}-mac-arm64.zip\` | 压缩包 |"
             echo ""

@@ -92,6 +92,7 @@ export const LIMITS = {
 }
 
 export type Platform = 'win' | 'mac' | 'linux'
+export type RuntimeArch = 'x64' | 'arm64'
 
 /** 节点资料（protocol §3），随 entry / alive / profile 报文携带 */
 export interface Profile {
@@ -115,7 +116,7 @@ export interface Profile {
 
 /** caps 能力位（protocol §3 / 决议 #166）：声明本节点能力，供对端探测；入站未知位忽略。 */
 export const CAPS = {
-  /** 可作为本平台更新源：运行于可分发形态（nsis 自留安装器 / deb 自重打包），能向同平台低版本节点提供安装包。 */
+  /** 可作为本平台更新源：运行于可分发形态（nsis 自留安装器 / deb 自重打包），能向同平台同架构低版本节点提供安装包。 */
   updateSource: 'upd1',
   /** 私聊文件支持发送方在文件卡片上请求免确认直接接收（收端仍受本地开关控制）。 */
   fileDirect: 'fd1'
@@ -296,6 +297,8 @@ export interface UpdateReqPayload {
   op: 'req'
   /** 请求方平台，供 A 复核同平台、拒绝跨平台请求 */
   platform: Platform
+  /** 请求方运行架构；新增 Linux arm64 产物后用于避免回传错架构安装包 */
+  arch?: RuntimeArch
 }
 export type UpdatePayload = UpdateReqPayload
 

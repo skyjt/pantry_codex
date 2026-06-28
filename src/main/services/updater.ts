@@ -1,5 +1,5 @@
 // 局域网 P2P 自更新编排（决议 #166）。
-import type { Platform, Profile } from '../../shared/protocol'
+import type { Platform, Profile, RuntimeArch } from '../../shared/protocol'
 import { CAPS } from '../../shared/protocol'
 import { compareSemver } from '../util/semver'
 import { readdirSync, statSync } from 'node:fs'
@@ -33,6 +33,7 @@ export interface UpdateRequester {
 
 /**
  * 从候选里挑「同平台、声明可作更新源、版本严格高于本机」的最高版本在线节点。
+ * 具体安装包架构在 update req / 本地包匹配阶段复核，避免 Linux x64/arm64 混用。
  * 无合适来源返回 null。
  */
 export function pickUpdateSource(self: SelfRelease, candidates: SourceCandidate[]): UpdateSource | null {
@@ -53,7 +54,7 @@ export function pickUpdateSource(self: SelfRelease, candidates: SourceCandidate[
   return best
 }
 
-/** A 端收到 B 的 update req 后的最小安全复核：同平台、在线、本机版本更高。 */
+/** A 端收到 B 的 update req 后的最小安全复核：同平台、在线、本机版本更高；安装包查找再按请求架构筛选。 */
 export function shouldServeUpdateRequest(
   self: SelfRelease,
   requester: UpdateRequester | null | undefined,
@@ -69,6 +70,7 @@ export function findLocalUpdatePackage(opts: {
   dirs: string[]
   version: string
   platform: Platform
+  arch?: RuntimeArch
 }): string | null {
   const versionNeedle = opts.version.toLowerCase()
   for (const dir of opts.dirs) {
@@ -81,7 +83,7 @@ export function findLocalUpdatePackage(opts: {
     const matches = names
       .filter((name) => {
         const lower = name.toLowerCase()
-        return lower.includes(versionNeedle) && isPackageNameForPlatform(lower, opts.platform)
+        return lower.includes(versionNeedle) && isPackageNameForPlatform(lower, opts.platform, opts.arch)
       })
       .sort()
     for (const name of matches) {
@@ -97,10 +99,18 @@ export function findLocalUpdatePackage(opts: {
   return null
 }
 
-function isPackageNameForPlatform(lowerName: string, platform: Platform): boolean {
+function isPackageNameForPlatform(lowerName: string, platform: Platform, arch?: RuntimeArch): boolean {
   if (platform === 'win') {
-    return lowerName.endsWith('.exe') && lowerName.includes('setup') && !lowerName.includes('portable')
+    if (!lowerName.endsWith('.exe') || !lowerName.includes('setup') || lowerName.includes('portable')) {
+      return false
+    }
+    return arch ? lowerName.includes(`-win-${arch}-`) : true
   }
-  if (platform === 'linux') return lowerName.endsWith('.deb')
+  if (platform === 'linux') {
+    if (!lowerName.endsWith('.deb')) return false
+    if (!arch) return true
+    const debArch = arch === 'x64' ? 'amd64' : 'arm64'
+    return lowerName.includes(`-linux-${debArch}.deb`)
+  }
   return false
 }

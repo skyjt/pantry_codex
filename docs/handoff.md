@@ -1,19 +1,19 @@
 # 茶话间（Teahouse）开发交接文档
 
 > 给接手本项目的任何 AI 代理或开发者。读完本文 + [AGENTS.md](../AGENTS.md) 即可无缝继续开发。
-> 最后更新：2026-06-28（**v0.28.6，第三方截图粘贴不再重复发送**）：公开仓库统一为 `skyjt/teahouse`，v0.11.4 为发布整理版；v0.12.0 补齐群改名系统提示（#87）与私聊顶部 IP 完整展示（#88）；v0.12.1 修复发送端先整文件预读 SHA-256 再发数据导致 10GB 级文件接受后长时间 0B 的问题；v0.13.x–v0.16.x 打磨文件卡片、关于页、独立图片查看窗口、本地 OCR、品牌 SVG、通知兼容、私聊震动和会话滚动；v0.17.0 新增 `scan-ranges` 网段记录低频同步（#114）；v0.18.0 新增左侧刷新全局用户（#115）；v0.19.x 打磨左侧导航 tooltip / 自己信息卡 / 焦点框（#116–#121）；v0.20.0 完成英文品牌名 Teahouse 更名（#124）；v0.21.x 完成移除会话删除聊天内容、置顶底色、顶栏等高与输入框拖拽、右键菜单关闭、文件卡片对齐、消息缓存索引、高频渲染路径优化和安全扫描报告修复（#125–#138）；v0.22.x 完成 PK 分歧解决与 UI 打磨（#139–#148）；v0.23.x–v0.26.x 完成设置页重组、网段表格、默认目录与图片传输修复；v0.27.x 推进局域网 P2P 自更新，当前已完成发现提示、更新请求协议地基、关于页主动检测 / 索包入口、`purpose:"update"` 更新包隔离接收、`update:request` 向最佳源请求已有本地安装包回传，以及设置-关于检测更新区按方案 A 并入键值行、机制说明收进圆形问号 tooltip、tooltip 上浮防裁切（#166–#173）；v0.28.0 实现私聊文件「直接发送」；v0.28.1 修复拖拽 / 粘贴文件路径缺少一次性授权导致发送失败的问题；v0.28.2 收紧直接发送文件卡布局；v0.28.3 收紧短状态文案；v0.28.4 将普通接收态从纵向三按钮改为一行动作组；v0.28.5 统一普通接收与直接发送自动接收的默认落点为 `文件保存位置/联系人名称/`（另存为除外）；v0.28.6 修复第三方截图工具图片粘贴被浏览器 paste 与原生剪贴板兜底双重发送的问题。仍遵守 Electron 22.3.27 / Node16 / Chrome108 / 纯内网红线。本文会过期——以 `git log` 与各文档变更记录为准。
+> 最后更新：2026-06-28（**v0.29.0，Debian 10 / UOS 20 arm64 发布包进入构建矩阵**）：公开仓库统一为 `skyjt/teahouse`，v0.11.4 为发布整理版；v0.12.0 补齐群改名系统提示（#87）与私聊顶部 IP 完整展示（#88）；v0.12.1 修复发送端先整文件预读 SHA-256 再发数据导致 10GB 级文件接受后长时间 0B 的问题；v0.13.x–v0.16.x 打磨文件卡片、关于页、独立图片查看窗口、本地 OCR、品牌 SVG、通知兼容、私聊震动和会话滚动；v0.17.0 新增 `scan-ranges` 网段记录低频同步（#114）；v0.18.0 新增左侧刷新全局用户（#115）；v0.19.x 打磨左侧导航 tooltip / 自己信息卡 / 焦点框（#116–#121）；v0.20.0 完成英文品牌名 Teahouse 更名（#124）；v0.21.x 完成移除会话删除聊天内容、置顶底色、顶栏等高与输入框拖拽、右键菜单关闭、文件卡片对齐、消息缓存索引、高频渲染路径优化和安全扫描报告修复（#125–#138）；v0.22.x 完成 PK 分歧解决与 UI 打磨（#139–#148）；v0.23.x–v0.26.x 完成设置页重组、网段表格、默认目录与图片传输修复；v0.27.x 推进局域网 P2P 自更新，当前已完成发现提示、更新请求协议地基、关于页主动检测 / 索包入口、`purpose:"update"` 更新包隔离接收、`update:request` 向最佳源请求已有本地安装包回传，以及设置-关于检测更新区按方案 A 并入键值行、机制说明收进圆形问号 tooltip、tooltip 上浮防裁切（#166–#173）；v0.28.x 完成私聊文件「直接发送」、拖拽 / 粘贴授权、文件卡 UI 收紧、默认接收目录统一与第三方截图粘贴去重；v0.29.0 新增 Linux arm64 deb/AppImage 发布 job，并让自更新安装包查找按架构匹配。仍遵守 Electron 22.3.27 / Node16 / Chrome108 / 纯内网红线。本文会过期——以 `git log` 与各文档变更记录为准。
 
 ## 0. 必读顺序（15 分钟上手）
 
 1. **[AGENTS.md](../AGENTS.md)** —— 9 条硬性红线（Electron 22.3.27 焊死、纯内网、分层铁律等），违反即错误；
 2. 本文 —— 状态、工作流、下一步；
-3. 设计四件套（按需细读）：[requirements.md](requirements.md)（功能与 180 项决议）→ [protocol.md](protocol.md)（线上协议 v0.33）→ [ui-design.md](ui-design.md)（界面）→ [tech-design.md](tech-design.md)（选型/分层/库表）；
+3. 设计四件套（按需细读）：[requirements.md](requirements.md)（功能与 181 项决议）→ [protocol.md](protocol.md)（线上协议 v0.34）→ [ui-design.md](ui-design.md)（界面）→ [tech-design.md](tech-design.md)（选型/分层/库表）；
 4. `git log --oneline` —— 提交历史就是完整开发史，每条 commit message 都是一份增量说明。
 
 ## 1. 项目状态一览
 
 纯内网、无服务器、基于 IP 的局域网 IM + 文件传输（Electron 22 / Vue 3 / better-sqlite3）。
-**v0.1、v0.2、v0.3、v0.4/P1 主链路已完成，本地迭代至 v0.28.6**（对照 tech-design §12）。Windows / Debian / UOS 真实打包运行测试留给目标平台执行：
+**v0.1、v0.2、v0.3、v0.4/P1 主链路已完成，本地迭代至 v0.29.0**（对照 tech-design §12）。Windows / Debian / UOS 真实打包运行测试留给目标平台执行：
 
 | 已交付 | 说明 |
 |---|---|
@@ -29,7 +29,7 @@
 | P1 文件/数据 | `.part` 断点续传；传输记录；HTML/TXT 阅读导出；`.pantry-bak` 迁移备份包（消息、联系人、群、传输、表情、图片/表情媒体）+ 身份映射导入 |
 | P1 系统/设置 | 开机自启、关闭到托盘/退出、通知预览、系统提示音开关、托盘 / 菜单栏未读数字与闪烁兜底、深色主题、字体缩放、截图/显示隐藏快捷键、UDP/TCP 端口保存（重启生效）、局域网自更新发现提示、关于页主动检测与键值行索包请求 |
 | 打包链条 | `electron-builder@24.13.3` 精确锁；`dist:win`/`dist:linux`/`dist:mac` 本地脚本；Windows/Debian 真实打包测试留给目标平台 |
-| GitHub 发布 | 公开仓库：[skyjt/teahouse](https://github.com/skyjt/teahouse)；`.github/workflows/release.yml` 已配置 Windows 7 x64、Debian 10 / UOS 20 x64、macOS arm64 三平台构建；Linux CI 在 Debian 10 容器内强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查源码重建产物与最终包内 `.node` 最高 GLIBC 符号不超过 2.28；push `main` / 手动触发上传 artifact，推送 `v*` tag 自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 packaging-test 执行 |
+| GitHub 发布 | 公开仓库：[skyjt/teahouse](https://github.com/skyjt/teahouse)；`.github/workflows/release.yml` 已配置 Windows 7 x64、Debian 10 / UOS 20 x64、Debian 10 / UOS 20 arm64、macOS arm64 四条发布线；Linux CI 在 Debian 10 容器内强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查源码重建产物与最终包内 `.node` 最高 GLIBC 符号不超过 2.28；arm64 通过 QEMU 跑 Debian 10 arm64 容器，产出 deb/AppImage 与独立 SHA 清单；push `main` / 手动触发上传 artifact，推送 `v*` tag 自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 packaging-test 执行 |
 | UI | **沉浸式无标题栏主窗/设置窗（决议 #49/#51/#52：mac 红绿灯置列表栏顶部 x=68、Win/Linux 右上自绘控制按钮、顶部 32px 隐形拖拽带——mac/Win 走 CSS 拖拽区，Linux 因 CSS 拖拽区吞点击改 Pointer Capture + 主进程光标跟随 JS 拖拽，`WindowDragStrip` 组件分流）**、三栏主窗、左侧 68px 浅灰导航（聊天/通讯录主图标 25px，刷新全局用户按钮位于设置上方并带细进度条，设置图标 21px；导航按钮在鼠标真实移动后延迟显示单体中文 tooltip，自己头像仅鼠标悬停显示分组个人信息卡）、三级通讯录树（公司▸部门▸团队，单击右侧资料页、双击直达单聊）、联系人完整资料页+本地备注、私聊头部资料弹窗+备注编辑、私聊顶部完整 IP 副标题、全局搜索（FTS 按字）、发起讨论组两步搜索选人+设置、自绘 SVG 系统图标、明确齿轮设置入口、20 个 Twemoji 本地 SVG 动物头像 + 背景色模板、设置页头像编辑器（决议 #50：大预览 + 图标/昵称首字分段切换 + 图标网格 + 色板）、内置 emoji 子集 Twemoji 本地 SVG 兼容渲染（面板 / 输入框编辑态 / 消息正文；输入框镜像按实际字体 DOM 探针逐字符测宽，与光标逐像素对齐）、系统通知 emoji 文本降级与真实应用图标（决议 #108）、茶杯气泡品牌 logo 三件套（菜单栏单色缩小留边、彩色小标、大图标/空状态）、输入区图标中文延迟提示、输入框 placeholder 独立浅 hint 色、输入区最右侧会话内历史搜索（设置页尺度弹窗，默认显示最近记录，关键词/图片/文件/连续日期筛选，图片结果显示缩略图）、独立图片查看窗口（标题栏文件名、初始 70% 屏幕阈值缩放、底部半透明菜单、缩放/适应窗口/原始大小/旋转/拖拽平移、双击以鼠标位置锚点放大、OCR 独立文本结果窗与缓存、另存为/快捷键，不遮挡主聊天窗）、消息内容级右键菜单与边缘避让、历史滚动加载、会话滚动位置按会话恢复且后台/通知直达默认最新（决议 #111）、设置独立小窗（桌面软件式分组面板）、首启向导、托盘+通知直达会话 |
 | 存储 | SQLite WAL，迁移 v8（user_version 机制，**只追加永不改旧迁移**）|
 
@@ -70,7 +70,7 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 ## 4. 下一步：P1 交付收尾
 
 1. **本地五连验证**：后续代码改动仍需按 `npm test` → `npm run test:db` → `npm run typecheck` → `npm run build` → `PANTRY_UDP_PORT=47878 PANTRY_TCP_PORT=47879 npm run smoke` 重跑，任何失败先修复再交付。
-2. **目标平台打包测试**：GitHub Actions 可先产出 Windows 7 x64、Debian 10 / UOS 20 x64 发布候选；真实启动、收发、托盘、通知、防火墙/权限仍交给 Windows 7 x64 VM、Debian 10、UOS 20 目标环境按 [packaging-test.md](packaging-test.md) 冒烟。
+2. **目标平台打包测试**：GitHub Actions 可先产出 Windows 7 x64、Debian 10 / UOS 20 x64、Debian 10 / UOS 20 arm64、macOS arm64 发布候选；真实启动、收发、托盘、通知、防火墙/权限仍交给对应目标环境按 [packaging-test.md](packaging-test.md) 冒烟。
 3. **v1.0 打磨项**：macOS universal 包专项、Win7 / UOS 真实平台复测（本地 SVG emoji/头像、软渲染、SHA-2 KB 提示文案）。
 
 ## 5. 已知遗留 / TODO（非阻塞）
@@ -80,7 +80,7 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 - 群消息不做按成员送达回执（本端入库即 sent），明细 P2。
 - 设置页结构已重排为左侧分组 + 右侧面板；高级项仍是打磨：聊天记录存储位置迁移、空间占用/缓存清理、诊断日志导出、快捷键冲突实时检测、清空全部记录双重确认。核心 P1 设置（资料、头像、文件目录、通知、自启、关闭行为、主题、字体、快捷键、端口、导入导出）已可用。
 - npm 11 对 `.npmrc` 自定义键（electron_mirror/runtime 等）打 deprecation 警告——npm 12 需改用环境变量，暂可忽略。
-- linux arm64 产物：CI 用 docker buildx，拖节奏就先只发 x64（tech-design §9 已记）。
+- Linux arm64 产物已进入 Release workflow；真实 UOS / Debian arm64 桌面冒烟仍需目标机器按 packaging-test 执行。
 - 局域网 P2P 自更新已完成发现提示、主动检测 / 索包请求、`update req` 可靠投递、已有本地安装包的隐藏 `purpose:"update"` 回传与隔离接收；仍缺 A 侧备包（nsis 自留 / deb 自重打包）、B 侧包格式与版本核对、安装重启、进度呈现与失败重试闭环。
 - 图片 OCR 当前使用 Tesseract.js 识别，不落库、不做全文索引、不做“大爆炸”分词面板；图片上不再叠加 OCR 选择层，不做逐字拖选。识别结果按 `transferId:naturalSize` 缓存在主进程会话级内存中，图片窗口加载后先查缓存，命中后底部按钮可直接打开文本结果窗，用户在原生 textarea 中选择 / 复制文字；小图自动 OCR 不自动弹窗，大图仍手动触发。后续扩展语言包必须继续走本地静态资源复制并评估包体与启动后首次识别耗时。
 

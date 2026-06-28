@@ -47,16 +47,24 @@ describe('codec', () => {
 
   it('update 自更新请求报文：合法往返 + 坏报文白名单拒绝', () => {
     const ok = decode(
-      encode(makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, 'node-aaaa', { op: 'req', platform: 'win' }))
+      encode(
+        makeEnvelope<UpdateReqPayload>(MSG_TYPES.update, 'node-aaaa', {
+          op: 'req',
+          platform: 'linux',
+          arch: 'arm64'
+        })
+      )
     )
     expect(ok.ok).toBe(true)
     if (ok.ok) {
       expect(ok.known).toBe(true)
-      expect((ok.env.payload as UpdateReqPayload).platform).toBe('win')
+      expect((ok.env.payload as UpdateReqPayload).platform).toBe('linux')
+      expect((ok.env.payload as UpdateReqPayload).arch).toBe('arm64')
     }
-    // op 非 req / platform 非法 / 缺字段 → 丢弃
+    // op 非 req / platform 非法 / arch 非法 / 缺字段 → 丢弃
     expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'x', platform: 'win' }))).ok).toBe(false)
     expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'req', platform: 'bad' }))).ok).toBe(false)
+    expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'req', platform: 'linux', arch: 'ia32' }))).ok).toBe(false)
     expect(decode(encode(makeEnvelope(MSG_TYPES.update, 'n', { op: 'req' }))).ok).toBe(false)
   })
 
