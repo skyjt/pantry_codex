@@ -123,35 +123,38 @@ jobs:
 
   linux-debian10-uos20-arm64:
     name: Debian 10 / UOS 20 arm64
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04-arm
+    container:
+      image: node:18-buster
     steps:
+      - name: 修正 Debian 10 archive 源并安装 checkout 依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/etc/apt/sources.list <<'EOF'
+          deb http://archive.debian.org/debian buster main contrib non-free
+          deb http://archive.debian.org/debian-security buster/updates main contrib non-free
+          deb http://archive.debian.org/debian buster-updates main contrib non-free
+          EOF
+          printf 'Acquire::Check-Valid-Until "false";\n' >/etc/apt/apt.conf.d/99no-check-valid-until
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+          rm -rf /var/lib/apt/lists/*
+
       - name: 拉取源码
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: 启用 arm64 QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: 在 Debian 10 arm64 容器内验证并打包
+      - name: 在 Debian 10 arm64 runner 容器内验证并打包
         shell: bash
+        env:
+          npm_config_build_from_source: "true"
         run: |
           set -euo pipefail
-          trap 'sudo chown -R "$(id -u):$(id -g)" release out node_modules public 2>/dev/null || true' EXIT
+          bash scripts/ci-linux-arm64.sh
 
-          docker run --rm --platform linux/arm64 \
-            -e CI="true" \
-            -e NO_UPDATE_NOTIFIER="1" \
-            -e ELECTRON_MIRROR="${ELECTRON_MIRROR}" \
-            -e ELECTRON_BUILDER_BINARIES_MIRROR="${ELECTRON_BUILDER_BINARIES_MIRROR}" \
-            -e npm_config_build_from_source="true" \
-            -v "$PWD:/workspace" \
-            -w /workspace \
-            node:18-buster bash scripts/ci-linux-arm64.sh
-
-          echo "=== host release files ==="
+          echo "=== release files ==="
           find release -maxdepth 1 -type f -print | sort
 
       - name: 上传 Linux arm64 产物
