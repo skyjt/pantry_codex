@@ -29,7 +29,7 @@ xvfb-run -a npm run smoke -- --no-sandbox
 
 gem install --no-document ffi -v 1.15.5
 gem install --no-document fpm -v 1.9.3
-USE_SYSTEM_FPM=true USE_SYSTEM_MKSQUASHFS=true USE_HARD_LINKS=false npm run dist:linux:arm64
+USE_SYSTEM_FPM=true USE_HARD_LINKS=false npm run dist:linux:arm64
 
 native=$(find release -path '*/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node' -print | sort | head -1)
 if [ -z "$native" ]; then
